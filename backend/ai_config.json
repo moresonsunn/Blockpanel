@@ -1,0 +1,152 @@
+{
+  "ai_error_fixer": {
+    "auto_startup": true,
+    "monitor_interval": 30,
+    "log_tail_lines": 100,
+    "max_retry_attempts": 3,
+    "backup_before_fix": true,
+    "auto_rebuild_images": true,
+    "auto_restart_containers": true,
+    "enable_docker_commands": true,
+    "enable_file_operations": true,
+    "enable_network_checks": true,
+    "notification_webhook": null,
+    "error_patterns": {
+      "jar_corruption": {
+        "enabled": true,
+        "severity": "critical",
+        "auto_fix": true
+      },
+      "java_version_mismatch": {
+        "enabled": true,
+        "severity": "high",
+        "auto_fix": true
+      },
+      "docker_container_issues": {
+        "enabled": true,
+        "severity": "high",
+        "auto_fix": true
+      },
+      "network_connectivity": {
+        "enabled": true,
+        "severity": "medium",
+        "auto_fix": true
+      },
+      "memory_issues": {
+        "enabled": true,
+        "severity": "high",
+        "auto_fix": true
+      },
+      "port_conflicts": {
+        "enabled": true,
+        "severity": "medium",
+        "auto_fix": true
+      },
+      "file_permissions": {
+        "enabled": true,
+        "severity": "medium",
+        "auto_fix": true
+      },
+      "download_failures": {
+        "enabled": true,
+        "severity": "medium",
+        "auto_fix": true
+      }
+    },
+    "fix_strategies": {
+      "jar_corruption": [
+        {
+          "name": "redownload_server_jar",
+          "enabled": true,
+          "priority": 1,
+          "timeout": 300
+        },
+        {
+          "name": "rebuild_docker_image",
+          "enabled": true,
+          "priority": 2,
+          "timeout": 600
+        }
+      ],
+      "java_version_mismatch": [
+        {
+          "name": "update_java_version",
+          "enabled": true,
+          "priority": 1,
+          "timeout": 300
+        },
+        {
+          "name": "rebuild_with_correct_java",
+          "enabled": true,
+          "priority": 2,
+          "timeout": 600
+        }
+      ],
+      "docker_container_issues": [
+        {
+          "name": "restart_container",
+          "enabled": true,
+          "priority": 1,
+          "timeout": 60
+        },
+        {
+          "name": "recreate_container",
+          "enabled": true,
+          "priority": 2,
+          "timeout": 300
+        }
+      ]
+    },
+    "notifications": {
+      "enabled": false,
+      "webhook_url": null,
+      "email": {
+        "enabled": false,
+        "smtp_server": null,
+        "smtp_port": 587,
+        "username": null,
+        "password": null,
+        "from_email": null,
+        "to_email": null
+      },
+      "discord": {
+        "enabled": false,
+        "webhook_url": null
+      },
+      "slack": {
+        "enabled": false,
+        "webhook_url": null
+      }
+    },
+    "logging": {
+      "level": "INFO",
+      "file": "logs/ai_error_fixer.log",
+      "max_size": "10MB",
+      "backup_count": 5
+    },
+    "backup": {
+      "enabled": true,
+      "directory": "backups",
+      "max_backups": 10,
+      "include_logs": true,
+      "include_data": true
+    },
+    "docker": {
+      "image_name": "minecraft-server-manager",
+      "registry": "docker.io",
+      "auto_push": false,
+      "build_args": {},
+      "labels": {
+        "maintainer": "AI Error Fixer",
+        "version": "1.0.0"
+      }
+    },
+    "system": {
+      "max_memory_usage": 90,
+      "max_cpu_usage": 80,
+      "disk_cleanup_threshold": 85,
+      "log_rotation_size": "10MB",
+      "log_rotation_count": 5
+    }
+  }
+}

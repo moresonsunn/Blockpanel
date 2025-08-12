@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+docker
+requests
+python-multipart
+mcrcon
+beautifulsoup4
