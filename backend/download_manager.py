@@ -16,12 +16,12 @@ def stream_download(url: str, dest_file: Path):
             
             # Check content type to ensure we're getting a JAR file
             content_type = r.headers.get('content-type', '').lower()
-            if 'application/json' in content_type:
-                logger.error(f"Received JSON response instead of JAR file from {url}")
-                logger.error(f"Response content: {r.text[:500]}...")
-                raise ValueError(f"Download URL returned JSON instead of JAR file: {url}")
-            elif 'application/java-archive' in content_type or 'application/octet-stream' in content_type:
-                logger.info(f"Received JAR file with content type: {content_type}")
+            if 'application/json' in content_type or 'text/html' in content_type:
+                preview = r.raw.read(512)
+                logger.error(f"Received non-binary response instead of JAR from {url}; content-type={content_type}; preview={preview[:200]!r}")
+                raise ValueError(f"Download URL returned non-JAR content: {content_type}")
+            elif 'application/java-archive' in content_type or 'application/octet-stream' in content_type or content_type == '':
+                logger.info(f"Received JAR-like content type: {content_type or 'unknown'}")
             else:
                 logger.warning(f"Unexpected content type: {content_type}, proceeding anyway")
             
@@ -35,6 +35,13 @@ def stream_download(url: str, dest_file: Path):
         if file_size < 1024 * 5:  # Less than 5KB
             logger.error(f"Downloaded file is too small ({file_size} bytes), likely corrupted")
             raise ValueError(f"Downloaded file is too small ({file_size} bytes), expected at least 5KB")
+        
+        # Validate JAR (ZIP) magic header 'PK\x03\x04'
+        with open(dest_file, 'rb') as f:
+            magic = f.read(4)
+        if magic[:2] != b'PK':
+            logger.error(f"Downloaded file does not look like a JAR (missing PK header): magic={magic!r}")
+            raise ValueError("Downloaded file is not a valid JAR (ZIP) archive")
             
     except requests.exceptions.RequestException as e:
         logger.error(f"Download failed for {url}: {e}")

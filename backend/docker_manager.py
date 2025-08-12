@@ -25,17 +25,41 @@ def download_file(url: str, dest: Path, min_size: int = 1024 * 100, max_retries:
     Download a file from a URL to a destination path.
     Ensures the file is at least min_size bytes (default 100KB).
     Retries up to max_retries times.
+    Performs basic validation for JAR content (content-type and ZIP magic).
     """
     for attempt in range(max_retries):
         try:
             logger.info(f"Downloading {url} to {dest} (attempt {attempt+1})")
             with requests.get(url, stream=True, timeout=30) as r:
                 r.raise_for_status()
+                content_type = r.headers.get("content-type", "").lower()
+                if "application/json" in content_type or "text/html" in content_type:
+                    # Read a small preview for logging
+                    preview = r.raw.read(512)
+                    logger.warning(
+                        f"Unexpected content-type for JAR download: {content_type}. Preview: {preview[:200]!r}"
+                    )
+                    raise ValueError(f"Unexpected content-type for JAR download: {content_type}")
                 with open(dest, "wb") as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
             if dest.exists() and dest.stat().st_size >= min_size:
+                # Validate ZIP/JAR magic 'PK\x03\x04'
+                try:
+                    with open(dest, "rb") as f:
+                        magic = f.read(4)
+                    if magic[:2] != b"PK":
+                        raise ValueError(f"Downloaded file does not appear to be a JAR (missing PK header): {magic!r}")
+                except Exception as magic_err:
+                    logger.warning(f"Validation failed for downloaded file {dest}: {magic_err}")
+                    # Remove invalid file and retry
+                    try:
+                        dest.unlink()
+                    except Exception:
+                        pass
+                    time.sleep(2)
+                    continue
                 logger.info(f"Downloaded {url} successfully ({dest.stat().st_size} bytes)")
                 return True
             else:
@@ -86,33 +110,12 @@ def get_fabric_download_url(version: str, loader_version: Optional[str] = None) 
     # Fabric installer: https://meta.fabricmc.net/v2/versions/loader/<mc_version>
     # If loader_version is provided, use it to select the loader version.
     try:
-        # Get stable installer version first
-        iresp = requests.get("https://meta.fabricmc.net/v2/versions/installer", timeout=10)
-        iresp.raise_for_status()
-        installers = iresp.json()
-        # Find the stable installer
-        stable_installer = None
-        for installer in installers:
-            if installer.get("stable"):
-                stable_installer = installer
-                break
-        if not stable_installer:
-            logger.warning("No stable Fabric installer available")
-            return None
-        installer_version = stable_installer["version"]
-        
+        # Prefer "stable" alias for installer to avoid hard-coding installer versions
+        installer_token = "stable"
+
         if loader_version:
-            # Use the loader version if provided
-            resp = requests.get(f"https://meta.fabricmc.net/v2/versions/loader/{version}/{loader_version}/{installer_version}/server/jar", timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-            # The server jar url is in data["server"]["url"]
-            jar_url = data.get("server", {}).get("url")
-            if jar_url:
-                return jar_url
-            else:
-                logger.warning(f"Could not find server jar url for Fabric {version} loader {loader_version}")
-                return None
+            # Directly compose the server JAR URL; this endpoint returns a binary JAR, not JSON
+            return f"https://meta.fabricmc.net/v2/versions/loader/{version}/{loader_version}/{installer_token}/server/jar"
         else:
             # Get latest loader for the game version
             lresp = requests.get(f"https://meta.fabricmc.net/v2/versions/loader/{version}", timeout=10)
@@ -122,10 +125,10 @@ def get_fabric_download_url(version: str, loader_version: Optional[str] = None) 
                 logger.warning(f"No Fabric loader available for {version}")
                 return None
             loader_entry = loaders[0]
-            loader_version = loader_entry["loader"]["version"]
-            
-            # Compose the download URL using loader version and stable installer version
-            return f"https://meta.fabricmc.net/v2/versions/loader/{version}/{loader_version}/{installer_version}/server/jar"
+            resolved_loader_version = loader_entry["loader"]["version"]
+
+            # Compose the download URL using loader version and stable installer alias
+            return f"https://meta.fabricmc.net/v2/versions/loader/{version}/{resolved_loader_version}/{installer_token}/server/jar"
     except Exception as e:
         logger.warning(f"Failed to get Fabric download url for {version} (loader {loader_version}): {e}")
         return None
