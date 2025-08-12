@@ -5,7 +5,6 @@ services:
       context: .
       dockerfile: docker/controller.Dockerfile
     image: mc-controller:latest
-    container_name: mc-controller
     ports:
       - "8000:8000"
     volumes:
