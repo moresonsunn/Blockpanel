@@ -73,7 +73,14 @@ app.include_router(player_router)
 app.include_router(template_router)
 
 try:
-    app.mount("/ui", StaticFiles(directory="static", html=True), name="ui")
+    from pathlib import Path
+    root_dir = Path(__file__).resolve().parent.parent
+    build_dir = root_dir / "frontend" / "build"
+    static_dir = root_dir / "static"
+    if build_dir.exists():
+        app.mount("/ui", StaticFiles(directory=str(build_dir), html=True), name="ui")
+    elif static_dir.exists():
+        app.mount("/ui", StaticFiles(directory=str(static_dir), html=True), name="ui")
 except Exception:
     pass
 

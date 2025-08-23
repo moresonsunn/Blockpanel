@@ -12,3 +12,4 @@ apscheduler
 aiofiles
 python-dateutil
 pydantic[email]
+bcrypt==4.0.1

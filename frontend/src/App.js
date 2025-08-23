@@ -22,6 +22,24 @@ import {
 
 const API = 'http://localhost:8000';
 
+const TOKEN_KEY = 'auth_token';
+const getStoredToken = () => localStorage.getItem(TOKEN_KEY) || '';
+const setStoredToken = (t) => localStorage.setItem(TOKEN_KEY, t);
+const clearStoredToken = () => localStorage.removeItem(TOKEN_KEY);
+const authHeaders = () => {
+  const t = getStoredToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+};
+
+// Attach Authorization header to all fetch calls
+if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const headers = { ...(init && init.headers ? init.headers : {}), ...authHeaders() };
+    return originalFetch(input, { ...(init || {}), headers });
+  };
+}
+
 const BLOCKED_FILE_EXTENSIONS = [
   '.jar', '.exe', '.dll', '.zip', '.tar', '.gz', '.7z', '.rar', '.bin', '.img', '.iso', '.mp3', '.mp4', '.avi', '.mov', '.ogg', '.wav', '.class', '.so', '.o', '.a', '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.ttf', '.otf', '.woff', '.woff2'
 ];
@@ -930,6 +948,48 @@ function ServerListCard({ server, onClick }) {
 }
 
 function App() {
+  // Auth state
+  const [authToken, setAuthToken] = useState(getStoredToken());
+  const isAuthenticated = !!authToken;
+  const [loginUsername, setLoginUsername] = useState('admin');
+  const [loginPassword, setLoginPassword] = useState('admin123');
+  const [loginError, setLoginError] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    setLoginError('');
+    setLoginLoading(true);
+    try {
+      const body = new URLSearchParams({ username: loginUsername, password: loginPassword });
+      const r = await fetch(`${API}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+      });
+      if (!r.ok) {
+        const payload = await r.json().catch(() => null);
+        throw new Error((payload && (payload.detail || payload.message)) || `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+      const token = data && data.access_token;
+      if (!token) throw new Error('Invalid login response');
+      setStoredToken(token);
+      setAuthToken(token);
+    } catch (err) {
+      setLoginError(err.message || 'Login failed');
+    } finally {
+      setLoginLoading(false);
+    }
+  }
+
+  function handleLogout() {
+    clearStoredToken();
+    setAuthToken('');
+    // Reload to clear any in-memory state
+    window.location.reload();
+  }
+
   // Fetch server types from backend
   const { data: typesData, error: typesError } = useFetch(
     `${API}/server-types`,
@@ -956,7 +1016,7 @@ function App() {
     data: serversData,
     loading: serversLoading,
     error: serversError,
-  } = useFetch(`${API}/servers`, []);
+  } = useFetch(isAuthenticated ? `${API}/servers` : null, [isAuthenticated]);
   // Server creation form state
   const [name, setName] = useState(
     'mc-' + Math.random().toString(36).slice(2, 7)
@@ -1097,11 +1157,55 @@ function App() {
             </div>
             <div className="font-semibold">Minecraft Panel</div>
           </div>
+          <div>
+            {isAuthenticated && (
+              <button onClick={handleLogout} className="text-sm text-white/70 hover:text-white border border-white/10 rounded px-3 py-1.5">
+                Logout
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
-      {!selectedServer && (
+      {!isAuthenticated && (
         <section className="container mt-8">
+          <div className="max-w-md mx-auto rounded-xl bg-black/30 border border-white/10 p-6 space-y-4">
+            <div className="text-white/80 text-lg font-medium">Login</div>
+            {loginError && <div className="text-red-400 text-sm">{loginError}</div>}
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="text-base text-white/70">Username</label>
+                <input
+                  className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-base"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-base text-white/70">Password</label>
+                <input
+                  type="password"
+                  className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-base"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={loginLoading}
+                className="w-full py-3 rounded-md bg-brand-500 hover:bg-brand-600 text-white font-medium"
+              >
+                {loginLoading ? 'Logging in…' : 'Login'}
+              </button>
+            </form>
+          </div>
+        </section>
+      )}
+
+      {isAuthenticated && (
+      <section className="container mt-8">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-8 shadow-card">
             <div className="grid md:grid-cols-2 gap-10 items-center">
               <div>
@@ -1159,108 +1263,77 @@ function App() {
                       value={version}
                       onChange={(e) => setVersion(e.target.value)}
                     >
-                      {(versionsData?.versions || [])
-                        .slice(0, 50)
-                        .map((v) => (
-                          <option key={v} value={v}>
-                            {v}
-                          </option>
-                        ))}
+                      {(versionsData && versionsData.versions ? versionsData.versions : []).map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
-                {/* Loader version select for types that need it */}
+
                 {SERVER_TYPES_WITH_LOADER.includes(selectedType) && (
                   <div>
-                    <label className="text-base text-white/70">
-                      Loader version
-                    </label>
-                    {/* Only show loader version select if loaderVersionsData is available and not loading/error */}
-                    {loaderVersionsLoading ? (
-                      <div className="mt-2 text-white/70 text-sm">Loading loader versions…</div>
-                    ) : loaderVersionsError ? (
-                      <div className="mt-2 text-red-400 text-sm">
-                        Error loading loader versions: {loaderVersionsError.message}
-                      </div>
-                    ) : loaderVersionsData && loaderVersionsData.loader_versions && loaderVersionsData.loader_versions.length > 0 ? (
-                      <select
-                        className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 text-base"
-                        value={loaderVersion}
-                        onChange={(e) => setLoaderVersion(e.target.value)}
-                        required
-                      >
-                        {(loaderVersionsData?.loader_versions || []).map((lv) => (
-                          <option key={lv} value={lv}>
-                            {lv}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div className="mt-2 text-white/50 text-sm">
-                        No loader versions available for this Minecraft version.
-                      </div>
+                    <label className="text-base text-white/70">Loader version</label>
+                    <select
+                      className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 text-base"
+                      value={loaderVersion}
+                      onChange={(e) => setLoaderVersion(e.target.value)}
+                    >
+                      {(loaderVersionsData?.loader_versions || []).map((lv) => (
+                        <option key={lv} value={lv}>
+                          {lv}
+                        </option>
+                      ))}
+                    </select>
+                    {loaderVersionsLoading && (
+                      <div className="text-white/70 text-sm mt-1">Loading loader versions…</div>
+                    )}
+                    {loaderVersionsError && (
+                      <div className="text-red-400 text-sm mt-1">Failed to load loader versions</div>
                     )}
                   </div>
                 )}
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-base text-white/70">
-                      Min RAM (MB)
-                    </label>
+                    <label className="text-base text-white/70">Host port</label>
                     <input
-                      className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 text-base"
                       type="number"
-                      min="256"
-                      step="1"
-                      value={minRam}
-                      onChange={e => setMinRam(e.target.value)}
-                      placeholder="1024"
-                      required
+                      className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-base"
+                      value={hostPort}
+                      onChange={(e) => setHostPort(e.target.value)}
+                      placeholder="25565"
                     />
                   </div>
-                  <div>
-                    <label className="text-base text-white/70">
-                      Max RAM (MB)
-                    </label>
-                    <input
-                      className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 text-base"
-                      type="number"
-                      min={minRam || 256}
-                      step="1"
-                      value={maxRam}
-                      onChange={e => setMaxRam(e.target.value)}
-                      placeholder="2048"
-                      required
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-base text-white/70">Min RAM (MB)</label>
+                      <input
+                        type="number"
+                        className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-base"
+                        value={minRam}
+                        onChange={(e) => setMinRam(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-base text-white/70">Max RAM (MB)</label>
+                      <input
+                        type="number"
+                        className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-base"
+                        value={maxRam}
+                        onChange={(e) => setMaxRam(e.target.value)}
+                      />
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <label className="text-base text-white/70">
-                    Host port (optional)
-                  </label>
-                  <input
-                    className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 text-base"
-                    value={hostPort}
-                    onChange={(e) => setHostPort(e.target.value)}
-                    placeholder="25565"
-                  />
-                </div>
+
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-2 rounded-md bg-brand-500 hover:bg-brand-400 transition px-6 py-3 font-semibold shadow-card text-lg"
+                  className="w-full py-3 rounded-md bg-brand-500 hover:bg-brand-600 text-white font-medium"
                 >
-                  <FaPlusCircle /> Create server
+                  Create server
                 </button>
-                {(serversError || typesError || versionsError) && (
-                  <div className="text-base text-red-400">
-                    {(serversError &&
-                      `Servers error: ${serversError.message}`) ||
-                      (typesError &&
-                        `Types error: ${typesError.message}`) ||
-                      (versionsError &&
-                        `Versions error: ${versionsError.message}`)}
-                  </div>
-                )}
               </form>
             </div>
           </div>
