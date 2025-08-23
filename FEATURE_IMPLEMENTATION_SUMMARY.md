@@ -115,6 +115,41 @@ This document summarizes all the advanced features that have been implemented to
 
 ---
 
+## 🧑‍💻 **FRONTEND LOGIN & AUTH FLOW**
+
+- **Login Page**: Added a lightweight login UI to obtain a JWT using `POST /auth/login`.
+- **Token Storage**: Access token is stored in `localStorage`.
+- **Auth Headers**: All authenticated requests include `Authorization: Bearer <token>`.
+- **Protected Views**: Fetching servers and performing actions require a valid token; UI prompts login when missing/expired.
+- **Logout**: Clears token from storage and returns to the login screen.
+
+> Endpoints used by the frontend:
+> - `POST /auth/login` → returns `{ access_token, token_type }`
+> - `GET /auth/me` → validates token and loads current user
+> - Secured endpoints (e.g., `GET /servers`, `POST /servers`, etc.) → require `Authorization` header
+
+---
+
+## 🧰 **TROUBLESHOOTING NOTES**
+
+### Passlib/Bcrypt warning during startup
+If you see this warning:
+
+```
+WARNING:passlib.handlers.bcrypt:(trapped) error reading bcrypt version
+AttributeError: module 'bcrypt' has no attribute 'about'
+```
+
+This is a known compatibility issue with recent `bcrypt` versions and `passlib`. The fix is to pin `bcrypt` to `4.0.1`:
+
+```bash
+pip install 'bcrypt==4.0.1'
+```
+
+`backend/requirements.txt` has been updated accordingly.
+
+---
+
 ## 🆚 **COMPARISON: Your Controller vs Crafty Controller**
 
 ### ✅ **Features You Have That Crafty Doesn't**
