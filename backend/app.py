@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, Form, Body, Query
+from fastapi import FastAPI, HTTPException, UploadFile, Form, Body, Query, Depends
 from pydantic import BaseModel
 from docker_manager import DockerManager
 import server_providers  # noqa: F401 - ensure providers register
@@ -12,6 +12,16 @@ import requests
 from bs4 import BeautifulSoup
 import threading
 import logging
+
+# New imports for enhanced features
+from database import init_db
+from auth_routes import router as auth_router
+from scheduler_routes import router as scheduler_router
+from player_routes import router as player_router
+from template_routes import router as template_router
+from auth import get_current_active_user, require_admin, require_moderator
+from scheduler import get_scheduler
+from models import User
 
 def get_forge_loader_versions(mc_version: str) -> list[str]:
     url = f"https://files.minecraftforge.net/net/minecraftforge/forge/index_{mc_version}.html"
@@ -56,6 +66,12 @@ def get_neoforge_loader_versions():
 
 app = FastAPI()
 
+# Include all routers
+app.include_router(auth_router)
+app.include_router(scheduler_router)
+app.include_router(player_router)
+app.include_router(template_router)
+
 try:
     app.mount("/ui", StaticFiles(directory="static", html=True), name="ui")
 except Exception:
@@ -63,9 +79,20 @@ except Exception:
 
 @app.on_event("startup")
 async def startup_event():
-    """Start the AI error monitoring when the application starts."""
+    """Initialize the application when it starts."""
     try:
-        # Check if auto-startup is enabled
+        # Initialize database
+        logging.info("Initializing database...")
+        init_db()
+        logging.info("Database initialized")
+        
+        # Start task scheduler
+        logging.info("Starting task scheduler...")
+        scheduler = get_scheduler()
+        scheduler.start()
+        logging.info("Task scheduler started")
+        
+        # Check if AI auto-startup is enabled
         import json
         from pathlib import Path
         
@@ -96,8 +123,14 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Stop the AI error monitoring when the application shuts down."""
+    """Clean up when the application shuts down."""
     try:
+        # Stop task scheduler
+        scheduler = get_scheduler()
+        scheduler.stop()
+        logging.info("Task scheduler stopped")
+        
+        # Stop AI monitoring
         stop_ai_monitoring()
         logging.info("AI error monitoring stopped")
     except Exception as e:
@@ -180,14 +213,14 @@ def list_loader_versions(
 
 
 @app.get("/servers")
-def list_servers():
+def list_servers(current_user: User = Depends(get_current_active_user)):
     try:
         return get_docker_manager().list_servers()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
 @app.post("/servers")
-def create_server(req: ServerCreateRequest):
+def create_server(req: ServerCreateRequest, current_user: User = Depends(require_moderator)):
     try:
         # Convert RAM values to proper format
         def format_ram(ram_value):
@@ -226,7 +259,7 @@ def stop_server(container_id: str):
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
 @app.delete("/servers/{container_id}")
-def delete_server(container_id: str):
+def delete_server(container_id: str, current_user: User = Depends(require_moderator)):
     try:
         return get_docker_manager().delete_server(container_id)
     except Exception as e:

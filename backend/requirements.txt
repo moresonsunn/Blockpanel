@@ -5,3 +5,9 @@ requests
 python-multipart
 mcrcon
 beautifulsoup4
+sqlalchemy
+passlib[bcrypt]
+python-jose[cryptography]
+apscheduler
+aiofiles
+python-dateutil
