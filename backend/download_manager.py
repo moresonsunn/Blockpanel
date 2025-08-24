@@ -50,14 +50,18 @@ def stream_download(url: str, dest_file: Path):
         logger.error(f"Unexpected error during download: {e}")
         raise
 
-def prepare_server_files(server_type: str, version: str, dest_dir: Path, loader_version: str = None):
+def prepare_server_files(server_type: str, version: str, dest_dir: Path, loader_version: str = None, installer_version: str = None):
     logger.info(f"Preparing {server_type} server v{version} in {dest_dir}")
     provider = get_provider(server_type)
     
     try:
-        # Pass loader_version to get_download_url if the provider supports it
+        # Pass loader_version and installer_version to provider if supported
         if hasattr(provider, 'get_download_url_with_loader'):
-            url = provider.get_download_url_with_loader(version, loader_version)
+            # Try signature with installer_version
+            try:
+                url = provider.get_download_url_with_loader(version, loader_version, installer_version)
+            except TypeError:
+                url = provider.get_download_url_with_loader(version, loader_version)
         else:
             url = provider.get_download_url(version)
         logger.info(f"Download URL: {url}")
