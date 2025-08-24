@@ -6,7 +6,14 @@ RUN apt-get update && apt-get install -y \
     wget \
     curl \
     ca-certificates \
+    fontconfig \
+    libfreetype6 \
+    libxi6 \
+    libxrender1 \
+    libxext6 \
     && rm -rf /var/lib/apt/lists/*
+
+ENV JAVA_TOOL_OPTIONS="-Djava.awt.headless=true -Dsun.java2d.noddraw=true -Djava.net.preferIPv4Stack=true"
 
 # Download and install Java 8 (Eclipse Temurin)
 RUN wget -qO- https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u392-b08/OpenJDK8U-jdk_x64_linux_hotspot_8u392b08.tar.gz | tar -xz -C /opt/ && \

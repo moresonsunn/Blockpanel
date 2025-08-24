@@ -132,7 +132,7 @@ echo "DEBUG: Current directory contents: $(ls -la)"
 start_jar=""
 
 # Check for specific JAR patterns in order of preference
-for pattern in "server.jar" "neoforge-*-universal.jar" "*forge-*-universal.jar" "*paper*.jar" "*purpur*.jar" "*fabric*.jar" "*server*.jar"; do
+for pattern in "server.jar" "neoforge-*-universal.jar" "*forge-*-universal.jar" "forge-*-server.jar" "*paper*.jar" "*purpur*.jar" "*fabric*.jar" "*server*.jar"; do
   echo "DEBUG: Checking pattern: $pattern"
   found=$(ls $pattern 2>/dev/null | head -n 1 || true)
   if [ -n "$found" ]; then
@@ -144,7 +144,7 @@ done
 
 # Fallback: look inside /data/servers/* for a jar
 if [ -z "$start_jar" ] && [ -d "/data/servers" ]; then
-  alt_jar=$(find /data/servers -maxdepth 2 -type f \( -name 'server.jar' -o -name 'neoforge-*-universal.jar' -o -name '*forge-*-universal.jar' -o -name '*paper*.jar' -o -name '*purpur*.jar' -o -name '*fabric*.jar' -o -name '*server*.jar' \) | head -n 1)
+  alt_jar=$(find /data/servers -maxdepth 2 -type f \( -name 'server.jar' -o -name 'neoforge-*-universal.jar' -o -name '*forge-*-universal.jar' -o -name 'forge-*-server.jar' -o -name '*paper*.jar' -o -name '*purpur*.jar' -o -name '*fabric*.jar' -o -name '*server*.jar' \) | head -n 1)
   if [ -n "$alt_jar" ]; then
     WORKDIR_BASE=$(dirname "$alt_jar")
     cd "$WORKDIR_BASE"
