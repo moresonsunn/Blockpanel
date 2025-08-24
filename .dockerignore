@@ -1,0 +1,19 @@
+# VCS
+.git
+.gitignore
+
+# Node artifacts
+frontend/node_modules
+frontend/build
+
+# Python caches
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+
+# OS junk
+**/.DS_Store
+
+# Virtual environments
+.venv
+venv
