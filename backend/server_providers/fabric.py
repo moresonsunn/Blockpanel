@@ -1,5 +1,5 @@
 import requests
-from typing import List
+from typing import List, Optional
 from .providers import register_provider
 
 # Fabric meta API
@@ -47,48 +47,51 @@ class FabricProvider:
         # Compose the download URL using loader version and stable installer version
         return f"{API_BASE}/versions/loader/{version}/{loader_version}/{installer_version}/server/jar"
 
-    def get_download_url_with_loader(self, version: str, loader_version: str = None) -> str:
-        # If loader_version is provided, use it; otherwise get the latest
+    def get_download_url_with_loader(self, version: str, loader_version: Optional[str] = None, installer_version: Optional[str] = None) -> str:
+        """Return the Fabric server jar URL using explicit loader and optionally installer version.
+        If loader_version is None, choose the latest for the game version.
+        If installer_version is None, choose the latest stable installer.
+        """
+        # Resolve loader version if not provided
         if loader_version:
-            # Get installer version for the specific loader
+            # Validate loader exists for this game version
             lresp = requests.get(f"{API_BASE}/versions/loader/{version}", timeout=20)
             lresp.raise_for_status()
             loaders = lresp.json()
-            # Find the loader entry with the specified version
-            loader_entry = None
-            for entry in loaders:
-                if entry["loader"]["version"] == loader_version:
-                    loader_entry = entry
-                    break
-            if not loader_entry:
-                raise ValueError(f"Fabric loader version {loader_version} not available for {version}")
+            if not any(entry.get("loader", {}).get("version") == loader_version for entry in loaders):
+                raise ValueError(f"Fabric loader {loader_version} not available for {version}")
         else:
             # Get latest loader for the game version
             lresp = requests.get(f"{API_BASE}/versions/loader/{version}", timeout=20)
             lresp.raise_for_status()
             loaders = lresp.json()
-            # Find the first loader entry (usually sorted newest first)
             if not loaders:
                 raise ValueError(f"No Fabric loader available for {version}")
-            loader_entry = loaders[0]
+            loader_version = loaders[0]["loader"]["version"]
         
-        loader_version = loader_entry["loader"]["version"]
+        # Resolve installer version if not provided
+        if installer_version:
+            # Optionally validate the installer exists
+            try:
+                iresp = requests.get(f"{API_BASE}/versions/installer", timeout=20)
+                iresp.raise_for_status()
+                installers = [i.get("version") for i in iresp.json()]
+                if installer_version not in installers:
+                    # If not found, still allow as meta endpoint might still accept it
+                    pass
+            except Exception:
+                # Best-effort validation only
+                pass
+        else:
+            iresp = requests.get(f"{API_BASE}/versions/installer", timeout=20)
+            iresp.raise_for_status()
+            installers = iresp.json()
+            stable_installer = next((i for i in installers if i.get("stable")), None)
+            if not stable_installer:
+                raise ValueError("No stable Fabric installer available")
+            installer_version = stable_installer["version"]
         
-        # Get stable installer version
-        iresp = requests.get(f"{API_BASE}/versions/installer", timeout=20)
-        iresp.raise_for_status()
-        installers = iresp.json()
-        # Find the stable installer
-        stable_installer = None
-        for installer in installers:
-            if installer.get("stable"):
-                stable_installer = installer
-                break
-        if not stable_installer:
-            raise ValueError(f"No stable Fabric installer available")
-        installer_version = stable_installer["version"]
-        
-        # Compose the download URL using loader version and stable installer version
+        # Compose the exact download URL
         return f"{API_BASE}/versions/loader/{version}/{loader_version}/{installer_version}/server/jar"
 
 register_provider(FabricProvider())

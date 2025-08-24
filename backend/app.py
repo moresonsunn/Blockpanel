@@ -174,6 +174,7 @@ class ServerCreateRequest(BaseModel):
     type: str
     version: str
     loader_version: str | None = None  # Allow specifying loader version
+    installer_version: str | None = None  # Fabric installer version
     host_port: int | None = None
     min_ram: int | str = 1024  # Minimum RAM (MB as int, or string like "1G")
     max_ram: int | str = 2048  # Maximum RAM (MB as int, or string like "2G")
@@ -264,7 +265,7 @@ def create_server(req: ServerCreateRequest, current_user: User = Depends(require
         
         # Pass loader_version if present, otherwise None
         return get_docker_manager().create_server(
-            req.name, req.type, req.version, req.host_port, req.loader_version, min_ram, max_ram
+            req.name, req.type, req.version, req.host_port, req.loader_version, min_ram, max_ram, req.installer_version
         )
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")

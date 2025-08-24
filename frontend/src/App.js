@@ -1278,6 +1278,7 @@ function App() {
   const [loaderVersionsData, setLoaderVersionsData] = useState(null);
   const [loaderVersionsLoading, setLoaderVersionsLoading] = useState(false);
   const [loaderVersionsError, setLoaderVersionsError] = useState(null);
+  const [installerVersion, setInstallerVersion] = useState('');
 
   // Fetch servers
   const {
@@ -1364,6 +1365,7 @@ function App() {
       type: selectedType,
       version,
       loader_version: SERVER_TYPES_WITH_LOADER.includes(selectedType) ? loaderVersion : null,
+      installer_version: selectedType === 'fabric' && installerVersion ? installerVersion : null,
       host_port: hostPort ? Number(hostPort) : null,
       min_ram: minRam ? Number(minRam) : null,
       max_ram: maxRam ? Number(maxRam) : null,
@@ -1541,24 +1543,31 @@ function App() {
                 </div>
 
                 {SERVER_TYPES_WITH_LOADER.includes(selectedType) && (
-                  <div>
-                    <label className="text-base text-white/70">Loader version</label>
-                    <select
-                      className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 text-base"
-                      value={loaderVersion}
-                      onChange={(e) => setLoaderVersion(e.target.value)}
-                    >
-                      {(loaderVersionsData?.loader_versions || []).map((lv) => (
-                        <option key={lv} value={lv}>
-                          {lv}
-                        </option>
-                      ))}
-                    </select>
-                    {loaderVersionsLoading && (
-                      <div className="text-white/70 text-sm mt-1">Loading loader versions…</div>
-                    )}
-                    {loaderVersionsError && (
-                      <div className="text-red-400 text-sm mt-1">Failed to load loader versions</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm text-white/70">Loader Version</label>
+                      <select
+                        className="mt-1 w-full rounded bg-white/5 border border-white/10 px-3 py-2"
+                        value={loaderVersion}
+                        onChange={(e) => setLoaderVersion(e.target.value)}
+                      >
+                        {(loaderVersionsData?.loader_versions || []).map((lv) => (
+                          <option key={lv} value={lv}>
+                            {lv}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {selectedType === 'fabric' && (
+                      <div>
+                        <label className="text-sm text-white/70">Installer Version</label>
+                        <input
+                          className="mt-1 w-full rounded bg-white/5 border border-white/10 px-3 py-2"
+                          placeholder="e.g., 1.1.0"
+                          value={installerVersion}
+                          onChange={(e) => setInstallerVersion(e.target.value)}
+                        />
+                      </div>
                     )}
                   </div>
                 )}
