@@ -2,6 +2,7 @@ FROM openjdk:21-jdk-slim
 
 # Install tools and available Java versions
 RUN apt-get update && apt-get install -y \
+    bash \
     wget \
     curl \
     ca-certificates \
@@ -28,5 +29,5 @@ ENV JAVA_BIN=/usr/local/bin/java21
 WORKDIR /data
 EXPOSE 25565
 COPY runtime-entrypoint.sh /usr/local/bin/runtime-entrypoint.sh
-RUN chmod +x /usr/local/bin/runtime-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/runtime-entrypoint.sh && chmod +x /usr/local/bin/runtime-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/runtime-entrypoint.sh"]
