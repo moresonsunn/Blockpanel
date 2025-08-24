@@ -263,25 +263,29 @@ class TaskScheduler:
             task.last_run = datetime.utcnow()
             
             try:
-                # Clean up old backups based on retention policy per backup
-                all_auto = db.query(BackupTask).filter(BackupTask.is_auto_created == True).all()
-                removed = 0
-                from pathlib import Path
-                for backup in all_auto:
+                # Clean up old backups based on retention policy
+                cutoff_date = datetime.utcnow() - timedelta(days=30)
+                old_backups = db.query(BackupTask).filter(
+                    BackupTask.is_auto_created == True,
+                    BackupTask.created_at < cutoff_date
+                ).all()
+                
+                for backup in old_backups:
                     try:
-                        days = backup.retention_days or 30
-                        cutoff = datetime.utcnow() - timedelta(days=days)
-                        if backup.created_at < cutoff:
-                            backup_path = Path("backups") / backup.server_name / backup.backup_file
-                            if backup_path.exists():
-                                backup_path.unlink()
-                            db.delete(backup)
-                            removed += 1
-                            logger.info(f"Cleaned up old backup: {backup.backup_file}")
+                        # Delete backup file
+                        from pathlib import Path
+                        backup_path = Path("backups") / backup.server_name / backup.backup_file
+                        if backup_path.exists():
+                            backup_path.unlink()
+                        
+                        # Remove from database
+                        db.delete(backup)
+                        logger.info(f"Cleaned up old backup: {backup.backup_file}")
+                        
                     except Exception as e:
                         logger.error(f"Failed to clean up backup {backup.backup_file}: {e}")
                 
-                logger.info(f"Cleanup completed, removed {removed} old backups")
+                logger.info(f"Cleanup completed, removed {len(old_backups)} old backups")
                 
             except Exception as e:
                 logger.error(f"Cleanup task failed: {e}")
