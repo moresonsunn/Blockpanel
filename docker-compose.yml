@@ -12,7 +12,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - SERVERS_CONTAINER_ROOT=/data/servers
-      - SERVERS_VOLUME_NAME=minecraft-server_mc_servers_data
+      - SERVERS_VOLUME_NAME=minecraft-controller_mc_servers_data
     restart: unless-stopped
 
 volumes:
