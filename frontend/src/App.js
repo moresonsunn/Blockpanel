@@ -1207,6 +1207,23 @@ function App() {
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
 
+  // Validate token on load and whenever it changes
+  useEffect(() => {
+    let cancelled = false;
+    async function validate() {
+      if (!authToken) return;
+      try {
+        const r = await fetch(`${API}/auth/me`);
+        if (!r.ok) throw new Error('invalid');
+      } catch (_) {
+        clearStoredToken();
+        if (!cancelled) setAuthToken('');
+      }
+    }
+    validate();
+    return () => { cancelled = true; };
+  }, [authToken]);
+
   async function handleLogin(e) {
     e.preventDefault();
     setLoginError('');
