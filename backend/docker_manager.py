@@ -530,14 +530,14 @@ class DockerManager:
             # On error, assume incompatible
             return False
 
-    def create_server(self, name, server_type, version, host_port=None, loader_version=None, min_ram="1G", max_ram="2G"):
+    def create_server(self, name, server_type, version, host_port=None, loader_version=None, min_ram="1G", max_ram="2G", installer_version=None):
         self._ensure_runtime_image()
         server_dir: Path = SERVERS_ROOT / name
         server_dir.mkdir(parents=True, exist_ok=True)
         
         # Try to prepare server files first
         try:
-            prepare_server_files(server_type, version, server_dir, loader_version=loader_version)
+            prepare_server_files(server_type, version, server_dir, loader_version=loader_version, installer_version=installer_version)
             # Check if server.jar was created successfully
             jar_path = server_dir / "server.jar"
             if jar_path.exists() and jar_path.stat().st_size >= 1024 * 100:  # At least 100KB

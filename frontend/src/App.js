@@ -1158,41 +1158,43 @@ function ServerListCard({ server, onClick }) {
 
   return (
     <div
-      className="rounded-xl bg-white/5 border border-white/10 shadow-card p-6 flex items-center justify-between cursor-pointer hover:bg-brand-500/10 transition"
+      className="rounded-xl bg-gradient-to-b from-white/10 to-white/5 border border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-6"
       onClick={onClick}
       tabIndex={0}
       role="button"
       style={{ minHeight: 100 }}
     >
-      <div className="flex items-center gap-5">
-        <div className="w-12 h-12 rounded-md bg-brand-500 inline-flex items-center justify-center text-2xl">
-          <FaServer />
-        </div>
-        <div>
-          <div className="font-bold text-xl">{server.name}</div>
-          <div className="text-sm text-white/60">{server.id.slice(0, 12)}</div>
-          <div className="text-xs text-white/50 mt-1">
-            Type: {typeVersionData?.server_type || server.type || <span className="text-white/40">Unknown</span>} | Version: {typeVersionData?.server_version || server.version || <span className="text-white/40">Unknown</span>}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-5">
+          <div className="w-12 h-12 rounded-lg bg-brand-500/90 ring-4 ring-brand-500/20 inline-flex items-center justify-center text-2xl text-white shadow-md">
+            <FaServer />
           </div>
-          {stats && !stats.error && (
-            <div className="flex items-center gap-2 mt-2 text-xs text-white/70">
-              <span className="rounded-full bg-white/10 px-2 py-0.5">CPU {stats.cpu_percent}%</span>
-              <span className="rounded-full bg-white/10 px-2 py-0.5">RAM {stats.memory_usage_mb}/{stats.memory_limit_mb} MB</span>
+          <div>
+            <div className="font-bold text-xl">{server.name}</div>
+            <div className="text-sm text-white/60">{server.id.slice(0, 12)}</div>
+            <div className="text-xs text-white/60 mt-1">
+              Type: {typeVersionData?.server_type || server.type || <span className="text-white/40">Unknown</span>} · Version: {typeVersionData?.server_version || server.version || <span className="text-white/40">Unknown</span>}
             </div>
-          )}
+            {stats && !stats.error && (
+              <div className="flex items-center gap-2 mt-2 text-[11px] text-white/80">
+                <span className="rounded-full bg-white/10 px-2 py-0.5 shadow-inner">CPU {stats.cpu_percent}%</span>
+                <span className="rounded-full bg-white/10 px-2 py-0.5 shadow-inner">RAM {stats.memory_usage_mb}/{stats.memory_limit_mb} MB</span>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-      <div className="flex items-center gap-4">
-        <div
-          className={`text-base px-4 py-2 rounded-full ${
-            server.status === 'running'
-              ? 'bg-green-500/20 text-green-300'
-              : 'bg-yellow-500/20 text-yellow-300'
-          }`}
-        >
-          {server.status}
+        <div className="flex items-center gap-3">
+          <div
+            className={`text-sm px-3 py-1.5 rounded-full border ${
+              server.status === 'running'
+                ? 'bg-green-500/15 text-green-300 border-green-400/20'
+                : 'bg-yellow-500/15 text-yellow-300 border-yellow-400/20'
+            }`}
+          >
+            {server.status}
+          </div>
+          <FaChevronRight className="text-white/40 text-xl" />
         </div>
-        <FaChevronRight className="text-white/40 text-xl" />
       </div>
     </div>
   );
@@ -1278,6 +1280,7 @@ function App() {
   const [loaderVersionsData, setLoaderVersionsData] = useState(null);
   const [loaderVersionsLoading, setLoaderVersionsLoading] = useState(false);
   const [loaderVersionsError, setLoaderVersionsError] = useState(null);
+  const [installerVersion, setInstallerVersion] = useState('');
 
   // Fetch servers
   const {
@@ -1364,6 +1367,7 @@ function App() {
       type: selectedType,
       version,
       loader_version: SERVER_TYPES_WITH_LOADER.includes(selectedType) ? loaderVersion : null,
+      installer_version: selectedType === 'fabric' && installerVersion ? installerVersion : null,
       host_port: hostPort ? Number(hostPort) : null,
       min_ram: minRam ? Number(minRam) : null,
       max_ram: maxRam ? Number(maxRam) : null,
@@ -1541,24 +1545,31 @@ function App() {
                 </div>
 
                 {SERVER_TYPES_WITH_LOADER.includes(selectedType) && (
-                  <div>
-                    <label className="text-base text-white/70">Loader version</label>
-                    <select
-                      className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 text-base"
-                      value={loaderVersion}
-                      onChange={(e) => setLoaderVersion(e.target.value)}
-                    >
-                      {(loaderVersionsData?.loader_versions || []).map((lv) => (
-                        <option key={lv} value={lv}>
-                          {lv}
-                        </option>
-                      ))}
-                    </select>
-                    {loaderVersionsLoading && (
-                      <div className="text-white/70 text-sm mt-1">Loading loader versions…</div>
-                    )}
-                    {loaderVersionsError && (
-                      <div className="text-red-400 text-sm mt-1">Failed to load loader versions</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm text-white/70">Loader Version</label>
+                      <select
+                        className="mt-1 w-full rounded bg-white/5 border border-white/10 px-3 py-2"
+                        value={loaderVersion}
+                        onChange={(e) => setLoaderVersion(e.target.value)}
+                      >
+                        {(loaderVersionsData?.loader_versions || []).map((lv) => (
+                          <option key={lv} value={lv}>
+                            {lv}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {selectedType === 'fabric' && (
+                      <div>
+                        <label className="text-sm text-white/70">Installer Version</label>
+                        <input
+                          className="mt-1 w-full rounded bg-white/5 border border-white/10 px-3 py-2"
+                          placeholder="e.g., 1.1.0"
+                          value={installerVersion}
+                          onChange={(e) => setInstallerVersion(e.target.value)}
+                        />
+                      </div>
                     )}
                   </div>
                 )}
