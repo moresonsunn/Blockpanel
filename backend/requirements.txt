@@ -11,5 +11,8 @@ python-jose[cryptography]
 apscheduler
 aiofiles
 python-dateutil
+<<<<<<< Current (Your changes)
 pydantic[email]
 bcrypt==4.0.1
+=======
+>>>>>>> Incoming (Background Agent changes)
