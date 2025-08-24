@@ -2,6 +2,7 @@ FROM openjdk:21-jdk-slim
 
 # Install tools and available Java versions
 RUN apt-get update && apt-get install -y \
+    bash \
     wget \
     curl \
     ca-certificates \
