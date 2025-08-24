@@ -461,6 +461,247 @@ function ConfigPanel({ server, onRestart }) {
   );
 }
 
+function PluginsPanel({ serverName }) {
+  const [plugins, setPlugins] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function refresh() {
+    setLoading(true);
+    setError('');
+    try {
+      const r = await fetch(`${API}/plugins/${encodeURIComponent(serverName)}`);
+      const d = await r.json();
+      setPlugins(d.plugins || []);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line
+  }, [serverName]);
+
+  async function upload(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    await fetch(`${API}/plugins/${encodeURIComponent(serverName)}/upload`, { method: 'POST', body: fd });
+    await refresh();
+  }
+
+  async function reloadPlugins() {
+    await fetch(`${API}/plugins/${encodeURIComponent(serverName)}/reload`, { method: 'POST' });
+  }
+
+  async function remove(name) {
+    await fetch(`${API}/plugins/${encodeURIComponent(serverName)}/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    await refresh();
+  }
+
+  return (
+    <div className="p-4 bg-black/20 rounded-lg">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-sm text-white/70">Plugins</div>
+        <div className="flex items-center gap-2">
+          <label className="rounded bg-brand-500 hover:bg-brand-400 px-3 py-1.5 cursor-pointer inline-flex items-center gap-2">
+            <FaUpload /> Upload
+            <input type="file" className="hidden" accept=".jar" onChange={upload} />
+          </label>
+          <button onClick={reloadPlugins} className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5">Reload</button>
+        </div>
+      </div>
+      {loading ? (
+        <div className="text-white/60 text-sm">Loading…</div>
+      ) : error ? (
+        <div className="text-red-400 text-sm">{error}</div>
+      ) : (
+        <div className="space-y-2">
+          {plugins.map(p => (
+            <div key={p.name} className="flex items-center justify-between bg-white/5 border border-white/10 rounded px-3 py-2">
+              <div className="text-sm">{p.name}</div>
+              <button onClick={() => remove(p.name)} className="text-red-300 hover:text-red-200 text-sm">Delete</button>
+            </div>
+          ))}
+          {!plugins.length && <div className="text-white/50 text-sm">No plugins found.</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WorldsPanel({ serverName }) {
+  const [worlds, setWorlds] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [uploading, setUploading] = useState(false);
+
+  async function refresh() {
+    setLoading(true);
+    setError('');
+    try {
+      const r = await fetch(`${API}/worlds/${encodeURIComponent(serverName)}`);
+      const d = await r.json();
+      setWorlds(d.worlds || []);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line
+  }, [serverName]);
+
+  async function upload(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      await fetch(`${API}/worlds/${encodeURIComponent(serverName)}/upload?world_name=world`, { method: 'POST', body: fd });
+      await refresh();
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function download(worldName) {
+    window.location.href = `${API}/worlds/${encodeURIComponent(serverName)}/download?world=${encodeURIComponent(worldName)}`;
+  }
+
+  async function backup(worldName) {
+    await fetch(`${API}/worlds/${encodeURIComponent(serverName)}/backup?world=${encodeURIComponent(worldName)}&compression=zip`, { method: 'POST' });
+  }
+
+  return (
+    <div className="p-4 bg-black/20 rounded-lg">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-sm text-white/70">Worlds</div>
+        <label className="rounded bg-brand-500 hover:bg-brand-400 px-3 py-1.5 cursor-pointer inline-flex items-center gap-2">
+          <FaUpload /> Upload World (.zip)
+          <input type="file" className="hidden" accept=".zip,.tar,.gz" onChange={upload} />
+        </label>
+      </div>
+      {loading ? (
+        <div className="text-white/60 text-sm">Loading…</div>
+      ) : error ? (
+        <div className="text-red-400 text-sm">{error}</div>
+      ) : (
+        <div className="space-y-2">
+          {worlds.map(w => (
+            <div key={w.name} className="flex items-center justify-between bg-white/5 border border-white/10 rounded px-3 py-2">
+              <div>
+                <div className="text-sm">{w.name}</div>
+                <div className="text-xs text-white/50">{(w.size / (1024*1024)).toFixed(1)} MB</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => download(w.name)} className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5 text-sm">Download</button>
+                <button onClick={() => backup(w.name)} className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5 text-sm">Backup</button>
+              </div>
+            </div>
+          ))}
+          {!worlds.length && <div className="text-white/50 text-sm">No worlds detected.</div>}
+        </div>
+      )}
+      {uploading && <div className="text-white/60 text-sm mt-2">Uploading…</div>}
+    </div>
+  );
+}
+
+function SchedulePanel() {
+  const { data, loading, error, setData } = useFetch(`${API}/schedule/tasks`, []);
+  const [name, setName] = useState('');
+  const [taskType, setTaskType] = useState('backup');
+  const [serverName, setServerName] = useState('');
+  const [cron, setCron] = useState('0 2 * * *');
+  const [command, setCommand] = useState('');
+
+  async function createTask() {
+    const body = { name, task_type: taskType, server_name: serverName || null, cron_expression: cron, command: command || null };
+    const r = await fetch(`${API}/schedule/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (r.ok) {
+      const task = await r.json();
+      setData([...(data || []), task]);
+      setName(''); setServerName(''); setCommand('');
+    }
+  }
+
+  async function removeTask(id) {
+    await fetch(`${API}/schedule/tasks/${id}`, { method: 'DELETE' });
+    setData((data || []).filter(t => t.id !== id));
+  }
+
+  return (
+    <div className="p-4 bg-black/20 rounded-lg">
+      <div className="text-sm text-white/70 mb-3">Scheduled Tasks</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        <input className="rounded bg-white/5 border border-white/10 px-3 py-2" placeholder="Task name" value={name} onChange={e => setName(e.target.value)} />
+        <select className="rounded bg-white/5 border border-white/10 px-3 py-2" value={taskType} onChange={e => setTaskType(e.target.value)}>
+          <option value="backup">Backup</option>
+          <option value="restart">Restart</option>
+          <option value="command">Command</option>
+          <option value="cleanup">Cleanup</option>
+        </select>
+        <input className="rounded bg-white/5 border border-white/10 px-3 py-2" placeholder="Server name (backup/restart/command)" value={serverName} onChange={e => setServerName(e.target.value)} />
+        <input className="rounded bg-white/5 border border-white/10 px-3 py-2" placeholder="Cron (e.g., 0 2 * * *)" value={cron} onChange={e => setCron(e.target.value)} />
+        <input className="rounded bg-white/5 border border-white/10 px-3 py-2 md:col-span-2" placeholder="Command (for command tasks)" value={command} onChange={e => setCommand(e.target.value)} />
+        <button onClick={createTask} className="rounded bg-brand-500 hover:bg-brand-400 px-3 py-2">Create Task</button>
+      </div>
+      {loading ? <div className="text-white/60 text-sm">Loading…</div> : error ? <div className="text-red-400 text-sm">{String(error)}</div> : (
+        <div className="space-y-2">
+          {(data || []).map(t => (
+            <div key={t.id} className="flex items-center justify-between bg-white/5 border border-white/10 rounded px-3 py-2">
+              <div className="text-sm">
+                <div className="font-medium">{t.name} <span className="text-white/50">({t.task_type})</span></div>
+                <div className="text-xs text-white/50">cron: {t.cron_expression} {t.server_name ? `| server: ${t.server_name}` : ''}</div>
+              </div>
+              <button onClick={() => removeTask(t.id)} className="text-red-300 hover:text-red-200 text-sm">Delete</button>
+            </div>
+          ))}
+          {!data?.length && <div className="text-white/50 text-sm">No scheduled tasks yet.</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlayersPanel({ serverName }) {
+  const [playerName, setPlayerName] = useState('');
+  const [reason, setReason] = useState('');
+
+  async function call(endpoint, method = 'POST', body = null) {
+    await fetch(`${API}/players/${encodeURIComponent(serverName)}/${endpoint}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  return (
+    <div className="p-4 bg-black/20 rounded-lg space-y-3">
+      <div className="text-sm text-white/70">Player Management</div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <input className="rounded bg-white/5 border border-white/10 px-3 py-2" placeholder="Player name" value={playerName} onChange={e => setPlayerName(e.target.value)} />
+        <input className="rounded bg-white/5 border border-white/10 px-3 py-2" placeholder="Reason (optional)" value={reason} onChange={e => setReason(e.target.value)} />
+        <div className="flex items-center gap-2">
+          <button onClick={() => call('whitelist', 'POST', { player_name: playerName, reason })} className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm">Whitelist</button>
+          <button onClick={() => call('ban', 'POST', { player_name: playerName, reason })} className="rounded bg-red-600 hover:bg-red-500 px-3 py-2 text-sm">Ban</button>
+          <button onClick={() => call('kick', 'POST', { player_name: playerName, reason })} className="rounded bg-yellow-600 hover:bg-yellow-500 px-3 py-2 text-sm">Kick</button>
+          <button onClick={() => call('op', 'POST', { player_name: playerName, reason })} className="rounded bg-green-600 hover:bg-green-500 px-3 py-2 text-sm">OP</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestart }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [filesEditing, setFilesEditing] = useState(false);
@@ -480,6 +721,8 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
     { id: 'files', label: 'Files', icon: FaFolder },
     { id: 'config', label: 'Config', icon: FaCog },
     { id: 'players', label: 'Players', icon: FaUsers },
+    { id: 'plugins', label: 'Plugins', icon: FaCog },
+    { id: 'worlds', label: 'Worlds', icon: FaFolder },
     { id: 'backup', label: 'Backup', icon: FaDownload },
     { id: 'schedule', label: 'Schedule', icon: FaClock },
   ];
@@ -706,19 +949,19 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
         );
       case 'backup':
         return <BackupsPanel serverName={server.name} />;
+      case 'plugins':
+        return <PluginsPanel serverName={server.name} />;
+      case 'worlds':
+        return <WorldsPanel serverName={server.name} />;
       case 'config':
         return <ConfigPanel server={server} onRestart={onRestart} />;
       case 'players':
         return (
-          <div className="p-4 bg-black/20 rounded-lg text-sm text-white/70">
-            Player listing and management coming soon.
-          </div>
+          <PlayersPanel serverName={server.name} />
         );
       case 'schedule':
         return (
-          <div className="p-4 bg-black/20 rounded-lg text-sm text-white/70">
-            Scheduling UI coming soon.
-          </div>
+          <SchedulePanel />
         );
       default:
         return (
@@ -905,11 +1148,13 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
   );
 }
 
+// Enhance ServerListCard with live stats
 function ServerListCard({ server, onClick }) {
   const { data: typeVersionData } = useFetch(
     server?.id ? `${API}/servers/${server.id}/info` : null,
     [server?.id]
   );
+  const stats = useServerStats(server.id);
 
   return (
     <div
@@ -929,6 +1174,12 @@ function ServerListCard({ server, onClick }) {
           <div className="text-xs text-white/50 mt-1">
             Type: {typeVersionData?.server_type || server.type || <span className="text-white/40">Unknown</span>} | Version: {typeVersionData?.server_version || server.version || <span className="text-white/40">Unknown</span>}
           </div>
+          {stats && !stats.error && (
+            <div className="flex items-center gap-2 mt-2 text-xs text-white/70">
+              <span className="rounded-full bg-white/10 px-2 py-0.5">CPU {stats.cpu_percent}%</span>
+              <span className="rounded-full bg-white/10 px-2 py-0.5">RAM {stats.memory_usage_mb}/{stats.memory_limit_mb} MB</span>
+            </div>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-4">

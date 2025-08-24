@@ -1,0 +1,9 @@
+{
+  "name": "Minecraft Controller",
+  "short_name": "MC Control",
+  "start_url": "/ui",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#22c55e",
+  "icons": []
+}

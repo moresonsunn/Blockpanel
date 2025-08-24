@@ -30,13 +30,14 @@ def list_backups(name: str) -> List[dict]:
     return items
 
 
-def create_backup(name: str) -> dict:
+def create_backup(name: str, compression: str = 'zip') -> dict:
     server_dir = _server_path(name)
     ts = time.strftime("%Y%m%d-%H%M%S")
     dest_dir = BACKUPS_ROOT / name
     dest_dir.mkdir(parents=True, exist_ok=True)
     archive_base = dest_dir / f"{name}-{ts}"
-    archive_file = shutil.make_archive(str(archive_base), 'zip', root_dir=str(server_dir))
+    fmt = compression if compression in {"zip", "gztar", "bztar", "tar"} else 'zip'
+    archive_file = shutil.make_archive(str(archive_base), fmt, root_dir=str(server_dir))
     p = Path(archive_file)
     return {"file": p.name, "size": p.stat().st_size}
 
@@ -49,3 +50,12 @@ def restore_backup(name: str, backup_file: str) -> None:
         raise HTTPException(status_code=404, detail="Backup not found")
     # Extract into server directory (overwrite)
     shutil.unpack_archive(str(archive), str(server_dir))
+
+
+def delete_backup(name: str, backup_file: str) -> None:
+    server_dir = _server_path(name)
+    dest_dir = BACKUPS_ROOT / name
+    archive = (dest_dir / backup_file).resolve()
+    if not str(archive).startswith(str(dest_dir)) or not archive.exists():
+        raise HTTPException(status_code=404, detail="Backup not found")
+    archive.unlink()

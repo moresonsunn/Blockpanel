@@ -14,7 +14,7 @@ import threading
 import logging
 
 # New imports for enhanced features
-from database import init_db
+from database import init_db, get_db
 from auth_routes import router as auth_router
 from scheduler_routes import router as scheduler_router
 from player_routes import router as player_router
@@ -22,6 +22,11 @@ from template_routes import router as template_router
 from auth import get_current_active_user, require_admin, require_moderator
 from scheduler import get_scheduler
 from models import User
+from plugin_routes import router as plugin_router
+from world_routes import router as world_router
+import asyncio
+from sqlalchemy.orm import Session
+from models import ServerPerformance
 
 def get_forge_loader_versions(mc_version: str) -> list[str]:
     url = f"https://files.minecraftforge.net/net/minecraftforge/forge/index_{mc_version}.html"
@@ -71,6 +76,8 @@ app.include_router(auth_router)
 app.include_router(scheduler_router)
 app.include_router(player_router)
 app.include_router(template_router)
+app.include_router(plugin_router)
+app.include_router(world_router)
 
 try:
     from pathlib import Path
@@ -98,6 +105,11 @@ async def startup_event():
         scheduler = get_scheduler()
         scheduler.start()
         logging.info("Task scheduler started")
+        
+        # Start performance collector
+        global _performance_task
+        if _performance_task is None:
+            _performance_task = asyncio.create_task(_collect_performance_metrics())
         
         # Check if AI auto-startup is enabled
         import json
@@ -136,6 +148,12 @@ async def shutdown_event():
         scheduler = get_scheduler()
         scheduler.stop()
         logging.info("Task scheduler stopped")
+        
+        # Stop performance collector
+        global _performance_task
+        if _performance_task:
+            _performance_task.cancel()
+            _performance_task = None
         
         # Stop AI monitoring
         stop_ai_monitoring()
@@ -341,13 +359,44 @@ def backups_list(name: str):
     return {"items": bk_list(name)}
 
 @app.post("/servers/{name}/backups")
-def backups_create(name: str):
-    return bk_create(name)
+def backups_create(name: str, compression: str = Query("zip"), retention_days: int | None = Query(None), db: Session = Depends(get_db), current_user: User = Depends(require_moderator)):
+    result = bk_create(name, compression)
+    # Record backup in DB
+    try:
+        from models import BackupTask
+        record = BackupTask(
+            server_name=name,
+            backup_file=result["file"],
+            file_size=result["size"],
+            compression_type=compression,
+            retention_days=retention_days if retention_days is not None else 30,
+            is_auto_created=False
+        )
+        db.add(record)
+        db.commit()
+    except Exception:
+        pass
+    return result
 
 @app.post("/servers/{name}/restore")
 def backups_restore(name: str, file: str):
     bk_restore(name, file)
     return {"ok": True}
+
+@app.delete("/servers/{name}/backups/{backup_file}")
+def backups_delete(name: str, backup_file: str, db: Session = Depends(get_db), current_user: User = Depends(require_moderator)):
+    from backup_manager import delete_backup as bk_delete
+    from models import BackupTask
+    bk_delete(name, backup_file)
+    try:
+        rec = db.query(BackupTask).filter(BackupTask.server_name == name, BackupTask.backup_file == backup_file).first()
+        if rec:
+            db.delete(rec)
+            db.commit()
+    except Exception:
+        pass
+    return {"ok": True}
+
 
 @app.get("/servers/{name}/players")
 def players_list(name: str):
@@ -583,4 +632,22 @@ def cleanup_system():
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to cleanup system: {e}")
+
+
+@app.get("/servers/{name}/performance")
+def get_performance(name: str, limit: int = Query(50), db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    q = db.query(ServerPerformance).filter(ServerPerformance.server_name == name).order_by(ServerPerformance.timestamp.desc()).limit(max(1, min(limit, 500)))
+    items = [
+        {
+            "timestamp": rec.timestamp.isoformat(),
+            "tps": rec.tps,
+            "cpu_usage": rec.cpu_usage,
+            "memory_usage": rec.memory_usage,
+            "memory_total": rec.memory_total,
+            "player_count": rec.player_count,
+            "metrics": rec.metrics,
+        }
+        for rec in q.all()
+    ]
+    return {"items": items}
 
