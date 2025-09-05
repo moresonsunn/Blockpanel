@@ -576,6 +576,20 @@ class DockerManager:
         if loader_version is not None:
             labels["mc.loader_version"] = loader_version
 
+        # Convert RAM strings to bytes for Docker memory limit
+        def ram_to_bytes(ram_str):
+            if isinstance(ram_str, int):
+                return ram_str * 1024 * 1024  # Assume MB
+            if ram_str.upper().endswith('G'):
+                return int(ram_str[:-1]) * 1024 * 1024 * 1024
+            elif ram_str.upper().endswith('M'):
+                return int(ram_str[:-1]) * 1024 * 1024
+            else:
+                return int(ram_str) * 1024 * 1024  # Assume MB
+        
+        # Set Docker memory limit to MAX_RAM
+        memory_limit = ram_to_bytes(max_ram)
+        
         try:
             container = self.client.containers.run(
                 RUNTIME_IMAGE,
@@ -588,6 +602,7 @@ class DockerManager:
                 tty=True,
                 stdin_open=True,
                 working_dir="/data",
+                mem_limit=memory_limit,
             )
             logger.info(f"Container {container.id} created successfully for server {name}")
         except Exception as e:

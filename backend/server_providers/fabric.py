@@ -92,6 +92,6 @@ class FabricProvider:
             installer_version = stable_installer["version"]
         
         # Compose the exact download URL
-        return f"{API_BASE}/versions/loader/{version}/{loader_version}/1.1.0/server/jar"
+        return f"{API_BASE}/versions/loader/{version}/{loader_version}/{installer_version}/server/jar"
 
 register_provider(FabricProvider())

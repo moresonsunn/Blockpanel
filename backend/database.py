@@ -34,11 +34,12 @@ def get_db():
 
 # Initialize database
 def init_db():
-    Base.metadata.create_all(bind=engine)
-    
-    # Create default admin user if none exists
-    from models import User
+    # Import all models first to register them with Base
+    from models import User, ScheduledTask, ServerTemplate, BackupTask, ServerPerformance, PlayerAction
     from auth import get_password_hash
+    
+    # Now create all tables
+    Base.metadata.create_all(bind=engine)
     
     db = SessionLocal()
     try:

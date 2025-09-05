@@ -100,9 +100,14 @@ fi
 INSTALLER_JAR=$(ls *installer*.jar 2>/dev/null || true)
 if [ -n "$INSTALLER_JAR" ]; then
   echo "Running installer: $INSTALLER_JAR"
+  # Use --installServer (note the capital S) for headless installation
   "$JAVA_BIN" -jar "$INSTALLER_JAR" --installServer || {
-    echo "Installer failed" >&2
-    exit 1
+    echo "Installer failed, trying alternative flags..." >&2
+    # Some older Forge versions might use different flags
+    "$JAVA_BIN" -jar "$INSTALLER_JAR" --install-server || {
+      echo "Installer failed with both flags" >&2
+      exit 1
+    }
   }
   rm -f *installer*.jar || true
   

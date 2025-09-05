@@ -643,16 +643,21 @@ function SchedulePanel() {
     <div className="p-4 bg-black/20 rounded-lg">
       <div className="text-sm text-white/70 mb-3">Scheduled Tasks</div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-        <input className="rounded bg-white/5 border border-white/10 px-3 py-2" placeholder="Task name" value={name} onChange={e => setName(e.target.value)} />
-        <select className="rounded bg-white/5 border border-white/10 px-3 py-2" value={taskType} onChange={e => setTaskType(e.target.value)}>
-          <option value="backup">Backup</option>
-          <option value="restart">Restart</option>
-          <option value="command">Command</option>
-          <option value="cleanup">Cleanup</option>
+        <input className="rounded bg-gray-800 border border-white/20 px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Task name" value={name} onChange={e => setName(e.target.value)} />
+        <select 
+          className="rounded bg-gray-800 border border-white/20 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-brand-500" 
+          value={taskType} 
+          onChange={e => setTaskType(e.target.value)}
+          style={{ backgroundColor: '#1f2937', color: '#ffffff' }}
+        >
+          <option value="backup" style={{ backgroundColor: '#1f2937', color: '#ffffff' }}>Backup</option>
+          <option value="restart" style={{ backgroundColor: '#1f2937', color: '#ffffff' }}>Restart</option>
+          <option value="command" style={{ backgroundColor: '#1f2937', color: '#ffffff' }}>Command</option>
+          <option value="cleanup" style={{ backgroundColor: '#1f2937', color: '#ffffff' }}>Cleanup</option>
         </select>
-        <input className="rounded bg-white/5 border border-white/10 px-3 py-2" placeholder="Server name (backup/restart/command)" value={serverName} onChange={e => setServerName(e.target.value)} />
-        <input className="rounded bg-white/5 border border-white/10 px-3 py-2" placeholder="Cron (e.g., 0 2 * * *)" value={cron} onChange={e => setCron(e.target.value)} />
-        <input className="rounded bg-white/5 border border-white/10 px-3 py-2 md:col-span-2" placeholder="Command (for command tasks)" value={command} onChange={e => setCommand(e.target.value)} />
+        <input className="rounded bg-gray-800 border border-white/20 px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Server name (backup/restart/command)" value={serverName} onChange={e => setServerName(e.target.value)} />
+        <input className="rounded bg-gray-800 border border-white/20 px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Cron (e.g., 0 2 * * *)" value={cron} onChange={e => setCron(e.target.value)} />
+        <input className="rounded bg-gray-800 border border-white/20 px-3 py-2 md:col-span-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Command (for command tasks)" value={command} onChange={e => setCommand(e.target.value)} />
         <button onClick={createTask} className="rounded bg-brand-500 hover:bg-brand-400 px-3 py-2">Create Task</button>
       </div>
       {loading ? <div className="text-white/60 text-sm">Loading…</div> : error ? <div className="text-red-400 text-sm">{String(error)}</div> : (
@@ -689,8 +694,8 @@ function PlayersPanel({ serverName }) {
     <div className="p-4 bg-black/20 rounded-lg space-y-3">
       <div className="text-sm text-white/70">Player Management</div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <input className="rounded bg-white/5 border border-white/10 px-3 py-2" placeholder="Player name" value={playerName} onChange={e => setPlayerName(e.target.value)} />
-        <input className="rounded bg-white/5 border border-white/10 px-3 py-2" placeholder="Reason (optional)" value={reason} onChange={e => setReason(e.target.value)} />
+        <input className="rounded bg-gray-800 border border-white/20 px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Player name" value={playerName} onChange={e => setPlayerName(e.target.value)} />
+        <input className="rounded bg-gray-800 border border-white/20 px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Reason (optional)" value={reason} onChange={e => setReason(e.target.value)} />
         <div className="flex items-center gap-2">
           <button onClick={() => call('whitelist', 'POST', { player_name: playerName, reason })} className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm">Whitelist</button>
           <button onClick={() => call('ban', 'POST', { player_name: playerName, reason })} className="rounded bg-red-600 hover:bg-red-500 px-3 py-2 text-sm">Ban</button>
@@ -985,10 +990,14 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
                 <div>
                   {server.ports
                     ? Object.entries(server.ports)
-                        .map(
-                          ([, v]) => v?.[0]?.HostPort || 'N/A'
+                        .filter(([containerPort, mappings]) => 
+                          containerPort.includes('25565') && mappings && mappings.length > 0
                         )
-                        .join(', ')
+                        .map(([containerPort, mappings]) => {
+                          const hostPort = mappings[0]?.HostPort;
+                          return hostPort ? `${hostPort} → 25565` : '25565 (unmapped)';
+                        })
+                        .join(', ') || 'Not mapped'
                     : 'N/A'}
                 </div>
               </div>
@@ -1517,12 +1526,13 @@ function App() {
                   <div>
                     <label className="text-base text-white/70">Type</label>
                     <select
-                      className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 text-base"
+                      className="mt-2 w-full rounded-md bg-gray-800 border border-white/20 px-4 py-3 text-base text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
                       value={selectedType}
                       onChange={(e) => setSelectedType(e.target.value)}
+                      style={{ backgroundColor: '#1f2937', color: '#ffffff' }}
                     >
                       {types.map((t) => (
-                        <option key={t} value={t}>
+                        <option key={t} value={t} style={{ backgroundColor: '#1f2937', color: '#ffffff' }}>
                           {t}
                         </option>
                       ))}
@@ -1531,12 +1541,13 @@ function App() {
                   <div>
                     <label className="text-base text-white/70">Version</label>
                     <select
-                      className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 text-base"
+                      className="mt-2 w-full rounded-md bg-gray-800 border border-white/20 px-4 py-3 text-base text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
                       value={version}
                       onChange={(e) => setVersion(e.target.value)}
+                      style={{ backgroundColor: '#1f2937', color: '#ffffff' }}
                     >
                       {(versionsData && versionsData.versions ? versionsData.versions : []).map((v) => (
-                        <option key={v} value={v}>
+                        <option key={v} value={v} style={{ backgroundColor: '#1f2937', color: '#ffffff' }}>
                           {v}
                         </option>
                       ))}
@@ -1549,12 +1560,13 @@ function App() {
                     <div>
                       <label className="text-sm text-white/70">Loader Version</label>
                       <select
-                        className="mt-1 w-full rounded bg-white/5 border border-white/10 px-3 py-2"
+                        className="mt-1 w-full rounded bg-gray-800 border border-white/20 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
                         value={loaderVersion}
                         onChange={(e) => setLoaderVersion(e.target.value)}
+                        style={{ backgroundColor: '#1f2937', color: '#ffffff' }}
                       >
                         {(loaderVersionsData?.loader_versions || []).map((lv) => (
-                          <option key={lv} value={lv}>
+                          <option key={lv} value={lv} style={{ backgroundColor: '#1f2937', color: '#ffffff' }}>
                             {lv}
                           </option>
                         ))}

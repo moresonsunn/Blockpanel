@@ -69,11 +69,19 @@ def prepare_server_files(server_type: str, version: str, dest_dir: Path, loader_
         if server_type in ("forge", "neoforge"):
             installer_name = "forge-installer.jar" if server_type == "forge" else "neoforge-installer.jar"
             installer_path = dest_dir / installer_name
+            logger.info(f"Downloading {server_type} installer from {url}")
             stream_download(url, installer_path)
+            
+            # Verify the installer was downloaded correctly
+            if not installer_path.exists() or installer_path.stat().st_size < 1024:
+                raise ValueError(f"Downloaded {server_type} installer is invalid or too small")
+                
             jar_path = dest_dir / "server.jar"  # will be generated after installer runs
+            logger.info(f"{server_type} installer downloaded successfully to {installer_path}")
         elif server_type == "fabric":
-            # For Fabric, download the server JAR directly
+            # For Fabric, download the server launcher JAR directly
             jar_path = dest_dir / "server.jar"
+            logger.info(f"Downloading Fabric server launcher from {url}")
             stream_download(url, jar_path)
             
             # Create a launcher script for Fabric
@@ -83,15 +91,26 @@ cd "$(dirname "$0")"
 java -jar server.jar server
 """
             launcher_script.write_text(launcher_content, encoding="utf-8")
-            launcher_script.chmod(0o755)  # Make executable
+            try:
+                launcher_script.chmod(0o755)  # Make executable
+            except Exception as e:
+                logger.warning(f"Could not set executable permission on run.sh: {e}")
             
-            # Verify Fabric JAR specifically (launcher JARs can vary in size)
-            if jar_path.stat().st_size < 1024 * 5:  # Less than 5KB for Fabric launcher
-                logger.error(f"Fabric JAR is too small ({jar_path.stat().st_size} bytes), likely corrupted")
-                raise ValueError(f"Fabric JAR is too small ({jar_path.stat().st_size} bytes), expected at least 5KB")
+            # Verify Fabric JAR specifically (launcher JARs can be smaller than full servers)
+            jar_size = jar_path.stat().st_size
+            if jar_size < 1024 * 5:  # Less than 5KB for Fabric launcher
+                logger.error(f"Fabric JAR is too small ({jar_size} bytes), likely corrupted")
+                raise ValueError(f"Fabric JAR is too small ({jar_size} bytes), expected at least 5KB")
+            
+            logger.info(f"Fabric server launcher downloaded successfully ({jar_size} bytes)")
         else:
+            # For vanilla, paper, purpur, etc.
             jar_path = dest_dir / "server.jar"
+            logger.info(f"Downloading {server_type} server JAR from {url}")
             stream_download(url, jar_path)
+            
+            jar_size = jar_path.stat().st_size
+            logger.info(f"{server_type} server JAR downloaded successfully ({jar_size} bytes)")
         
         # Verify download
         if not jar_path.exists():
