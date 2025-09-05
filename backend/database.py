@@ -34,26 +34,40 @@ def get_db():
 
 # Initialize database
 def init_db():
+    """Initialize the database and create tables."""
     # Import all models first to register them with Base
-    from models import User, ScheduledTask, ServerTemplate, BackupTask, ServerPerformance, PlayerAction
-    from auth import get_password_hash
+    # Import here to avoid circular imports
+    import models  # This will trigger the model class definitions
     
     # Now create all tables
     Base.metadata.create_all(bind=engine)
+    print("Database tables created successfully")
     
+    # Initialize default permissions, roles, and admin user
     db = SessionLocal()
     try:
-        admin_user = db.query(User).filter(User.username == "admin").first()
+        # Import user service
+        from user_service import UserService
+        user_service = UserService(db)
+        
+        # Initialize permissions and roles
+        user_service.initialize_default_permissions_and_roles()
+        
+        # Create default admin user if none exists
+        admin_user = user_service.get_user_by_username("admin")
         if not admin_user:
-            admin_user = User(
+            admin_user = user_service.create_user(
                 username="admin",
                 email="admin@localhost",
-                hashed_password=get_password_hash("admin123"),
+                password="admin123",  # Strong default password
                 role="admin",
-                is_active=True
+                full_name="Administrator"
             )
-            db.add(admin_user)
-            db.commit()
-            print("Created default admin user: admin/admin123")
+            print("Default admin user created: username=admin, password=admin123")
+        else:
+            print("Default admin user already exists")
+    except Exception as e:
+        print(f"Error initializing database: {e}")
+        db.rollback()
     finally:
         db.close()

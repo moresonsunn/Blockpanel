@@ -6,7 +6,7 @@ from datetime import datetime
 
 from database import get_db
 from models import ScheduledTask, User
-from auth import get_current_active_user, require_moderator
+from auth import require_auth, require_moderator
 from scheduler import get_scheduler
 
 router = APIRouter(prefix="/schedule", tags=["scheduling"])
@@ -42,7 +42,7 @@ class ScheduledTaskResponse(BaseModel):
 
 @router.get("/tasks", response_model=List[ScheduledTaskResponse])
 async def list_scheduled_tasks(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """List all scheduled tasks."""
@@ -129,7 +129,7 @@ async def create_scheduled_task(
 @router.get("/tasks/{task_id}", response_model=ScheduledTaskResponse)
 async def get_scheduled_task(
     task_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """Get a specific scheduled task."""

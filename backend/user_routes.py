@@ -6,7 +6,7 @@ from datetime import datetime
 
 from database import get_db
 from models import User
-from auth import get_current_active_user, require_admin, require_moderator, get_password_hash
+from auth import require_auth, require_admin, require_user_view, require_user_create, require_user_edit
 
 router = APIRouter(prefix="/users", tags=["user_management"])
 

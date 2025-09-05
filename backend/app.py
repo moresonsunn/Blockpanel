@@ -21,10 +21,10 @@ from player_routes import router as player_router
 from template_routes import router as template_router
 from world_routes import router as world_router
 from plugin_routes import router as plugin_router
-from user_routes import router as user_router
+from api.user_routes import router as user_router
 from monitoring_routes import router as monitoring_router
 from health_routes import router as health_router
-from auth import get_current_active_user, require_admin, require_moderator
+from auth import require_auth, get_current_user, require_admin, require_moderator
 from scheduler import get_scheduler
 from models import User
 
@@ -90,10 +90,14 @@ except Exception:
 @app.on_event("startup")
 async def startup_event():
     """Initialize the application when it starts."""
+    print("Starting up application...")
+    logging.basicConfig(level=logging.INFO)
     try:
         # Initialize database
+        print("Initializing database...")
         logging.info("Initializing database...")
         init_db()
+        print("Database initialized successfully")
         logging.info("Database initialized")
         
         # Start task scheduler
@@ -224,7 +228,7 @@ def list_loader_versions(
 
 
 @app.get("/servers")
-def list_servers(current_user: User = Depends(get_current_active_user)):
+def list_servers(current_user: User = Depends(require_auth)):
     try:
         return get_docker_manager().list_servers()
     except Exception as e:

@@ -4,7 +4,7 @@ from typing import List
 from pathlib import Path
 
 from database import get_db
-from auth import get_current_active_user, require_moderator
+from auth import require_auth, require_moderator
 from models import User
 from file_manager import upload_file as fm_upload_file, delete_path as fm_delete_path
 from docker_manager import DockerManager
@@ -34,7 +34,7 @@ def _get_docker_manager() -> DockerManager:
 @router.get("/{server_name}")
 async def list_plugins(
     server_name: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_auth),
 ):
     """List plugin JARs in the server's plugins directory."""
     pdir = _plugins_dir(server_name)

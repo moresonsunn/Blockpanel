@@ -1,13 +1,16 @@
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from database import get_db
 from models import User
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
@@ -64,46 +67,140 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
     if not verify_password(password, user.hashed_password):
         return None
     return user
+    
+def get_client_ip(request: Request) -> str:
+    """Get client IP address from request."""
+    if "x-forwarded-for" in request.headers:
+        return request.headers["x-forwarded-for"].split(",")[0]
+    if "x-real-ip" in request.headers:
+        return request.headers["x-real-ip"]
+    return request.client.host
 
-async def get_current_user(
+def get_user_agent(request: Request) -> str:
+    """Get user agent from request."""
+    return request.headers.get("user-agent", "Unknown")
+
+def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    """Get current user from session token, returning None if not authenticated."""
+    if not credentials:
+        return None
+    
+    # Try JWT token first for backward compatibility
+    payload = verify_token(credentials.credentials)
+    if payload is not None:
+        username = payload.get("sub")
+        if username:
+            user = get_user_by_username(db, username)
+            if user:
+                return user
+    
+    # Try session token
+    try:
+        # Import here to avoid circular import
+        from user_service import UserService
+        user_service = UserService(db)
+        user = user_service.get_user_by_session_token(credentials.credentials)
+        return user
+    except ImportError:
+        logger.warning("UserService not available, using legacy JWT authentication only")
+        return None
+
+def require_auth(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db)
 ) -> User:
-    """Get the current authenticated user."""
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    """Require authentication - raises exception if not authenticated."""
+    user = get_current_user(request, credentials, db)
     
-    if not credentials:
-        raise credentials_exception
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
-    payload = verify_token(credentials.credentials)
-    if payload is None:
-        raise credentials_exception
-    
-    username: str = payload.get("sub")
-    if username is None:
-        raise credentials_exception
-    
-    user = get_user_by_username(db, username)
-    if user is None:
-        raise credentials_exception
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user"
+        )
     
     return user
 
-async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
-    """Get the current active user."""
-    if not current_user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
-    return current_user
+def get_user_permissions(user: User, db: Session) -> List[str]:
+    """Get permissions for a user based on their role."""
+    try:
+        # Import here to avoid circular import
+        from user_service import UserService
+        user_service = UserService(db)
+        return user_service.get_user_permissions(user)
+    except ImportError:
+        # Fallback to basic role-based permissions if UserService not available
+        if user.role == "admin":
+            return ["*"]
+        elif user.role == "moderator":
+            return ["server.view", "server.start", "server.stop", "server.console", "server.files", "server.config"]
+        else:
+            return ["server.view"]
+
+def require_permission(permission: str):
+    """Decorator factory to require specific permission."""
+    def permission_dependency(
+        user: User = Depends(require_auth),
+        db: Session = Depends(get_db)
+    ) -> User:
+        permissions = get_user_permissions(user, db)
+        
+        # Admin has all permissions
+        if user.role == "admin" or "*" in permissions:
+            return user
+            
+        if permission not in permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: {permission} required"
+            )
+        
+        return user
+    
+    return permission_dependency
+
+def require_any_permission(permissions: List[str]):
+    """Decorator factory to require any of the specified permissions."""
+    def permission_dependency(
+        user: User = Depends(require_auth),
+        db: Session = Depends(get_db)
+    ) -> User:
+        user_permissions = get_user_permissions(user, db)
+        
+        # Admin has all permissions
+        if user.role == "admin" or "*" in user_permissions:
+            return user
+            
+        has_permission = any(perm in user_permissions for perm in permissions)
+        
+        if not has_permission:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: One of {permissions} required"
+            )
+        
+        return user
+    
+    return permission_dependency
 
 def require_role(required_role: str):
-    """Decorator to require a specific role."""
-    def role_checker(current_user: User = Depends(get_current_active_user)) -> User:
+    """Decorator factory to require specific role."""
+    def role_dependency(
+        user: User = Depends(require_auth)
+    ) -> User:
         role_hierarchy = {"admin": 3, "moderator": 2, "user": 1}
-        user_level = role_hierarchy.get(current_user.role, 0)
+        user_level = role_hierarchy.get(user.role, 0)
         required_level = role_hierarchy.get(required_role, 999)
         
         if user_level < required_level:
@@ -111,9 +208,63 @@ def require_role(required_role: str):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not enough permissions"
             )
-        return current_user
-    return role_checker
+        return user
+    return role_dependency
 
-# Convenience dependencies
+# Convenience role dependencies
 require_admin = require_role("admin")
 require_moderator = require_role("moderator")
+require_moderator_or_admin = lambda: require_any_permission(["server.config", "system.backup"])
+
+# Convenience permission dependencies
+require_server_view = require_permission("server.view")
+require_server_create = require_permission("server.create")
+require_server_start = require_permission("server.start")
+require_server_stop = require_permission("server.stop")
+require_server_delete = require_permission("server.delete")
+require_server_console = require_permission("server.console")
+require_server_files = require_permission("server.files")
+require_server_config = require_permission("server.config")
+
+require_user_view = require_permission("user.view")
+require_user_create = require_permission("user.create")
+require_user_edit = require_permission("user.edit")
+require_user_delete = require_permission("user.delete")
+require_user_manage_roles = require_permission("user.manage_roles")
+
+require_system_backup = require_permission("system.backup")
+require_system_schedule = require_permission("system.schedule")
+require_system_monitoring = require_permission("system.monitoring")
+require_system_audit = require_permission("system.audit")
+require_system_settings = require_permission("system.settings")
+
+def log_user_action(user: User, action: str, resource_type: Optional[str] = None,
+                   resource_id: Optional[str] = None, details: Optional[dict] = None,
+                   request: Optional[Request] = None, db: Optional[Session] = None):
+    """Helper to log user actions."""
+    if not db:
+        return
+    
+    try:
+        # Import here to avoid circular import
+        from user_service import UserService
+        user_service = UserService(db)
+        
+        ip_address = None
+        user_agent = None
+        
+        if request:
+            ip_address = get_client_ip(request)
+            user_agent = get_user_agent(request)
+        
+        user_service.log_audit_action(
+            user_id=user.id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            details=details,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+    except ImportError:
+        logger.warning("UserService not available for audit logging")

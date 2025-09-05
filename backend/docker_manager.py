@@ -33,17 +33,29 @@ def download_file(url: str, dest: Path, min_size: int = 1024 * 100, max_retries:
             with requests.get(url, stream=True, timeout=30) as r:
                 r.raise_for_status()
                 content_type = r.headers.get("content-type", "").lower()
-                if "application/json" in content_type or "text/html" in content_type:
-                    # Read a small preview for logging
-                    preview = r.raw.read(512)
+                
+                # Read the first few bytes to check if it's a valid file
+                first_chunk = next(r.iter_content(chunk_size=8192), b'')
+                r.close()  # Close the first request
+                
+                # Check for valid file signatures
+                is_jar = first_chunk.startswith(b'PK')  # ZIP/JAR signature
+                is_gzip = first_chunk.startswith(b'\x1f\x8b')  # GZIP signature
+                
+                # Only reject if we're sure it's not a valid file
+                if not is_jar and not is_gzip and ("text/html" in content_type or ("application/json" in content_type and len(first_chunk) > 0 and not first_chunk.startswith(b'{') and not first_chunk.startswith(b'['))): 
                     logger.warning(
-                        f"Unexpected content-type for JAR download: {content_type}. Preview: {preview[:200]!r}"
+                        f"Invalid file type for JAR download: {content_type}. First bytes: {first_chunk[:50]!r}"
                     )
-                    raise ValueError(f"Unexpected content-type for JAR download: {content_type}")
-                with open(dest, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
+                    raise ValueError(f"Invalid file type for JAR download: {content_type}")
+                
+                # Re-open the request for actual download
+                with requests.get(url, stream=True, timeout=30) as r2:
+                    r2.raise_for_status()
+                    with open(dest, "wb") as f:
+                        for chunk in r2.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
             if dest.exists() and dest.stat().st_size >= min_size:
                 # Validate ZIP/JAR magic 'PK\x03\x04'
                 try:
@@ -274,13 +286,37 @@ class DockerManager:
                     server_version = labels.get("mc.version", None)
                     # Optionally, extract loader version if present
                     loader_version = labels.get("mc.loader_version", None)
+                    
+                    # Extract actual host port mappings
+                    port_mappings = {}
+                    raw_ports = network.get("Ports", {})
+                    for container_port, host_bindings in raw_ports.items():
+                        if host_bindings and isinstance(host_bindings, list) and len(host_bindings) > 0:
+                            # Take the first IPv4 binding (0.0.0.0)
+                            for binding in host_bindings:
+                                if binding.get("HostIp") == "0.0.0.0":
+                                    port_mappings[container_port] = {
+                                        "host_port": binding.get("HostPort"),
+                                        "host_ip": binding.get("HostIp")
+                                    }
+                                    break
+                            # Fallback to first binding if no 0.0.0.0 found
+                            if container_port not in port_mappings:
+                                port_mappings[container_port] = {
+                                    "host_port": host_bindings[0].get("HostPort"),
+                                    "host_ip": host_bindings[0].get("HostIp")
+                                }
+                        else:
+                            port_mappings[container_port] = None
+                    
                     result.append({
                         "id": c.id,
                         "name": c.name,
                         "status": getattr(c, "status", "unknown"),
                         "image": config.get("Image"),
                         "labels": labels,
-                        "ports": network.get("Ports", {}),
+                        "ports": raw_ports,  # Keep raw ports for backward compatibility
+                        "port_mappings": port_mappings,  # New field with actual host port mappings
                         "mounts": attrs.get("Mounts", []),
                         "server_type": server_type,
                         "server_version": server_version,
@@ -367,13 +403,36 @@ class DockerManager:
                 java_version = labels["mc.java_version"]
                 java_bin = f"/usr/local/bin/java{java_version}"
             
+            # Extract actual host port mappings
+            port_mappings = {}
+            raw_ports = network.get("Ports", {})
+            for container_port, host_bindings in raw_ports.items():
+                if host_bindings and isinstance(host_bindings, list) and len(host_bindings) > 0:
+                    # Take the first IPv4 binding (0.0.0.0)
+                    for binding in host_bindings:
+                        if binding.get("HostIp") == "0.0.0.0":
+                            port_mappings[container_port] = {
+                                "host_port": binding.get("HostPort"),
+                                "host_ip": binding.get("HostIp")
+                            }
+                            break
+                    # Fallback to first binding if no 0.0.0.0 found
+                    if container_port not in port_mappings:
+                        port_mappings[container_port] = {
+                            "host_port": host_bindings[0].get("HostPort"),
+                            "host_ip": host_bindings[0].get("HostIp")
+                        }
+                else:
+                    port_mappings[container_port] = None
+            
             return {
                 "id": container.id,
                 "name": container.name,
                 "status": getattr(container, "status", "unknown"),
                 "image": config.get("Image"),
                 "labels": labels,
-                "ports": network.get("Ports", {}),
+                "ports": raw_ports,
+                "port_mappings": port_mappings,
                 "mounts": attrs.get("Mounts", []),
                 "server_type": labels.get("mc.type", None),
                 "server_version": labels.get("mc.version", None),
@@ -538,16 +597,27 @@ class DockerManager:
         # Try to prepare server files first
         try:
             prepare_server_files(server_type, version, server_dir, loader_version=loader_version, installer_version=installer_version)
-            # Check if server.jar was created successfully
-            jar_path = server_dir / "server.jar"
-            if jar_path.exists() and jar_path.stat().st_size >= 1024 * 100:  # At least 100KB
-                logger.info(f"Server files prepared successfully, server.jar found at {jar_path}")
+            
+            # For installer-based servers (forge/neoforge), don't check for server.jar yet
+            # It will be created when the installer runs inside the container
+            if server_type.lower() in ("forge", "neoforge"):
+                logger.info(f"Server files prepared successfully for {server_type} (installer downloaded)")
             else:
-                logger.warning(f"Server.jar not found or too small after prepare_server_files, attempting fix")
-                fix_server_jar(server_dir, server_type, version, loader_version=loader_version)
+                # Check if server.jar was created successfully for direct-download servers
+                jar_path = server_dir / "server.jar"
+                if jar_path.exists() and jar_path.stat().st_size >= 1024 * 100:  # At least 100KB
+                    logger.info(f"Server files prepared successfully, server.jar found at {jar_path}")
+                else:
+                    logger.warning(f"Server.jar not found or too small after prepare_server_files, attempting fix")
+                    fix_server_jar(server_dir, server_type, version, loader_version=loader_version)
         except Exception as e:
             logger.warning(f"prepare_server_files failed: {e}, attempting fix_server_jar")
-            fix_server_jar(server_dir, server_type, version, loader_version=loader_version)
+            # Only run fix_server_jar for non-installer servers when there's an error
+            if server_type.lower() not in ("forge", "neoforge"):
+                fix_server_jar(server_dir, server_type, version, loader_version=loader_version)
+            else:
+                # For installer-based servers, re-raise the exception since fix_server_jar won't help
+                raise
 
         # Configure port binding
         port_binding = {}

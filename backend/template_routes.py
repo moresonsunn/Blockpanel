@@ -6,7 +6,7 @@ from datetime import datetime
 
 from database import get_db
 from models import ServerTemplate, User
-from auth import get_current_active_user, require_moderator
+from auth import require_auth, require_moderator
 from docker_manager import DockerManager
 
 router = APIRouter(prefix="/templates", tags=["server_templates"])
@@ -61,7 +61,7 @@ def get_docker_manager() -> DockerManager:
 
 @router.get("/", response_model=List[ServerTemplateResponse])
 async def list_templates(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """List all available server templates."""
@@ -125,7 +125,7 @@ async def create_template(
 @router.get("/{template_id}", response_model=ServerTemplateResponse)
 async def get_template(
     template_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """Get a specific server template."""
@@ -293,7 +293,7 @@ async def create_server_from_template(
 
 @router.get("/popular/")
 async def get_popular_templates(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """Get popular/recommended server templates."""

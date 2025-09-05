@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from database import get_db
 from models import User
 from auth import (
-    authenticate_user, create_access_token, get_current_active_user,
+    authenticate_user, create_access_token, require_auth,
     get_password_hash, require_admin, require_moderator
 )
 
@@ -72,14 +72,14 @@ async def login(
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.get("/me", response_model=UserResponse)
-async def read_users_me(current_user: User = Depends(get_current_active_user)):
+async def read_users_me(current_user: User = Depends(require_auth)):
     """Get current user information."""
     return current_user
 
 @router.put("/me/password")
 async def change_password(
     password_data: PasswordChange,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """Change current user's password."""

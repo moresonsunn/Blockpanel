@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from database import get_db
 from models import User, ServerPerformance
-from auth import get_current_active_user, require_moderator
+from auth import require_auth, require_admin
 from docker_manager import DockerManager
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
@@ -46,7 +46,7 @@ def get_docker_manager() -> DockerManager:
 
 @router.get("/system-health", response_model=SystemHealth)
 async def get_system_health(
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(require_auth)
 ):
     """Get overall system health metrics."""
     try:
@@ -105,7 +105,7 @@ async def get_system_health(
 async def get_server_metrics(
     server_name: str,
     hours: int = Query(24, description="Hours of metrics to retrieve"),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_auth)
     db: Session = Depends(get_db)
 ):
     """Get historical metrics for a specific server."""
@@ -169,7 +169,7 @@ async def record_server_metrics(
 @router.get("/servers/{server_name}/current-stats")
 async def get_current_server_stats(
     server_name: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(require_auth)
 ):
     """Get real-time stats for a server."""
     try:
@@ -241,7 +241,7 @@ async def get_monitoring_alerts(
 
 @router.get("/dashboard-data")
 async def get_dashboard_data(
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(require_auth)
 ):
     """Get comprehensive dashboard data."""
     try:

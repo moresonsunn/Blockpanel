@@ -8,7 +8,7 @@ import sys
 import os
 
 from database import get_db, engine
-from auth import get_current_active_user
+from auth import require_auth, require_admin
 from models import User
 from docker_manager import DockerManager
 
@@ -223,7 +223,7 @@ async def get_application_health():
 
 @router.get("/", response_model=OverallHealth)
 async def get_overall_health(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_auth)
     db: Session = Depends(get_db)
 ):
     """Get comprehensive health status."""

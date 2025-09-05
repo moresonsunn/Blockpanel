@@ -76,8 +76,19 @@ def prepare_server_files(server_type: str, version: str, dest_dir: Path, loader_
             if not installer_path.exists() or installer_path.stat().st_size < 1024:
                 raise ValueError(f"Downloaded {server_type} installer is invalid or too small")
                 
-            jar_path = dest_dir / "server.jar"  # will be generated after installer runs
+            # For installer-based servers, server.jar will be created when the installer runs
+            # We don't need to check for server.jar existence here
             logger.info(f"{server_type} installer downloaded successfully to {installer_path}")
+            
+            # Accept EULA automatically for installer-based servers
+            (dest_dir / "eula.txt").write_text("eula=true\n", encoding="utf-8")
+            
+            # For installer-based servers, we return the installer path, not the server.jar path
+            # The server.jar will be created by the runtime entrypoint when it runs the installer
+            logger.info(f"Server files prepared successfully at {installer_path}")
+            logger.info(f"Directory contents of {dest_dir}: {list(dest_dir.iterdir())}")
+            return installer_path
+            
         elif server_type == "fabric":
             # For Fabric, download the server launcher JAR directly
             jar_path = dest_dir / "server.jar"
@@ -112,20 +123,21 @@ java -jar server.jar server
             jar_size = jar_path.stat().st_size
             logger.info(f"{server_type} server JAR downloaded successfully ({jar_size} bytes)")
         
-        # Verify download
-        if not jar_path.exists():
-            logger.error(f"Server JAR not found at {jar_path} after download")
-            logger.error(f"Directory contents of {dest_dir}: {list(dest_dir.iterdir())}")
-            raise FileNotFoundError(f"Server JAR not found at {jar_path} after download")
-        if jar_path.stat().st_size == 0:
-            raise ValueError(f"Downloaded JAR is empty at {jar_path}")
+        # Verify download (only for non-installer based servers)
+        if server_type not in ("forge", "neoforge"):
+            if not jar_path.exists():
+                logger.error(f"Server JAR not found at {jar_path} after download")
+                logger.error(f"Directory contents of {dest_dir}: {list(dest_dir.iterdir())}")
+                raise FileNotFoundError(f"Server JAR not found at {jar_path} after download")
+            if jar_path.stat().st_size == 0:
+                raise ValueError(f"Downloaded JAR is empty at {jar_path}")
             
-        logger.info(f"Server files prepared successfully at {jar_path}")
-        logger.info(f"Directory contents of {dest_dir}: {list(dest_dir.iterdir())}")
-        
-        # Accept EULA automatically
-        (dest_dir / "eula.txt").write_text("eula=true\n", encoding="utf-8")
-        return jar_path
+            logger.info(f"Server files prepared successfully at {jar_path}")
+            logger.info(f"Directory contents of {dest_dir}: {list(dest_dir.iterdir())}")
+            
+            # Accept EULA automatically
+            (dest_dir / "eula.txt").write_text("eula=true\n", encoding="utf-8")
+            return jar_path
         
     except Exception as e:
         logger.error(f"Failed to prepare server files: {e}")

@@ -6,7 +6,7 @@ from datetime import datetime
 
 from database import get_db
 from models import PlayerAction, User
-from auth import get_current_active_user, require_moderator
+from auth import require_auth, require_moderator
 from docker_manager import DockerManager
 
 router = APIRouter(prefix="/players", tags=["player_management"])
@@ -36,7 +36,7 @@ def get_docker_manager() -> DockerManager:
 @router.get("/{server_name}/actions", response_model=List[PlayerActionResponse])
 async def list_player_actions(
     server_name: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """List all player actions for a server."""
@@ -467,7 +467,7 @@ async def deop_player(
 @router.get("/{server_name}/online")
 async def get_online_players(
     server_name: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(require_auth)
 ):
     """Get list of currently online players."""
     try:

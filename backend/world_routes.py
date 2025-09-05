@@ -8,7 +8,7 @@ import time
 from typing import List
 
 from database import get_db
-from auth import get_current_active_user, require_moderator
+from auth import require_auth, require_moderator
 from models import User
 from config import SERVERS_ROOT
 
@@ -40,7 +40,7 @@ def _detect_world_dirs(server_dir: Path) -> List[Path]:
 @router.get("/{server_name}")
 async def list_worlds(
     server_name: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_auth)
 ):
     server_dir = _server_dir(server_name)
     worlds = _detect_world_dirs(server_dir)
@@ -65,7 +65,7 @@ async def list_worlds(
 async def download_world(
     server_name: str,
     world: str = Query("world"),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_auth)
 ):
     server_dir = _server_dir(server_name)
     world_dir = (server_dir / world).resolve()
