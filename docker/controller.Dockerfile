@@ -4,7 +4,7 @@ WORKDIR /ui
 
 # Install dependencies first for better caching
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci --only=production=false --silent
+RUN npm install --silent
 
 # Copy frontend source
 COPY frontend ./
