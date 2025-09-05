@@ -13,7 +13,26 @@ services:
     environment:
       - SERVERS_CONTAINER_ROOT=/data/servers
       - SERVERS_VOLUME_NAME=minecraft-controller_mc_servers_data
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - USE_POSTGRES=true
+      - DATABASE_URL=postgresql://postgres:postgres123@db:5432/minecraft_controller
+    restart: unless-stopped
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15-alpine
+    container_name: mc-postgres
+    environment:
+      - POSTGRES_DB=minecraft_controller
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     restart: unless-stopped
 
 volumes:
   mc_servers_data:
+  postgres_data:

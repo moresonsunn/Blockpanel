@@ -19,6 +19,11 @@ from auth_routes import router as auth_router
 from scheduler_routes import router as scheduler_router
 from player_routes import router as player_router
 from template_routes import router as template_router
+from world_routes import router as world_router
+from plugin_routes import router as plugin_router
+from user_routes import router as user_router
+from monitoring_routes import router as monitoring_router
+from health_routes import router as health_router
 from auth import get_current_active_user, require_admin, require_moderator
 from scheduler import get_scheduler
 from models import User
@@ -71,6 +76,11 @@ app.include_router(auth_router)
 app.include_router(scheduler_router)
 app.include_router(player_router)
 app.include_router(template_router)
+app.include_router(world_router)
+app.include_router(plugin_router)
+app.include_router(user_router)
+app.include_router(monitoring_router)
+app.include_router(health_router)
 
 try:
     app.mount("/ui", StaticFiles(directory="static", html=True), name="ui")

@@ -1,39 +1,45 @@
 # --- Build frontend ---
-    FROM node:20-alpine AS ui
-    WORKDIR /ui
-    
-    # WICHTIG: Dev-Dependencies wie react-scripts müssen installiert werden
-    ENV NODE_ENV=development
-    
-    # Package.json + lockfile zuerst kopieren (Cache layer)
-    COPY frontend/package.json frontend/package-lock.json ./
-    
-    # Installiere alles inkl. devDependencies
-    RUN npm install --no-audit --no-fund
-    
-    # Restliches Frontend kopieren
-    COPY frontend ./ 
-    
-    # Build React App
-    RUN npm run build
-    
-    # --- Backend image ---
-    FROM python:3.11-slim AS api
-    WORKDIR /app
-    
-    # System deps
-    RUN apt-get update && apt-get install -y --no-install-recommends curl \
-      && rm -rf /var/lib/apt/lists/*
-    
-    COPY backend/requirements.txt ./
-    RUN pip install --no-cache-dir -r requirements.txt
-    COPY backend ./
-    
-    # Copy built frontend into backend container
-    COPY --from=ui /ui/build ./static
-    
-    ENV PORT=8000
-    EXPOSE 8000
-    
-    CMD ["sh", "-lc", "uvicorn app:app --host 0.0.0.0 --port ${PORT}"]
+FROM node:20-alpine AS ui
+WORKDIR /ui
+
+# Install dependencies first for better caching
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --only=production=false --silent
+
+# Copy frontend source
+COPY frontend ./
+
+# Build React app
+RUN npm run build
+
+# --- Backend image ---
+FROM python:3.11-slim AS api
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY backend/requirements.txt ./
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy backend source
+COPY backend ./
+
+# Copy built frontend
+COPY --from=ui /ui/build ./static
+
+# Create data directory
+RUN mkdir -p /data/servers
+
+ENV PORT=8000
+EXPOSE 8000
+
+# Use Python module syntax for better reliability
+CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
     

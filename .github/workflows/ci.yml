@@ -1,0 +1,141 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: postgres123
+          POSTGRES_DB: minecraft_controller_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+    
+    - name: Run syntax checks
+      run: |
+        cd backend
+        python -m py_compile *.py
+        
+    - name: Run comprehensive tests
+      run: python test_complete_system.py
+      env:
+        DATABASE_URL: postgresql://postgres:postgres123@localhost:5432/minecraft_controller_test
+        USE_POSTGRES: true
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm ci
+    
+    - name: Run build test
+      run: |
+        cd frontend
+        npm run build
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: frontend-build
+        path: frontend/build/
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend]
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build runtime image
+      run: |
+        docker build -t mc-runtime:latest -f docker/runtime.Dockerfile docker
+    
+    - name: Build controller image
+      run: |
+        docker build -t mc-controller:latest -f docker/controller.Dockerfile .
+    
+    - name: Test Docker Compose configuration
+      run: |
+        docker-compose config
+    
+    - name: Run Docker integration test
+      run: |
+        # Start services in background
+        docker-compose up -d
+        
+        # Wait for services to be ready
+        sleep 30
+        
+        # Test health endpoint
+        curl -f http://localhost:8000/health/quick || exit 1
+        
+        # Cleanup
+        docker-compose down
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend, docker-build, security-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to production
+      run: |
+        echo "Production deployment would happen here"
+        echo "Consider using Docker registry push, SSH deployment, or cloud provider specific actions"

@@ -1,5 +1,6 @@
 {
   "ai_error_fixer": {
+    "ai_error_fixer": true,
     "auto_startup": true,
     "monitor_interval": 30,
     "log_tail_lines": 100,

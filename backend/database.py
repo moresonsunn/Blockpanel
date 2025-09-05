@@ -4,14 +4,19 @@ from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime
 import os
 
-# Database URL - using SQLite for simplicity
+# Database URL - support both SQLite and PostgreSQL
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./minecraft_controller.db")
 
+# For PostgreSQL in Docker, use this URL:
+if os.getenv("USE_POSTGRES", "false").lower() == "true":
+    DATABASE_URL = "postgresql://postgres:postgres123@db:5432/minecraft_controller"
+
 # Create engine
-engine = create_engine(
-    DATABASE_URL, 
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
-)
+connect_args = {}
+if "sqlite" in DATABASE_URL:
+    connect_args = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
 # Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
