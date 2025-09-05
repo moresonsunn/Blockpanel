@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from database import get_db
 from models import User, ServerPerformance
-from auth import require_auth, require_admin
+from auth import require_auth, require_admin, require_moderator
 from docker_manager import DockerManager
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
@@ -105,7 +105,7 @@ async def get_system_health(
 async def get_server_metrics(
     server_name: str,
     hours: int = Query(24, description="Hours of metrics to retrieve"),
-    current_user: User = Depends(require_auth)
+    current_user: User = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
     """Get historical metrics for a specific server."""
