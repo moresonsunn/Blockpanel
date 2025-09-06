@@ -7,7 +7,7 @@ import psutil
 import sys
 import os
 
-from database import get_db, engine
+from database import get_db, engine, get_connection_pool_status, health_check_db
 from auth import require_auth, require_admin
 from models import User
 from docker_manager import DockerManager
@@ -107,9 +107,9 @@ async def get_system_info():
 async def get_database_health(db: Session = Depends(get_db)):
     """Get database health status."""
     try:
-        # Test database connection
-        result = db.execute("SELECT 1")
-        result.fetchone()
+        # Test database connection using optimized health check
+        if not health_check_db():
+            raise Exception("Database connection failed")
         
         # Get database type
         db_url = str(engine.url)
@@ -252,15 +252,32 @@ async def get_overall_health(
         application=application
     )
 
+@router.get("/database/pool")
+async def get_database_pool_status(current_user: User = Depends(require_auth)):
+    """Get database connection pool status for monitoring."""
+    pool_status = get_connection_pool_status()
+    db_healthy = health_check_db()
+    
+    # Calculate pool utilization percentage
+    utilization = 0
+    if not pool_status.get('error') and pool_status.get('pool_size', 0) > 0:
+        checked_out = pool_status.get('checked_out', 0)
+        total_capacity = pool_status.get('pool_size', 0) + pool_status.get('overflow', 0)
+        utilization = (checked_out / total_capacity) * 100 if total_capacity > 0 else 0
+    
+    return {
+        "healthy": db_healthy,
+        "pool_status": pool_status,
+        "utilization_percent": round(utilization, 2),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
 @router.get("/quick")
 async def get_quick_health():
     """Get a quick health check (no authentication required)."""
     try:
-        # Quick database test
-        from database import engine
-        with engine.connect() as conn:
-            conn.execute("SELECT 1")
-        db_ok = True
+        # Quick database test using health check function
+        db_ok = health_check_db()
     except Exception:
         db_ok = False
     

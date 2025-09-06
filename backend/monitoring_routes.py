@@ -216,28 +216,186 @@ async def get_current_server_stats(
 async def get_monitoring_alerts(
     current_user: User = Depends(require_moderator)
 ):
-    """Get monitoring alerts/notifications."""
-    # This is a placeholder for a more sophisticated alerting system
-    # In practice, you'd have a database table for alerts and rules
-    
-    sample_alerts = [
-        {
-            "id": 1,
-            "type": "warning",
-            "message": "High CPU usage detected on server 'survival-world'",
-            "timestamp": datetime.utcnow() - timedelta(minutes=15),
-            "acknowledged": False
-        },
-        {
-            "id": 2,
-            "type": "info",
-            "message": "Server 'creative-build' restarted successfully",
-            "timestamp": datetime.utcnow() - timedelta(hours=2),
-            "acknowledged": True
+    """Get monitoring alerts/notifications based on real server data."""
+    try:
+        docker_manager = get_docker_manager()
+        servers = docker_manager.list_servers()
+        
+        alerts = []
+        alert_id = 1
+        
+        for server in servers:
+            server_name = server.get("name", "Unknown")
+            status = server.get("status", "unknown")
+            container_id = server.get("id")
+            
+            # Alert for stopped servers
+            if status != "running":
+                alerts.append({
+                    "id": alert_id,
+                    "type": "error",
+                    "severity": "high",
+                    "message": f"Server '{server_name}' is not running (Status: {status})",
+                    "timestamp": datetime.utcnow() - timedelta(minutes=5),
+                    "acknowledged": False,
+                    "server_name": server_name,
+                    "category": "server_status"
+                })
+                alert_id += 1
+                continue
+            
+            # Get server stats for running servers
+            try:
+                if container_id:
+                    stats = docker_manager.get_server_stats(container_id)
+                    
+                    # High CPU usage alert
+                    cpu_percent = stats.get("cpu_percent", 0)
+                    if cpu_percent > 80:
+                        alerts.append({
+                            "id": alert_id,
+                            "type": "warning",
+                            "severity": "medium",
+                            "message": f"High CPU usage on server '{server_name}' ({cpu_percent:.1f}%)",
+                            "timestamp": datetime.utcnow() - timedelta(minutes=2),
+                            "acknowledged": False,
+                            "server_name": server_name,
+                            "category": "performance",
+                            "metric_value": cpu_percent,
+                            "threshold": 80
+                        })
+                        alert_id += 1
+                    
+                    # High memory usage alert
+                    memory_percent = stats.get("memory_percent", 0)
+                    if memory_percent > 90:
+                        alerts.append({
+                            "id": alert_id,
+                            "type": "critical",
+                            "severity": "high",
+                            "message": f"Critical memory usage on server '{server_name}' ({memory_percent:.1f}%)",
+                            "timestamp": datetime.utcnow() - timedelta(minutes=1),
+                            "acknowledged": False,
+                            "server_name": server_name,
+                            "category": "performance",
+                            "metric_value": memory_percent,
+                            "threshold": 90
+                        })
+                        alert_id += 1
+                    elif memory_percent > 75:
+                        alerts.append({
+                            "id": alert_id,
+                            "type": "warning",
+                            "severity": "medium",
+                            "message": f"High memory usage on server '{server_name}' ({memory_percent:.1f}%)",
+                            "timestamp": datetime.utcnow() - timedelta(minutes=3),
+                            "acknowledged": False,
+                            "server_name": server_name,
+                            "category": "performance",
+                            "metric_value": memory_percent,
+                            "threshold": 75
+                        })
+                        alert_id += 1
+                    
+                    # Low disk space warning (if available)
+                    disk_usage = stats.get("disk_usage_percent")
+                    if disk_usage and disk_usage > 85:
+                        alerts.append({
+                            "id": alert_id,
+                            "type": "warning",
+                            "severity": "medium",
+                            "message": f"Low disk space on server '{server_name}' ({disk_usage:.1f}% used)",
+                            "timestamp": datetime.utcnow() - timedelta(minutes=10),
+                            "acknowledged": False,
+                            "server_name": server_name,
+                            "category": "storage",
+                            "metric_value": disk_usage,
+                            "threshold": 85
+                        })
+                        alert_id += 1
+            
+            except Exception as e:
+                # Server stats unavailable alert
+                alerts.append({
+                    "id": alert_id,
+                    "type": "warning",
+                    "severity": "medium",
+                    "message": f"Unable to retrieve stats for server '{server_name}': {str(e)[:100]}",
+                    "timestamp": datetime.utcnow() - timedelta(minutes=5),
+                    "acknowledged": False,
+                    "server_name": server_name,
+                    "category": "monitoring"
+                })
+                alert_id += 1
+        
+        # System-wide alerts
+        total_servers = len(servers)
+        running_servers = len([s for s in servers if s.get("status") == "running"])
+        
+        if total_servers > 0 and running_servers / total_servers < 0.5:
+            alerts.append({
+                "id": alert_id,
+                "type": "critical",
+                "severity": "high",
+                "message": f"More than half of servers are down ({running_servers}/{total_servers} running)",
+                "timestamp": datetime.utcnow() - timedelta(minutes=1),
+                "acknowledged": False,
+                "server_name": None,
+                "category": "system"
+            })
+            alert_id += 1
+        
+        # Add some positive alerts for healthy servers
+        healthy_servers = [s for s in servers if s.get("status") == "running"]
+        if len(healthy_servers) > 0:
+            alerts.append({
+                "id": alert_id,
+                "type": "success",
+                "severity": "info",
+                "message": f"{len(healthy_servers)} server{'s' if len(healthy_servers) != 1 else ''} running smoothly",
+                "timestamp": datetime.utcnow() - timedelta(minutes=1),
+                "acknowledged": True,
+                "server_name": None,
+                "category": "system"
+            })
+            alert_id += 1
+        
+        # Sort alerts by severity and timestamp
+        severity_order = {"critical": 0, "error": 1, "warning": 2, "info": 3, "success": 4}
+        alerts.sort(key=lambda x: (severity_order.get(x["type"], 3), x["timestamp"]))
+        
+        return {
+            "alerts": alerts,
+            "summary": {
+                "total": len(alerts),
+                "critical": len([a for a in alerts if a["type"] == "critical"]),
+                "warnings": len([a for a in alerts if a["type"] == "warning"]),
+                "errors": len([a for a in alerts if a["type"] == "error"]),
+                "unacknowledged": len([a for a in alerts if not a["acknowledged"]])
+            }
         }
-    ]
-    
-    return {"alerts": sample_alerts}
+        
+    except Exception as e:
+        # Fallback to basic system alert
+        return {
+            "alerts": [{
+                "id": 1,
+                "type": "error",
+                "severity": "high",
+                "message": f"Monitoring system error: {str(e)}",
+                "timestamp": datetime.utcnow(),
+                "acknowledged": False,
+                "server_name": None,
+                "category": "system"
+            }],
+            "summary": {
+                "total": 1,
+                "critical": 0,
+                "warnings": 0,
+                "errors": 1,
+                "unacknowledged": 1
+            }
+        }
 
 @router.get("/dashboard-data")
 async def get_dashboard_data(

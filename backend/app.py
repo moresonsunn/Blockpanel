@@ -27,6 +27,7 @@ from health_routes import router as health_router
 from auth import require_auth, get_current_user, require_admin, require_moderator
 from scheduler import get_scheduler
 from models import User
+from server_templates import get_template_manager
 
 def get_forge_loader_versions(mc_version: str) -> list[str]:
     url = f"https://files.minecraftforge.net/net/minecraftforge/forge/index_{mc_version}.html"
@@ -318,6 +319,69 @@ def get_server_console(container_id: str, tail: int = 100):
         return get_docker_manager().get_server_terminal(container_id, tail=tail)
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Console unavailable: {e}")
+
+# Server Templates Endpoints
+@app.get("/templates")
+def list_templates(category: str = Query(None), popular: bool = Query(False)):
+    """
+    List all available server templates, optionally filtered by category or popularity
+    """
+    try:
+        manager = get_template_manager()
+        return {
+            "templates": manager.list_templates(category=category, popular_only=popular),
+            "categories": manager.get_categories()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/templates/{template_id}")
+def get_template(template_id: str):
+    """
+    Get a specific template by ID
+    """
+    try:
+        manager = get_template_manager()
+        template = manager.get_template(template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+        return template.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/servers/from-template")
+def create_server_from_template(
+    template_id: str = Body(..., embed=True),
+    name: str = Body(..., embed=True),
+    host_port: int = Body(None, embed=True),
+    current_user: User = Depends(require_moderator)
+):
+    """
+    Create a server from a template
+    """
+    try:
+        manager = get_template_manager()
+        template = manager.get_template(template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+        
+        # Create server using template configuration
+        return get_docker_manager().create_server(
+            name=name,
+            server_type=template.type,
+            version=template.version,
+            host_port=host_port,
+            loader_version=template.loader_version,
+            min_ram=template.min_ram,
+            max_ram=template.max_ram,
+            installer_version=template.installer_version
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Failed to create server: {e}")
 
 @app.get("/servers/{name}/files")
 def files_list(name: str, path: str = "."):

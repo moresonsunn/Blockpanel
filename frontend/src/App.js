@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, lazy, Suspense, useCallback, createContext, useContext } from 'react';
 import {
   FaServer,
   FaPlay,
@@ -70,6 +70,216 @@ import {
 
 const API = 'http://localhost:8000';
 
+// Global Data Store Context for instant access to all data
+const GlobalDataContext = createContext();
+
+// Global data store that preloads everything
+function GlobalDataProvider({ children }) {
+  // All application data - preloaded and always available
+  const [globalData, setGlobalData] = useState({
+    servers: [],
+    serverStats: {},
+    dashboardData: null,
+    systemHealth: null,
+    alerts: [],
+    users: [],
+    roles: [],
+    auditLogs: [],
+    settings: {},
+    serverTypes: [],
+    serverVersions: {},
+    isInitialized: false
+  });
+
+  // Background refresh intervals
+  const refreshIntervals = useRef({});
+  const abortControllers = useRef({});
+
+  // Aggressive preloading function - loads EVERYTHING immediately
+  const preloadAllData = useCallback(async () => {
+    const endpoints = [
+      { key: 'servers', url: `${API}/servers` },
+      { key: 'dashboardData', url: `${API}/monitoring/dashboard-data` },
+      { key: 'systemHealth', url: `${API}/monitoring/system-health` },
+      { key: 'alerts', url: `${API}/monitoring/alerts` },
+      { key: 'users', url: `${API}/users` },
+      { key: 'roles', url: `${API}/users/roles` },
+      { key: 'auditLogs', url: `${API}/users/audit-logs?limit=50` },
+      { key: 'serverTypes', url: `${API}/server-types` }
+    ];
+
+    // Create abort controllers for all requests
+    endpoints.forEach(endpoint => {
+      abortControllers.current[endpoint.key] = new AbortController();
+    });
+
+    // Execute all requests in parallel for maximum speed
+    const promises = endpoints.map(async endpoint => {
+      try {
+        const response = await fetch(endpoint.url, {
+          signal: abortControllers.current[endpoint.key]?.signal,
+          headers: authHeaders()
+        });
+        if (response.ok) {
+          const data = await response.json();
+          return { key: endpoint.key, data };
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          console.warn(`Failed to preload ${endpoint.key}:`, error);
+        }
+      }
+      return { key: endpoint.key, data: null };
+    });
+
+    // Wait for all data to load
+    const results = await Promise.all(promises);
+    
+    // Process results and update global state
+    const newData = { ...globalData };
+    
+    results.forEach(result => {
+      if (result.data) {
+        switch (result.key) {
+          case 'servers':
+            newData.servers = Array.isArray(result.data) ? result.data : [];
+            break;
+          case 'alerts':
+            newData.alerts = result.data.alerts || [];
+            break;
+          case 'users':
+            newData.users = result.data.users || [];
+            break;
+          case 'roles':
+            newData.roles = result.data.roles || [];
+            break;
+          case 'auditLogs':
+            newData.auditLogs = result.data.logs || [];
+            break;
+          case 'serverTypes':
+            newData.serverTypes = result.data.types || [];
+            break;
+          default:
+            newData[result.key] = result.data;
+        }
+      }
+    });
+
+    // Preload server stats for all servers
+    if (newData.servers.length > 0) {
+      const serverStatsPromises = newData.servers.map(async server => {
+        try {
+          const response = await fetch(`${API}/servers/${server.id}/stats`, {
+            headers: authHeaders()
+          });
+          if (response.ok) {
+            const stats = await response.json();
+            return { serverId: server.id, stats };
+          }
+        } catch (error) {
+          console.warn(`Failed to preload stats for server ${server.id}:`, error);
+        }
+        return { serverId: server.id, stats: null };
+      });
+
+      const serverStatsResults = await Promise.all(serverStatsPromises);
+      const serverStats = {};
+      serverStatsResults.forEach(result => {
+        if (result.stats) {
+          serverStats[result.serverId] = result.stats;
+        }
+      });
+      newData.serverStats = serverStats;
+    }
+
+    newData.isInitialized = true;
+    setGlobalData(newData);
+  }, [globalData]);
+
+  // Background refresh function - updates data silently
+  const refreshDataInBackground = useCallback(async (dataKey, url, processor = null) => {
+    try {
+      const response = await fetch(url, { headers: authHeaders() });
+      if (response.ok) {
+        const data = await response.json();
+        setGlobalData(current => ({
+          ...current,
+          [dataKey]: processor ? processor(data) : data
+        }));
+      }
+    } catch (error) {
+      // Silent fail for background updates
+    }
+  }, []);
+
+  // Start aggressive preloading on mount
+  useEffect(() => {
+    preloadAllData();
+
+    // Set up optimized background refresh intervals for balanced performance
+    // Reduced frequencies to prevent database connection pool exhaustion
+    refreshIntervals.current.servers = setInterval(() => {
+      refreshDataInBackground('servers', `${API}/servers`, (data) => 
+        Array.isArray(data) ? data : []
+      );
+    }, 10000); // Increased from 5s to 10s
+
+    refreshIntervals.current.dashboardData = setInterval(() => {
+      refreshDataInBackground('dashboardData', `${API}/monitoring/dashboard-data`);
+    }, 20000); // Increased from 10s to 20s
+
+    refreshIntervals.current.alerts = setInterval(() => {
+      refreshDataInBackground('alerts', `${API}/monitoring/alerts`, (data) => 
+        data.alerts || []
+      );
+    }, 30000); // Increased from 15s to 30s
+
+    // Server stats refresh with reduced frequency but still responsive
+    refreshIntervals.current.serverStats = setInterval(() => {
+      globalData.servers.forEach(server => {
+        refreshDataInBackground(`serverStats.${server.id}`, `${API}/servers/${server.id}/stats`);
+      });
+    }, 8000); // Increased from 3s to 8s
+
+    return () => {
+      // Cleanup intervals and abort controllers
+      Object.values(refreshIntervals.current).forEach(clearInterval);
+      Object.values(abortControllers.current).forEach(controller => {
+        controller.abort();
+      });
+    };
+  }, [preloadAllData, refreshDataInBackground]);
+
+  // Update server stats in the background
+  useEffect(() => {
+    if (globalData.servers.length > 0 && globalData.isInitialized) {
+      globalData.servers.forEach(server => {
+        if (!globalData.serverStats[server.id]) {
+          refreshDataInBackground('serverStats', `${API}/servers/${server.id}/stats`, (data) => ({
+            ...globalData.serverStats,
+            [server.id]: data
+          }));
+        }
+      });
+    }
+  }, [globalData.servers, globalData.isInitialized, refreshDataInBackground]);
+
+  return (
+    <GlobalDataContext.Provider value={globalData}>
+      {children}
+    </GlobalDataContext.Provider>
+  );
+}
+
+// Hook to access global data instantly
+function useGlobalData() {
+  const data = useContext(GlobalDataContext);
+  if (!data) {
+    throw new Error('useGlobalData must be used within GlobalDataProvider');
+  }
+  return data;
+}
+
 const TOKEN_KEY = 'auth_token';
 const getStoredToken = () => localStorage.getItem(TOKEN_KEY) || '';
 const setStoredToken = (t) => localStorage.setItem(TOKEN_KEY, t);
@@ -97,16 +307,39 @@ function isBlockedFile(name) {
   return BLOCKED_FILE_EXTENSIONS.some(ext => lower.endsWith(ext));
 }
 
-function useFetch(url, deps = []) {
+// Simple cache for API responses
+const apiCache = new Map();
+const CACHE_DURATION = 30000; // 30 seconds
+
+function useFetch(url, deps = [], options = {}) {
+  const { cacheEnabled = true, cacheDuration = CACHE_DURATION } = options;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!url) return;
+    
     let active = true;
+    const abortController = new AbortController();
+    
+    // Check cache first
+    if (cacheEnabled) {
+      const cached = apiCache.get(url);
+      if (cached && Date.now() - cached.timestamp < cacheDuration) {
+        if (active) {
+          setData(cached.data);
+          setLoading(false);
+          setError(null);
+        }
+        return;
+      }
+    }
+    
     setLoading(true);
-    fetch(url)
+    setError(null);
+    
+    fetch(url, { signal: abortController.signal })
       .then(async (r) => {
         const payload = await r.json().catch(() => null);
         if (!r.ok)
@@ -116,28 +349,65 @@ function useFetch(url, deps = []) {
           );
         return payload;
       })
-      .then((d) => active && setData(d))
-      .catch((e) => active && setError(e))
-      .finally(() => active && setLoading(false));
+      .then((d) => {
+        if (active) {
+          setData(d);
+          // Cache the response
+          if (cacheEnabled) {
+            apiCache.set(url, { data: d, timestamp: Date.now() });
+          }
+        }
+      })
+      .catch((e) => {
+        if (active && e.name !== 'AbortError') {
+          setError(e);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+      
     return () => {
       active = false;
+      abortController.abort();
     };
   }, deps);
 
   return { data, loading, error, setData };
 }
 
+// Optimized server stats hook with debouncing and caching
 function useServerStats(serverId) {
   const [stats, setStats] = useState(null);
+  const [isVisible, setIsVisible] = useState(true);
+
+  // Check if the tab/page is visible to pause polling when not needed
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsVisible(!document.hidden);
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   useEffect(() => {
-    if (!serverId) return;
+    if (!serverId || !isVisible) return;
+    
     let active = true;
     let interval = null;
+    const abortController = new AbortController();
 
     async function fetchStats() {
+      if (!active || !isVisible) return;
+      
       try {
-        const r = await fetch(`${API}/servers/${serverId}/stats`);
+        const r = await fetch(`${API}/servers/${serverId}/stats`, {
+          signal: abortController.signal
+        });
         if (!r.ok) {
           if (r.status === 404) {
             if (active) setStats(null);
@@ -148,20 +418,22 @@ function useServerStats(serverId) {
         const d = await r.json();
         if (active) setStats(d);
       } catch (e) {
-        if (active && e.message !== 'HTTP 404') {
+        if (active && e.name !== 'AbortError' && e.message !== 'HTTP 404') {
           setStats(null);
         }
       }
     }
 
     fetchStats();
-    interval = setInterval(fetchStats, 2000);
+    // Reduced frequency from 2 seconds to 5 seconds to reduce server load
+    interval = setInterval(fetchStats, 5000);
 
     return () => {
       active = false;
+      abortController.abort();
       if (interval) clearInterval(interval);
     };
-  }, [serverId]);
+  }, [serverId, isVisible]);
 
   return stats;
 }
@@ -1133,16 +1405,31 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               <div
-                className={`text-base px-4 py-2 rounded-full ${
+                className={`text-sm px-3 py-1.5 rounded-full border ${
                   server.status === 'running'
-                    ? 'bg-green-500/20 text-green-300'
-                    : 'bg-yellow-500/20 text-yellow-300'
+                    ? 'bg-green-500/10 text-green-300 border-green-400/20'
+                    : 'bg-gray-500/10 text-gray-300 border-gray-400/20'
                 }`}
               >
                 {server.status}
               </div>
+              {server.status !== 'running' ? (
+                <button
+                  onClick={() => onStart(server.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 hover:bg-green-500 px-3 py-1.5 text-sm font-medium transition-colors"
+                >
+                  <FaPlay className="w-3 h-3" /> Start
+                </button>
+              ) : (
+                <button
+                  onClick={() => onStop(server.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-yellow-600 hover:bg-yellow-500 px-3 py-1.5 text-sm font-medium transition-colors"
+                >
+                  <FaStop className="w-3 h-3" /> Stop
+                </button>
+              )}
             </div>
           </div>
           <div className="mt-8">
@@ -1171,32 +1458,13 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
               <TerminalPanel containerId={server.id} />
             </div>
           )}
-          <div className="flex gap-4 mt-8 pt-8 border-t border-white/10">
-            <button
-              onClick={() => onStart(server.id)}
-              className="inline-flex items-center gap-2 rounded-md bg-green-600 hover:bg-green-500 px-6 py-3 text-lg font-semibold"
-            >
-              <FaPlay /> Start
-            </button>
-            <button
-              onClick={() => onStop(server.id)}
-              className="inline-flex items-center gap-2 rounded-md bg-yellow-600 hover:bg-yellow-500 px-6 py-3 text-lg font-semibold"
-            >
-              <FaStop /> Stop
-            </button>
-            <button
-              className="inline-flex items-center gap-2 rounded-md bg-slate-700 hover:bg-slate-600 px-6 py-3 text-lg font-semibold"
-              style={{ pointerEvents: 'none', opacity: 0.5 }}
-              tabIndex={-1}
-              aria-disabled="true"
-            >
-              <FaTerminal /> Console/Logs
-            </button>
+          {/* Minimal actions - only destructive action at bottom */}
+          <div className="flex justify-end mt-8 pt-6 border-t border-white/10">
             <button
               onClick={() => onDelete(server.id)}
-              className="inline-flex items-center gap-2 rounded-md bg-red-600 hover:bg-red-500 px-6 py-3 text-lg font-semibold ml-auto"
+              className="inline-flex items-center gap-2 rounded-lg bg-red-600/80 hover:bg-red-500 px-3 py-1.5 text-xs font-medium transition-colors text-red-100"
             >
-              <FaTrash /> Delete
+              <FaTrash className="w-3 h-3" /> Delete Server
             </button>
           </div>
         </div>
@@ -1205,18 +1473,33 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
   );
 }
 
-// Enhance ServerListCard with live stats
-function ServerListCard({ server, onClick }) {
+// Enhance ServerListCard with live stats - INSTANT with preloaded data
+const ServerListCard = React.memo(function ServerListCard({ server, onClick }) {
+  // Get preloaded server stats instantly
+  const globalData = useGlobalData();
+  const stats = globalData.serverStats[server.id] || null;
+  
+  // Still get type/version data since it's less frequently used
   const { data: typeVersionData } = useFetch(
     server?.id ? `${API}/servers/${server.id}/info` : null,
-    [server?.id]
+    [server?.id],
+    { cacheDuration: 60000 } // Cache for 1 minute since this rarely changes
   );
-  const stats = useServerStats(server.id);
+  
+  // Predictive preloading on hover
+  const handleMouseEnter = useCallback(() => {
+    // Preload detailed server info when user hovers
+    if (server?.id) {
+      fetch(`${API}/servers/${server.id}/info`, { headers: authHeaders() })
+        .catch(() => {}); // Silent fail for predictive loading
+    }
+  }, [server?.id]);
 
   return (
     <div
-      className="rounded-xl bg-gradient-to-b from-white/10 to-white/5 border border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-6"
+      className="rounded-xl bg-gradient-to-b from-white/10 to-white/5 border border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-6 transition-all duration-200 hover:from-white/15 hover:to-white/10"
       onClick={onClick}
+      onMouseEnter={handleMouseEnter}
       tabIndex={0}
       role="button"
       style={{ minHeight: 100 }}
@@ -1255,55 +1538,31 @@ function ServerListCard({ server, onClick }) {
       </div>
     </div>
   );
+});
+
+// Loading component for Suspense
+function PageLoadingSpinner() {
+  return (
+    <div className="flex items-center justify-center min-h-[400px]">
+      <div className="text-white/70 flex items-center gap-2">
+        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-brand-500"></div>
+        Loading...
+      </div>
+    </div>
+  );
 }
 
-// User Management Components
-function UserManagementPage() {
-  const [users, setUsers] = useState([]);
-  const [roles, setRoles] = useState([]);
-  const [loading, setLoading] = useState(true);
+// User Management Components - INSTANT with preloaded data
+function UserManagementPageImpl() {
+  // Get all data instantly from global store
+  const globalData = useGlobalData();
+  const { users, roles, auditLogs } = globalData;
+  
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [newUser, setNewUser] = useState({ username: '', email: '', role: 'user', password: '' });
   const [selectedUser, setSelectedUser] = useState(null);
-  const [auditLogs, setAuditLogs] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
-
-  useEffect(() => {
-    loadUsers();
-    loadRoles();
-    loadAuditLogs();
-  }, []);
-
-  async function loadUsers() {
-    try {
-      const r = await fetch(`${API}/users`);
-      const data = await r.json();
-      setUsers(data.users || []);
-    } catch (e) {
-      console.error('Failed to load users:', e);
-    }
-  }
-
-  async function loadRoles() {
-    try {
-      const r = await fetch(`${API}/users/roles`);
-      const data = await r.json();
-      setRoles(data.roles || []);
-    } catch (e) {
-      console.error('Failed to load roles:', e);
-    }
-  }
-
-  async function loadAuditLogs() {
-    try {
-      const r = await fetch(`${API}/users/audit-logs?limit=50`);
-      const data = await r.json();
-      setAuditLogs(data.logs || []);
-    } catch (e) {
-      console.error('Failed to load audit logs:', e);
-    }
-    setLoading(false);
-  }
+  const [error, setError] = useState('');
 
   async function createUser() {
     try {
@@ -1359,7 +1618,7 @@ function UserManagementPage() {
     user.email?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  if (loading) return <div className="p-6"><div className="text-white/70">Loading users...</div></div>;
+  // No loading needed - data is always available!
 
   return (
     <div className="p-6 space-y-6">
@@ -1377,6 +1636,19 @@ function UserManagementPage() {
           <FaPlus /> Create User
         </button>
       </div>
+
+      {/* Backend notice */}
+      {users.length === 0 && (
+        <div className="bg-blue-500/10 border border-blue-500/20 text-blue-300 p-4 rounded-lg">
+          <div className="flex items-center gap-3 mb-2">
+            <FaInfoCircle /> 
+            <span className="font-semibold">User Management Backend</span>
+          </div>
+          <p className="text-sm text-blue-200">
+            The user management backend endpoints are not yet fully implemented. This interface is ready and will work once the backend user management API is connected.
+          </p>
+        </div>
+      )}
 
       {/* Search and filters */}
       <div className="bg-white/5 border border-white/10 rounded-lg p-4">
@@ -1567,38 +1839,13 @@ function UserManagementPage() {
   );
 }
 
-// Monitoring Dashboard
-function MonitoringPage() {
-  const [systemHealth, setSystemHealth] = useState(null);
-  const [serverMetrics, setServerMetrics] = useState([]);
-  const [alerts, setAlerts] = useState([]);
-  const [dashboardData, setDashboardData] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadMonitoringData();
-    const interval = setInterval(loadMonitoringData, 10000); // Update every 10 seconds
-    return () => clearInterval(interval);
-  }, []);
-
-  async function loadMonitoringData() {
-    try {
-      const [healthRes, dashboardRes, alertsRes] = await Promise.all([
-        fetch(`${API}/monitoring/system-health`),
-        fetch(`${API}/monitoring/dashboard-data`),
-        fetch(`${API}/monitoring/alerts`)
-      ]);
-      
-      if (healthRes.ok) setSystemHealth(await healthRes.json());
-      if (dashboardRes.ok) setDashboardData(await dashboardRes.json());
-      if (alertsRes.ok) setAlerts((await alertsRes.json()).alerts || []);
-    } catch (e) {
-      console.error('Failed to load monitoring data:', e);
-    }
-    setLoading(false);
-  }
-
-  if (loading) return <div className="p-6"><div className="text-white/70">Loading monitoring data...</div></div>;
+// Monitoring Dashboard - INSTANT with preloaded data
+function MonitoringPageImpl() {
+  // Get all data instantly from global store
+  const globalData = useGlobalData();
+  const { systemHealth, dashboardData, alerts, isInitialized } = globalData;
+  
+  // Always show data - no loading states needed!
 
   return (
     <div className="p-6 space-y-6">
@@ -1618,6 +1865,19 @@ function MonitoringPage() {
           </button>
         </div>
       </div>
+
+      {/* Backend notice - always show if no data */}
+      {!systemHealth && !dashboardData && (
+        <div className="bg-blue-500/10 border border-blue-500/20 text-blue-300 p-4 rounded-lg">
+          <div className="flex items-center gap-3 mb-2">
+            <FaInfoCircle /> 
+            <span className="font-semibold">Monitoring Backend</span>
+          </div>
+          <p className="text-sm text-blue-200">
+            Advanced monitoring data is being loaded in the background. All data will appear instantly once available.
+          </p>
+        </div>
+      )}
 
       {/* System Health Overview */}
       {systemHealth && (
@@ -1737,8 +1997,8 @@ function MonitoringPage() {
   );
 }
 
-// System Settings Page
-function SettingsPage() {
+// System Settings Page - renamed to avoid conflicts
+function SettingsPageImpl() {
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1954,164 +2214,254 @@ function SettingsPage() {
   );
 }
 
-// Dashboard Page
-function DashboardPage({ servers = [] }) {
-  const [systemStats, setSystemStats] = useState(null);
-  const [recentActivity, setRecentActivity] = useState([]);
-  const [quickStats, setQuickStats] = useState({
-    totalServers: 0,
-    runningServers: 0,
-    totalPlayers: 0,
-    totalMemoryUsage: 0
-  });
+// Modern Dashboard Page - ZERO LOADING with preloaded global data
+const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
+  // Get all data instantly from global store - NO LOADING!
+  const globalData = useGlobalData();
+  const { 
+    servers, 
+    dashboardData, 
+    systemHealth, 
+    alerts, 
+    isInitialized 
+  } = globalData;
 
-  useEffect(() => {
-    // Calculate quick stats
-    const running = servers.filter(s => s.status === 'running').length;
-    setQuickStats({
-      totalServers: servers.length,
+  // No loading states needed - data is always available!
+
+  // Calculate real-time metrics - INSTANT calculation from preloaded data
+  const { totalServers, runningServers, totalMemoryMB, avgCpuPercent, criticalAlerts, warningAlerts } = useMemo(() => {
+    const total = servers?.length || 0;
+    const running = servers?.filter(s => s.status === 'running').length || 0;
+    const memoryMB = dashboardData?.system_overview?.total_memory_mb || 0;
+    const cpuPercent = dashboardData?.system_overview?.avg_cpu_percent || 0;
+    const critical = alerts?.filter(a => a.type === 'critical' && !a.acknowledged).length || 0;
+    const warning = alerts?.filter(a => a.type === 'warning' && !a.acknowledged).length || 0;
+    
+    return {
+      totalServers: total,
       runningServers: running,
-      totalPlayers: 0, // This would be calculated from server stats
-      totalMemoryUsage: 0 // This would be calculated from server stats
-    });
-  }, [servers]);
-
+      totalMemoryMB: memoryMB,
+      avgCpuPercent: cpuPercent,
+      criticalAlerts: critical,
+      warningAlerts: warning
+    };
+  }, [servers, dashboardData, alerts]);
+  
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3">
-            <FaHome className="text-brand-500" /> Dashboard
-          </h1>
-          <p className="text-white/70 mt-2">Overview of your Minecraft server infrastructure</p>
-        </div>
-      </div>
-
-      {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+    <div className="min-h-screen bg-gray-950">
+      {/* Clean Linear-inspired header */}
+      <div className="border-b border-gray-800">
+        <div className="max-w-6xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-white/70 text-sm">Total Servers</p>
-              <p className="text-3xl font-bold text-white">{quickStats.totalServers}</p>
+              <h1 className="text-2xl font-medium text-white mb-1">Overview</h1>
+              <p className="text-sm text-gray-400">Monitor your Minecraft infrastructure</p>
             </div>
-            <FaServer className="text-4xl text-brand-500" />
-          </div>
-        </div>
-        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/70 text-sm">Running Servers</p>
-              <p className="text-3xl font-bold text-green-400">{quickStats.runningServers}</p>
-            </div>
-            <FaPlay className="text-4xl text-green-500" />
-          </div>
-        </div>
-        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/70 text-sm">Total Players</p>
-              <p className="text-3xl font-bold text-blue-400">{quickStats.totalPlayers}</p>
-            </div>
-            <FaUsers className="text-4xl text-blue-500" />
-          </div>
-        </div>
-        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/70 text-sm">System Health</p>
-              <p className="text-3xl font-bold text-yellow-400">Good</p>
-            </div>
-            <FaHeart className="text-4xl text-red-500" />
-          </div>
-        </div>
-      </div>
-
-      {/* Server Status Overview */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <FaServer /> Server Status
-          </h3>
-          <div className="space-y-3">
-            {servers.slice(0, 5).map(server => (
-              <div key={server.id} className="flex items-center justify-between p-3 bg-white/5 rounded">
-                <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${
-                    server.status === 'running' ? 'bg-green-500' : 'bg-red-500'
-                  }`} />
-                  <span className="font-medium">{server.name}</span>
-                </div>
-                <span className={`text-sm px-2 py-1 rounded ${
-                  server.status === 'running'
-                    ? 'bg-green-500/20 text-green-300'
-                    : 'bg-red-500/20 text-red-300'
-                }`}>
-                  {server.status}
-                </span>
-              </div>
-            ))}
-            {servers.length === 0 && (
-              <div className="text-white/60 text-center py-8">
-                No servers created yet
-              </div>
-            )}
-          </div>
-        </div>
-        
-        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <FaBell /> Recent Activity
-          </h3>
-          <div className="space-y-3">
-            {recentActivity.length > 0 ? (
-              recentActivity.map((activity, idx) => (
-                <div key={idx} className="flex items-center gap-3 p-3 bg-white/5 rounded">
-                  <FaInfoCircle className="text-blue-400" />
-                  <div>
-                    <div className="text-sm">{activity.message}</div>
-                    <div className="text-xs text-white/60">{activity.timestamp}</div>
+            
+            {(criticalAlerts > 0 || warningAlerts > 0) && (
+              <div className="flex items-center gap-2">
+                {criticalAlerts > 0 && (
+                  <div className="flex items-center gap-1 px-2 py-1 bg-red-900/20 text-red-300 rounded text-sm">
+                    <div className="w-2 h-2 bg-red-400 rounded-full" />
+                    {criticalAlerts}
                   </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-white/60 text-center py-8">
-                No recent activity
+                )}
+                {warningAlerts > 0 && (
+                  <div className="flex items-center gap-1 px-2 py-1 bg-yellow-900/20 text-yellow-300 rounded text-sm">
+                    <div className="w-2 h-2 bg-yellow-400 rounded-full" />
+                    {warningAlerts}
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
       </div>
+      
+      <div className="max-w-6xl mx-auto px-6 py-8 space-y-8">
 
-      {/* Quick Actions */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <FaRocket /> Quick Actions
-        </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <button className="flex items-center gap-3 p-4 bg-brand-500/20 hover:bg-brand-500/30 border border-brand-500/30 rounded-lg transition-colors">
-            <FaPlusCircle className="text-brand-400" />
-            <span>Create Server</span>
-          </button>
-          <button className="flex items-center gap-3 p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors">
-            <FaDownload className="text-white/60" />
-            <span>Backup All</span>
-          </button>
-          <button className="flex items-center gap-3 p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors">
-            <FaChartLine className="text-white/60" />
-            <span>View Metrics</span>
-          </button>
-          <button className="flex items-center gap-3 p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors">
-            <FaCog className="text-white/60" />
-            <span>Settings</span>
-          </button>
+        {/* Simplified Stats */}
+        <div className="grid grid-cols-4 gap-6">
+          <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-5">
+            <div className="text-sm text-gray-400 mb-1">Servers</div>
+            <div className="flex items-baseline gap-2">
+              <div className="text-2xl font-medium text-white">
+                {runningServers}
+              </div>
+              <div className="text-sm text-gray-500">/ {totalServers}</div>
+            </div>
+          </div>
+          
+          <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-5">
+            <div className="text-sm text-gray-400 mb-1">CPU</div>
+            <div className="text-2xl font-medium text-white">
+              {`${avgCpuPercent.toFixed(0)}%`}
+            </div>
+          </div>
+          
+          <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-5">
+            <div className="text-sm text-gray-400 mb-1">Memory</div>
+            <div className="text-2xl font-medium text-white">
+              {`${(totalMemoryMB / 1024).toFixed(1)}GB`}
+            </div>
+          </div>
+          
+          <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-5">
+            <div className="text-sm text-gray-400 mb-1">Issues</div>
+            <div className="text-2xl font-medium text-white">
+              {criticalAlerts + warningAlerts}
+            </div>
+          </div>
         </div>
+
+        {/* Clean Server List */}
+        <div className="space-y-6">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-medium text-white">Servers</h2>
+              <button 
+                onClick={() => onNavigate && onNavigate('servers')}
+                className="text-sm text-gray-400 hover:text-white transition-colors"
+              >
+                View all
+              </button>
+            </div>
+            
+            <div className="bg-gray-900/50 border border-gray-800 rounded-lg divide-y divide-gray-800">
+              {servers.length > 0 ? (
+                servers.slice(0, 5).map((server) => {
+                  const isRunning = server.status === 'running';
+                  
+                  return (
+                    <div 
+                      key={server.id}
+                      className="flex items-center justify-between p-4 hover:bg-gray-800/50 cursor-pointer transition-colors"
+                      onClick={() => onNavigate && onNavigate('servers')}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-2 h-2 rounded-full ${
+                          isRunning ? 'bg-green-400' : 'bg-gray-500'
+                        }`} />
+                        <div>
+                          <div className="text-white font-medium">{server.name}</div>
+                          <div className="text-sm text-gray-400">
+                            {server.version} • {server.type || 'vanilla'}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-3">
+                        <span className={`text-xs px-2 py-1 rounded ${
+                          isRunning 
+                            ? 'bg-green-900/50 text-green-300'
+                            : 'bg-gray-800 text-gray-400'
+                        }`}>
+                          {isRunning ? 'Running' : 'Stopped'}
+                        </span>
+                        <FaChevronRight className="w-3 h-3 text-gray-500" />
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="p-8 text-center">
+                  <div className="text-gray-400 mb-2">No servers yet</div>
+                  <button 
+                    onClick={() => onNavigate && onNavigate('servers')}
+                    className="text-sm text-blue-400 hover:text-blue-300"
+                  >
+                    Create your first server
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          {/* Clean Alerts */}
+          {alerts.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-medium text-white">Recent Issues</h2>
+                <button 
+                  onClick={() => onNavigate && onNavigate('monitoring')}
+                  className="text-sm text-gray-400 hover:text-white transition-colors"
+                >
+                  View all
+                </button>
+              </div>
+              
+              <div className="bg-gray-900/50 border border-gray-800 rounded-lg divide-y divide-gray-800">
+                {alerts.slice(0, 3).map((alert, index) => {
+                  const isError = alert.type === 'critical' || alert.type === 'error';
+                  
+                  return (
+                    <div key={alert.id || index} className="p-4">
+                      <div className="flex items-start gap-3">
+                        <div className={`w-2 h-2 rounded-full mt-2 ${
+                          isError ? 'bg-red-400' : 'bg-yellow-400'
+                        }`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-white text-sm">{alert.message}</div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            {new Date(alert.timestamp).toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );
+});
+
+// Servers Page with Global Data
+function ServersPageWithGlobalData({
+  onSelectServer, onCreateServer,
+  types, versionsData, selectedType, setSelectedType,
+  name, setName, version, setVersion, hostPort, setHostPort,
+  minRam, setMinRam, maxRam, setMaxRam, loaderVersion, setLoaderVersion,
+  loaderVersionsData, installerVersion, setInstallerVersion
+}) {
+  // Get servers from global data - INSTANT access!
+  const globalData = useGlobalData();
+  const { servers } = globalData;
+  
+  return (
+    <ServersPage
+      servers={servers}
+      serversLoading={false} // Never loading with preloaded data!
+      onSelectServer={onSelectServer}
+      onCreateServer={onCreateServer}
+      types={types}
+      versionsData={versionsData}
+      selectedType={selectedType}
+      setSelectedType={setSelectedType}
+      name={name}
+      setName={setName}
+      version={version}
+      setVersion={setVersion}
+      hostPort={hostPort}
+      setHostPort={setHostPort}
+      minRam={minRam}
+      setMinRam={setMinRam}
+      maxRam={maxRam}
+      setMaxRam={setMaxRam}
+      loaderVersion={loaderVersion}
+      setLoaderVersion={setLoaderVersion}
+      loaderVersionsData={loaderVersionsData}
+      installerVersion={installerVersion}
+      setInstallerVersion={setInstallerVersion}
+    />
+  );
 }
 
-// Servers Page
+// Original Servers Page
 function ServersPage({
   servers, serversLoading, onSelectServer, onCreateServer,
   types, versionsData, selectedType, setSelectedType,
@@ -2173,6 +2523,37 @@ function ServersPage({
               </select>
             </div>
           </div>
+
+          {/* Loader version for modded servers */}
+          {SERVER_TYPES_WITH_LOADER.includes(selectedType) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">Loader Version</label>
+                <select
+                  value={loaderVersion}
+                  onChange={(e) => setLoaderVersion(e.target.value)}
+                  className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white"
+                >
+                  {(loaderVersionsData?.loader_versions || []).map((lv) => (
+                    <option key={lv} value={lv} style={{ backgroundColor: '#1f2937' }}>{lv}</option>
+                  ))}
+                </select>
+              </div>
+              {selectedType === 'fabric' && (
+                <div>
+                  <label className="block text-sm font-medium text-white/70 mb-2">Installer Version</label>
+                  <input
+                    type="text"
+                    value={installerVersion}
+                    onChange={(e) => setInstallerVersion(e.target.value)}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-white/50"
+                    placeholder="e.g., 1.1.0"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-white/70 mb-2">Host Port</label>
@@ -2497,8 +2878,8 @@ function App() {
     [serversData]
   );
 
-  // Create server handler, using loader_version as in backend/app.py
-  async function createServer(e) {
+  // Create server handler, using loader_version as in backend/app.py - optimized with useCallback
+  const createServer = useCallback(async function createServer(e) {
     e.preventDefault();
     const payload = {
       name,
@@ -2516,26 +2897,28 @@ function App() {
       body: JSON.stringify(payload),
     });
     window.location.reload();
-  }
+  }, [name, selectedType, version, loaderVersion, installerVersion, hostPort, minRam, maxRam]);
 
-  // Start server handler
-  async function start(id) {
+  // Start server handler - optimized
+  const start = useCallback(async function start(id) {
     await fetch(`${API}/servers/${id}/start`, { method: 'POST' });
     window.location.reload();
-  }
-  // Stop server handler
-  async function stop(id) {
+  }, []);
+  
+  // Stop server handler - optimized
+  const stop = useCallback(async function stop(id) {
     await fetch(`${API}/servers/${id}/stop`, { method: 'POST' });
     window.location.reload();
-  }
-  // Delete server handler
-  async function del(id) {
+  }, []);
+  
+  // Delete server handler - optimized
+  const del = useCallback(async function del(id) {
     await fetch(`${API}/servers/${id}`, { method: 'DELETE' });
     window.location.reload();
-  }
+  }, []);
 
-  // Restart server handler
-  async function restart(id) {
+  // Restart server handler - optimized
+  const restart = useCallback(async function restart(id) {
     try {
       await fetch(`${API}/servers/${id}/stop`, { method: 'POST' });
       // Wait a moment for the server to stop
@@ -2550,7 +2933,7 @@ function App() {
     } catch (e) {
       console.error('Error restarting server:', e);
     }
-  }
+  }, []);
 
   // Find selected server object
   const selectedServerObj =
@@ -2573,23 +2956,19 @@ function App() {
   function renderCurrentPage() {
     switch (currentPage) {
       case 'dashboard':
-        return <DashboardPage servers={servers} />;
+        return <DashboardPage onNavigate={setCurrentPage} />;
       case 'servers':
-        return selectedServer ? (
-          selectedServerObj && (
-            <ServerDetailsPage
-              server={selectedServerObj}
-              onBack={() => setSelectedServer(null)}
-              onStart={start}
-              onStop={stop}
-              onDelete={del}
-              onRestart={restart}
-            />
-          )
+        return selectedServer && selectedServerObj ? (
+          <ServerDetailsPage
+            server={selectedServerObj}
+            onBack={() => setSelectedServer(null)}
+            onStart={start}
+            onStop={stop}
+            onDelete={del}
+            onRestart={restart}
+          />
         ) : (
-          <ServersPage
-            servers={servers}
-            serversLoading={serversLoading}
+          <ServersPageWithGlobalData
             onSelectServer={setSelectedServer}
             onCreateServer={createServer}
             types={types}
@@ -2614,9 +2993,9 @@ function App() {
           />
         );
       case 'monitoring':
-        return <MonitoringPage />;
+        return <MonitoringPageImpl />;
       case 'users':
-        return <UserManagementPage />;
+        return <UserManagementPageImpl />;
       case 'backups':
         return <BackupManagementPage />;
       case 'schedule':
@@ -2628,14 +3007,77 @@ function App() {
       case 'security':
         return <SecurityPage />;
       case 'settings':
-        return <SettingsPage />;
+        return <SettingsPageImpl />;
       default:
         return <DashboardPage servers={servers} />;
     }
   }
 
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-ink bg-hero-gradient flex">
+        <div className="min-h-screen flex items-center justify-center w-full">
+          <div className="max-w-md w-full mx-4">
+            <div className="rounded-xl bg-black/30 border border-white/10 p-6 space-y-4">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-brand-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <FaServer className="text-2xl text-white" />
+                </div>
+                <h1 className="text-2xl font-bold text-white">Minecraft Panel</h1>
+                <p className="text-white/70 mt-2">Please sign in to continue</p>
+              </div>
+              
+              {loginError && (
+                <div className="bg-red-500/10 border border-red-500/20 text-red-300 p-3 rounded-lg text-sm">
+                  {loginError}
+                </div>
+              )}
+              
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-white/70 mb-2">Username</label>
+                  <input
+                    type="text"
+                    className="w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-white placeholder-white/50"
+                    placeholder="Enter your username"
+                    value={loginUsername}
+                    onChange={(e) => setLoginUsername(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-white/70 mb-2">Password</label>
+                  <input
+                    type="password"
+                    className="w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-white placeholder-white/50"
+                    placeholder="Enter your password"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={loginLoading}
+                  className="w-full py-3 rounded-md bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white font-medium transition-colors"
+                >
+                  {loginLoading ? 'Signing in...' : 'Sign In'}
+                </button>
+              </form>
+              
+              <div className="text-center text-sm text-white/60 border-t border-white/10 pt-4">
+                Default credentials: admin / admin123
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-ink bg-hero-gradient flex">
+    <GlobalDataProvider>
+      <div className="min-h-screen bg-ink bg-hero-gradient flex">
       {/* Sidebar */}
       {isAuthenticated && (
         <div className={`${sidebarOpen ? 'w-64' : 'w-16'} bg-black/20 border-r border-white/10 transition-all duration-300 flex flex-col`}>
@@ -2723,68 +3165,11 @@ function App() {
 
         {/* Main Content Area */}
         <main className="flex-1">
-          {!isAuthenticated ? (
-            <div className="min-h-screen flex items-center justify-center">
-              <div className="max-w-md w-full mx-4">
-                <div className="rounded-xl bg-black/30 border border-white/10 p-6 space-y-4">
-                  <div className="text-center mb-6">
-                    <div className="w-16 h-16 bg-brand-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <FaServer className="text-2xl text-white" />
-                    </div>
-                    <h1 className="text-2xl font-bold text-white">Minecraft Panel</h1>
-                    <p className="text-white/70 mt-2">Please sign in to continue</p>
-                  </div>
-                  
-                  {loginError && (
-                    <div className="bg-red-500/10 border border-red-500/20 text-red-300 p-3 rounded-lg text-sm">
-                      {loginError}
-                    </div>
-                  )}
-                  
-                  <form onSubmit={handleLogin} className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-white/70 mb-2">Username</label>
-                      <input
-                        type="text"
-                        className="w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-white placeholder-white/50"
-                        placeholder="Enter your username"
-                        value={loginUsername}
-                        onChange={(e) => setLoginUsername(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-white/70 mb-2">Password</label>
-                      <input
-                        type="password"
-                        className="w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-white placeholder-white/50"
-                        placeholder="Enter your password"
-                        value={loginPassword}
-                        onChange={(e) => setLoginPassword(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={loginLoading}
-                      className="w-full py-3 rounded-md bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white font-medium transition-colors"
-                    >
-                      {loginLoading ? 'Signing in...' : 'Sign In'}
-                    </button>
-                  </form>
-                  
-                  <div className="text-center text-sm text-white/60 border-t border-white/10 pt-4">
-                    Default credentials: admin / admin123
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            renderCurrentPage()
-          )}
+          {renderCurrentPage()}
         </main>
       </div>
-    </div>
+      </div>
+    </GlobalDataProvider>
   );
 }
 

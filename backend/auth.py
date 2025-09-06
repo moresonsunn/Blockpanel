@@ -3,12 +3,15 @@ from typing import Optional, List
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from database import get_db
+from database import get_db, DatabaseSession
 from models import User
 import os
 import logging
+import time
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +54,71 @@ def verify_token(token: str) -> Optional[dict]:
     except JWTError:
         return None
 
+# Cache for user lookups to reduce database hits
+_user_cache = {}
+_cache_ttl = 60  # Cache TTL in seconds
+
+def _get_cache_key(prefix: str, value: str) -> str:
+    return f"{prefix}:{value}"
+
+def _is_cache_valid(cache_entry: dict) -> bool:
+    return time.time() - cache_entry['timestamp'] < _cache_ttl
+
 def get_user_by_username(db: Session, username: str) -> Optional[User]:
-    """Get user by username."""
-    return db.query(User).filter(User.username == username).first()
+    """Get user by username with caching to reduce database load."""
+    cache_key = _get_cache_key("username", username)
+    
+    # Check cache first
+    if cache_key in _user_cache and _is_cache_valid(_user_cache[cache_key]):
+        return _user_cache[cache_key]['user']
+    
+    try:
+        # Use optimized query with explicit session management
+        user = db.query(User).filter(User.username == username).first()
+        
+        # Cache the result (including None results)
+        _user_cache[cache_key] = {
+            'user': user,
+            'timestamp': time.time()
+        }
+        
+        return user
+    except Exception as e:
+        logger.error(f"Error querying user by username {username}: {e}")
+        # Clear cache entry on error
+        _user_cache.pop(cache_key, None)
+        raise
 
 def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
-    """Get user by ID."""
-    return db.query(User).filter(User.id == user_id).first()
+    """Get user by ID with caching to reduce database load."""
+    cache_key = _get_cache_key("user_id", str(user_id))
+    
+    # Check cache first
+    if cache_key in _user_cache and _is_cache_valid(_user_cache[cache_key]):
+        return _user_cache[cache_key]['user']
+    
+    try:
+        # Use optimized query with explicit session management
+        user = db.query(User).filter(User.id == user_id).first()
+        
+        # Cache the result
+        _user_cache[cache_key] = {
+            'user': user,
+            'timestamp': time.time()
+        }
+        
+        return user
+    except Exception as e:
+        logger.error(f"Error querying user by ID {user_id}: {e}")
+        # Clear cache entry on error
+        _user_cache.pop(cache_key, None)
+        raise
+
+def clear_user_cache():
+    """Clear the user cache (call when user data changes)."""
+    global _user_cache
+    _user_cache.clear()
+    logger.info("User cache cleared")
 
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
     """Authenticate a user with username and password."""
