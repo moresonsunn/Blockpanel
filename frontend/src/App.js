@@ -66,6 +66,10 @@ import {
   FaStepForward,
   FaFastBackward,
   FaFastForward,
+  FaTable,
+  FaTimes,
+  FaUserSlash,
+  FaUserCheck,
 } from 'react-icons/fa';
 
 const API = 'http://localhost:8000';
@@ -104,7 +108,7 @@ function GlobalDataProvider({ children }) {
       { key: 'alerts', url: `${API}/monitoring/alerts` },
       { key: 'users', url: `${API}/users` },
       { key: 'roles', url: `${API}/users/roles` },
-      { key: 'auditLogs', url: `${API}/users/audit-logs?limit=50` },
+      { key: 'auditLogs', url: `${API}/users/audit-logs?page=1&page_size=50` },
       { key: 'serverTypes', url: `${API}/server-types` }
     ];
 
@@ -169,7 +173,7 @@ function GlobalDataProvider({ children }) {
     if (newData.servers.length > 0) {
       const serverStatsPromises = newData.servers.map(async server => {
         try {
-          const response = await fetch(`${API}/servers/${server.id}/stats`, {
+          const response = await fetch(`${API}/servers/${server.id}/resources`, {
             headers: authHeaders()
           });
           if (response.ok) {
@@ -237,7 +241,7 @@ function GlobalDataProvider({ children }) {
     // Server stats refresh with reduced frequency but still responsive
     refreshIntervals.current.serverStats = setInterval(() => {
       globalData.servers.forEach(server => {
-        refreshDataInBackground(`serverStats.${server.id}`, `${API}/servers/${server.id}/stats`);
+        refreshDataInBackground(`serverStats.${server.id}`, `${API}/servers/${server.id}/resources`);
       });
     }, 8000); // Increased from 3s to 8s
 
@@ -255,7 +259,7 @@ function GlobalDataProvider({ children }) {
     if (globalData.servers.length > 0 && globalData.isInitialized) {
       globalData.servers.forEach(server => {
         if (!globalData.serverStats[server.id]) {
-          refreshDataInBackground('serverStats', `${API}/servers/${server.id}/stats`, (data) => ({
+          refreshDataInBackground('serverStats', `${API}/servers/${server.id}/resources`, (data) => ({
             ...globalData.serverStats,
             [server.id]: data
           }));
@@ -450,7 +454,8 @@ function Stat({ label, value, icon }) {
   );
 }
 
-function TerminalPanel({ containerId }) {
+// TerminalPanel moved to components with mute filters
+import TerminalPanel from './components/TerminalPanel';
   const [cmd, setCmd] = useState('');
   const [logs, setLogs] = useState('');
   const scrollRef = useRef(null);
@@ -510,34 +515,6 @@ function TerminalPanel({ containerId }) {
     setCmd('');
   }
 
-  return (
-    <div className="p-6 bg-black/20 rounded-lg space-y-4" style={{ minHeight: 600 }}>
-      <div className="text-base text-white/70 mb-2">Server Console & Logs (live)</div>
-      <div
-        ref={scrollRef}
-        className="text-sm text-white/70 whitespace-pre-wrap bg-black/30 p-4 rounded max-h-[800px] min-h-[500px] overflow-auto font-mono"
-        style={{ fontSize: '1.15rem', lineHeight: '1.5', height: 500 }}
-      >
-        {logs || <span className="text-white/40">No output yet.</span>}
-      </div>
-      <div className="flex gap-3 mt-2">
-        <input
-          value={cmd}
-          onChange={(e) => setCmd(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && send()}
-          className="flex-1 rounded-md bg-white/5 border border-white/10 px-4 py-3 text-base"
-          placeholder="Type a command (e.g. say hello or op Username)"
-        />
-        <button
-          onClick={send}
-          className="inline-flex items-center gap-2 rounded-md bg-brand-500 hover:bg-brand-400 px-4 py-3 font-semibold text-base"
-        >
-          <FaTerminal /> Send
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function FilesPanel({ serverName, onEditStateChange }) {
   // This component is now unused, see FilesPanelWrapper in ServerDetailsPage
@@ -650,6 +627,16 @@ function ConfigPanel({ server, onRestart }) {
   const [currentVersion, setCurrentVersion] = useState(null);
   const [updating, setUpdating] = useState(false);
 
+  // Quick properties editor
+  const [propsLoading, setPropsLoading] = useState(false);
+  const [propsError, setPropsError] = useState('');
+  const [propsData, setPropsData] = useState({
+    max_players: '',
+    motd: '',
+    difficulty: '',
+    online_mode: '',
+  });
+
   // Fetch available Java versions
   useEffect(() => {
     async function fetchJavaVersions() {
@@ -672,6 +659,77 @@ function ConfigPanel({ server, onRestart }) {
 
     fetchJavaVersions();
   }, [server.id]);
+
+  // Load and parse server.properties
+  useEffect(() => {
+    async function loadProps() {
+      setPropsLoading(true);
+      setPropsError('');
+      try {
+        const r = await fetch(`${API}/servers/${encodeURIComponent(server.name)}/file?path=${encodeURIComponent('server.properties')}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        const text = d.content || '';
+        const lines = text.split(/\r?\n/);
+        const map = {};
+        for (const line of lines) {
+          if (!line || line.trim().startsWith('#')) continue;
+          const idx = line.indexOf('=');
+          if (idx > -1) {
+            const k = line.substring(0, idx).trim();
+            const v = line.substring(idx + 1).trim();
+            map[k] = v;
+          }
+        }
+        setPropsData({
+          max_players: map['max-players'] || '',
+          motd: map['motd'] || '',
+          difficulty: map['difficulty'] || '',
+          online_mode: map['online-mode'] || '',
+        });
+      } catch (e) {
+        setPropsError(String(e));
+      } finally {
+        setPropsLoading(false);
+      }
+    }
+    loadProps();
+    // eslint-disable-next-line
+  }, [server.name]);
+
+  async function saveProps() {
+    try {
+      setPropsLoading(true);
+      setPropsError('');
+      // Fetch current file to preserve unknown keys/comments
+      const r = await fetch(`${API}/servers/${encodeURIComponent(server.name)}/file?path=${encodeURIComponent('server.properties')}`);
+      const d = await r.json();
+      let lines = (d.content || '').split(/\r?\n/);
+      const setOrAdd = (k, val) => {
+        let found = false;
+        lines = lines.map(line => {
+          if (line.startsWith(k + '=')) { found = true; return `${k}=${val}`; }
+          return line;
+        });
+        if (!found) lines.push(`${k}=${val}`);
+      };
+      setOrAdd('max-players', propsData.max_players || '20');
+      setOrAdd('motd', propsData.motd || 'A Minecraft Server');
+      setOrAdd('difficulty', propsData.difficulty || 'easy');
+      setOrAdd('online-mode', propsData.online_mode || 'true');
+      const newContent = lines.join('\n');
+      const body = new URLSearchParams({ content: newContent });
+      const wr = await fetch(`${API}/servers/${encodeURIComponent(server.name)}/file?path=${encodeURIComponent('server.properties')}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
+      });
+      if (!wr.ok) throw new Error(`HTTP ${wr.status}`);
+      alert('server.properties saved. Restart the server to apply changes.');
+    } catch (e) {
+      setPropsError(String(e));
+    } finally {
+      setPropsLoading(false);
+    }
+  }
 
   // Update Java version
   async function updateJavaVersion(version) {
@@ -770,11 +828,39 @@ function ConfigPanel({ server, onRestart }) {
         )}
       </div>
 
-      {/* Additional Configuration Options */}
-      <div className="border-t border-white/10 pt-4">
-        <div className="text-sm text-white/70 mb-2">Additional Settings</div>
-        <div className="text-xs text-white/50">
-          Use the Files tab to edit server.properties, spigot.yml, and other configuration files.
+      {/* Quick server.properties editor */}
+      <div className="border-t border-white/10 pt-4 mt-6">
+        <div className="text-sm text-white/70 mb-3">Quick Settings (server.properties)</div>
+        {propsError && <div className="text-xs text-red-400 mb-2">{propsError}</div>}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-white/60 mb-1">Max Players</label>
+            <input value={propsData.max_players} onChange={e=>setPropsData({...propsData, max_players: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="20" />
+          </div>
+          <div>
+            <label className="block text-xs text-white/60 mb-1">Online Mode</label>
+            <select value={propsData.online_mode} onChange={e=>setPropsData({...propsData, online_mode: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
+              <option value="true" style={{ backgroundColor: '#1f2937' }}>true</option>
+              <option value="false" style={{ backgroundColor: '#1f2937' }}>false</option>
+            </select>
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-xs text-white/60 mb-1">MOTD</label>
+            <input value={propsData.motd} onChange={e=>setPropsData({...propsData, motd: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="A Minecraft Server" />
+          </div>
+          <div>
+            <label className="block text-xs text-white/60 mb-1">Difficulty</label>
+            <select value={propsData.difficulty} onChange={e=>setPropsData({...propsData, difficulty: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
+              <option value="peaceful" style={{ backgroundColor: '#1f2937' }}>peaceful</option>
+              <option value="easy" style={{ backgroundColor: '#1f2937' }}>easy</option>
+              <option value="normal" style={{ backgroundColor: '#1f2937' }}>normal</option>
+              <option value="hard" style={{ backgroundColor: '#1f2937' }}>hard</option>
+            </select>
+          </div>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button onClick={saveProps} disabled={propsLoading} className="px-3 py-1.5 bg-brand-500 hover:bg-brand-400 rounded text-sm disabled:opacity-50">{propsLoading ? 'Saving…' : 'Save server.properties'}</button>
+          {onRestart && <button onClick={() => onRestart(server.id)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-sm">Restart Server</button>}
         </div>
       </div>
     </div>
@@ -1002,6 +1088,17 @@ function PlayersPanel({ serverName }) {
   const [playerName, setPlayerName] = useState('');
   const [reason, setReason] = useState('');
 
+  const globalData = useGlobalData();
+  const serverId = useMemo(() => {
+    const s = (globalData.servers || []).find(s => s.name === serverName);
+    return s ? s.id : null;
+  }, [globalData.servers, serverName]);
+  const onlinePlayers = useMemo(() => {
+    if (!serverId) return [];
+    const st = globalData.serverStats?.[serverId];
+    return Array.isArray(st?.players?.names) ? st.players.names : [];
+  }, [globalData.serverStats, serverId]);
+
   async function call(endpoint, method = 'POST', body = null) {
     await fetch(`${API}/players/${encodeURIComponent(serverName)}/${endpoint}`, {
       method,
@@ -1011,8 +1108,27 @@ function PlayersPanel({ serverName }) {
   }
 
   return (
-    <div className="p-4 bg-black/20 rounded-lg space-y-3">
+    <div className="p-4 bg-black/20 rounded-lg space-y-4">
       <div className="text-sm text-white/70">Player Management</div>
+
+      {onlinePlayers.length > 0 ? (
+        <div>
+          <div className="text-xs text-white/60 mb-2">Online Players ({onlinePlayers.length})</div>
+          <div className="flex flex-wrap gap-2">
+            {onlinePlayers.map(p => (
+              <div key={p} className="bg-white/10 border border-white/10 rounded px-2 py-1 text-xs flex items-center gap-2">
+                <span>{p}</span>
+                <button onClick={() => call('kick', 'POST', { player_name: p, reason: reason || 'Kicked by admin' })} className="text-yellow-300 hover:text-yellow-200">Kick</button>
+                <button onClick={() => call('ban', 'POST', { player_name: p, reason: reason || 'Banned by admin' })} className="text-red-300 hover:text-red-200">Ban</button>
+                <button onClick={() => call('op', 'POST', { player_name: p })} className="text-green-300 hover:text-green-200">OP</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="text-xs text-white/50">No players online.</div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <input className="rounded bg-gray-800 border border-white/20 px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Player name" value={playerName} onChange={e => setPlayerName(e.target.value)} />
         <input className="rounded bg-gray-800 border border-white/20 px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Reason (optional)" value={reason} onChange={e => setReason(e.target.value)} />
@@ -1552,6 +1668,54 @@ function PageLoadingSpinner() {
   );
 }
 
+// Error Boundary Component to catch JavaScript errors
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Error caught by ErrorBoundary:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-6 space-y-6">
+          <div className="bg-red-500/10 border border-red-500/20 text-red-300 p-6 rounded-lg">
+            <div className="flex items-center gap-3 mb-4">
+              <FaExclamationTriangle className="text-2xl" />
+              <h2 className="text-xl font-semibold">Something went wrong</h2>
+            </div>
+            <p className="text-sm text-red-200 mb-4">
+              An error occurred while loading this page. This is likely due to missing backend endpoints.
+            </p>
+            <div className="bg-red-500/5 border border-red-500/20 p-4 rounded-lg mb-4">
+              <p className="text-xs text-red-300 font-mono">{this.state.error?.message}</p>
+            </div>
+            <button
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                window.location.reload();
+              }}
+              className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-sm font-medium"
+            >
+              Reload Page
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 // Advanced User Management System - Inspired by Crafty Controller
 function AdvancedUserManagementPageImpl() {
   // Get all data instantly from global store with fallbacks
@@ -1977,7 +2141,7 @@ function MonitoringPageImpl() {
       </div>
 
       {/* System Health Overview - Always show with fallback values */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <div className="bg-white/5 border border-white/10 rounded-lg p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -2016,6 +2180,17 @@ function MonitoringPageImpl() {
               </p>
             </div>
             <FaMemory className="text-3xl text-purple-500" />
+          </div>
+        </div>
+        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white/70 text-sm">Online Players</p>
+              <p className="text-2xl font-bold text-blue-400">
+                {Object.values(globalData.serverStats || {}).reduce((sum, s) => sum + ((s && (s.players?.online ?? s.player_count)) || 0), 0)}
+              </p>
+            </div>
+            <FaUsers className="text-3xl text-blue-500" />
           </div>
         </div>
       </div>
@@ -2092,8 +2267,20 @@ function MonitoringPageImpl() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-white/70">Players:</span>
-                      <span>{serverStats?.player_count || 0}</span>
+                      <span>
+                        {(() => {
+                          const online = serverStats?.players?.online ?? serverStats?.player_count ?? 0;
+                          const max = serverStats?.players?.max;
+                          return max ? `${online}/${max}` : online;
+                        })()}
+                      </span>
                     </div>
+                    {Array.isArray(serverStats?.players?.names) && serverStats.players.names.length > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-white/70">Names:</span>
+                        <span className="text-right truncate max-w-[60%]">{serverStats.players.names.join(', ')}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -2788,18 +2975,84 @@ function PluginManagerPage() {
 }
 
 function TemplatesPage() {
+  const [serverName, setServerName] = useState('mp-' + Math.random().toString(36).slice(2,6));
+  const [url, setUrl] = useState('');
+  const [hostPort, setHostPort] = useState('');
+  const [minRam, setMinRam] = useState('2048M');
+  const [maxRam, setMaxRam] = useState('4096M');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  async function importPack(e) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg('');
+    try {
+      const body = {
+        server_name: serverName,
+        server_pack_url: url,
+        host_port: hostPort ? Number(hostPort) : null,
+        min_ram: minRam,
+        max_ram: maxRam
+      };
+      const r = await fetch(`${API}/modpacks/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+      setMsg('Server pack imported and container started. Go to Servers to see it.');
+    } catch (e) {
+      setMsg(`Error: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-3">
-          <FaLayerGroup className="text-brand-500" /> Server Templates
+          <FaLayerGroup className="text-brand-500" /> Templates & Modpacks
         </h1>
-        <p className="text-white/70 mt-2">Create and manage server templates</p>
+        <p className="text-white/70 mt-2">Create templates or import modpack server packs</p>
       </div>
+
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4">Import Server Pack (CurseForge or direct URL)</h3>
+        <form onSubmit={importPack} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Server Name</label>
+            <input value={serverName} onChange={e=>setServerName(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" required />
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Host Port (optional)</label>
+            <input value={hostPort} onChange={e=>setHostPort(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="e.g. 25565" />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm text-white/70 mb-1">Server Pack URL (.zip)</label>
+            <input value={url} onChange={e=>setUrl(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="https://...serverpack.zip" required />
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Min RAM</label>
+            <input value={minRam} onChange={e=>setMinRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Max RAM</label>
+            <input value={maxRam} onChange={e=>setMaxRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
+          </div>
+          <div className="md:col-span-2 flex items-center gap-3">
+            <button disabled={busy} className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded">{busy ? 'Importing...' : 'Import Server Pack'}</button>
+            {msg && <div className="text-sm text-white/70">{msg}</div>}
+          </div>
+        </form>
+      </div>
+
       <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
         <FaLayerGroup className="text-6xl text-white/20 mx-auto mb-4" />
         <h3 className="text-xl font-semibold mb-2">Server Templates</h3>
-        <p className="text-white/60">Template system coming soon!</p>
+        <p className="text-white/60">Use templates to quickly create configured servers. (UI for CRUD coming next.)</p>
       </div>
     </div>
   );
@@ -3015,13 +3268,13 @@ function App() {
 
   // Start server handler - optimized
   const start = useCallback(async function start(id) {
-    await fetch(`${API}/servers/${id}/start`, { method: 'POST' });
+    await fetch(`${API}/servers/${id}/power`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signal: 'start' }) });
     window.location.reload();
   }, []);
   
   // Stop server handler - optimized
   const stop = useCallback(async function stop(id) {
-    await fetch(`${API}/servers/${id}/stop`, { method: 'POST' });
+    await fetch(`${API}/servers/${id}/power`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signal: 'stop' }) });
     window.location.reload();
   }, []);
   
@@ -3034,10 +3287,7 @@ function App() {
   // Restart server handler - optimized
   const restart = useCallback(async function restart(id) {
     try {
-      await fetch(`${API}/servers/${id}/stop`, { method: 'POST' });
-      // Wait a moment for the server to stop
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      await fetch(`${API}/servers/${id}/start`, { method: 'POST' });
+      await fetch(`${API}/servers/${id}/power`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signal: 'restart' }) });
       // Refresh servers data
       const response = await fetch(`${API}/servers`);
       if (response.ok) {
@@ -3105,7 +3355,11 @@ function App() {
       case 'monitoring':
         return <MonitoringPageImpl />;
       case 'users':
-        return <AdvancedUserManagementPageImpl />;
+        return (
+          <ErrorBoundary>
+            <AdvancedUserManagementPageImpl />
+          </ErrorBoundary>
+        );
       case 'settings':
         return <SettingsPageImpl />;
       default:
@@ -3281,6 +3535,10 @@ function UsersTab({
   filterStatus, setFilterStatus, updateUserRole, toggleUserActive, 
   deleteUser, setSelectedUser 
 }) {
+  // Ensure users is always an array
+  const safeUsers = Array.isArray(users) ? users : [];
+  const safeRoles = Array.isArray(roles) ? roles : [];
+  
   return (
     <div className="space-y-4">
       {/* Search and Filters */}
@@ -3302,7 +3560,7 @@ function UsersTab({
             className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white"
           >
             <option value="all">All Roles</option>
-            {roles.map(role => (
+            {safeRoles.map(role => (
               <option key={role.name} value={role.name}>{role.name}</option>
             ))}
           </select>
@@ -3332,8 +3590,8 @@ function UsersTab({
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
-              {users.map((user) => {
-                const userRole = roles.find(r => r.name === user.role);
+              {safeUsers.map((user) => {
+                const userRole = safeRoles.find(r => r.name === user.role);
                 return (
                   <tr key={user.id} className="hover:bg-white/5">
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -3342,11 +3600,11 @@ function UsersTab({
                           className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold"
                           style={{ backgroundColor: userRole?.color || '#6b7280' }}
                         >
-                          {user.username?.charAt(0).toUpperCase()}
+                          {user.username?.charAt(0)?.toUpperCase() || '?'}
                         </div>
                         <div className="ml-3">
-                          <div className="text-sm font-medium text-white">{user.username}</div>
-                          <div className="text-sm text-white/60">{user.email}</div>
+                          <div className="text-sm font-medium text-white">{user.username || 'Unknown'}</div>
+                          <div className="text-sm text-white/60">{user.email || 'No email'}</div>
                           {user.fullName && <div className="text-xs text-white/50">{user.fullName}</div>}
                         </div>
                       </div>
@@ -3410,7 +3668,7 @@ function UsersTab({
           </table>
         </div>
         
-        {users.length === 0 && (
+        {safeUsers.length === 0 && (
           <div className="text-center py-12 text-white/60">
             <FaUsers className="text-4xl mx-auto mb-3 text-white/30" />
             <p className="text-lg">No users found</p>
@@ -3424,11 +3682,14 @@ function UsersTab({
 
 // Roles Tab Component
 function RolesTab({ roles, permissionCategories, setSelectedRole }) {
+  // Ensure roles is always an array
+  const safeRoles = Array.isArray(roles) ? roles : [];
+  
   return (
     <div className="space-y-4">
       {/* Role Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {roles.map((role) => {
+        {safeRoles.map((role) => {
           const permissionCount = role.permissions?.length || 0;
           return (
             <div key={role.name} className="bg-white/5 border border-white/10 rounded-lg p-6 hover:bg-white/10 transition-colors">
@@ -3489,7 +3750,7 @@ function RolesTab({ roles, permissionCategories, setSelectedRole }) {
         })}
       </div>
       
-      {roles.length === 0 && (
+      {safeRoles.length === 0 && (
         <div className="text-center py-12 text-white/60">
           <FaShieldAlt className="text-4xl mx-auto mb-3 text-white/30" />
           <p className="text-lg">No roles configured</p>
@@ -3502,11 +3763,14 @@ function RolesTab({ roles, permissionCategories, setSelectedRole }) {
 
 // Audit Tab Component 
 function AuditTab({ auditLogs }) {
+  // Ensure auditLogs is always an array
+  const safeLogs = Array.isArray(auditLogs) ? auditLogs : [];
+  
   return (
     <div className="bg-white/5 border border-white/10 rounded-lg p-6">
       <div className="space-y-3 max-h-96 overflow-y-auto">
-        {auditLogs.length > 0 ? (
-          auditLogs.map((log, idx) => (
+        {safeLogs.length > 0 ? (
+          safeLogs.map((log, idx) => (
             <div key={idx} className="flex items-center gap-4 p-3 bg-white/5 rounded-lg">
               <div className="w-8 h-8 bg-brand-500/20 rounded-full flex items-center justify-center">
                 <FaHistory className="text-xs text-brand-400" />
@@ -3544,6 +3808,9 @@ function AuditTab({ auditLogs }) {
 // Create User Modal Component
 function CreateUserModal({ show, onClose, newUser, setNewUser, roles, onSubmit }) {
   if (!show) return null;
+  
+  // Ensure roles is always an array
+  const safeRoles = Array.isArray(roles) ? roles : [];
   
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -3625,7 +3892,7 @@ function CreateUserModal({ show, onClose, newUser, setNewUser, roles, onSubmit }
               onChange={(e) => setNewUser({...newUser, role: e.target.value})}
               className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white focus:ring-2 focus:ring-brand-500"
             >
-              {roles.map(role => (
+              {safeRoles.map(role => (
                 <option key={role.name} value={role.name} style={{ backgroundColor: '#1f2937' }}>
                   {role.name} - {role.description}
                 </option>

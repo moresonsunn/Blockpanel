@@ -587,3 +587,49 @@ class UserService:
     def get_permissions(self) -> List[Permission]:
         """Get all available permissions."""
         return self.db.query(Permission).all()
+
+    def create_role(self, name: str, description: Optional[str], permissions: List[str], is_system: bool = False) -> Role:
+        """Create a new custom role."""
+        existing = self.db.query(Role).filter(Role.name == name).first()
+        if existing:
+            raise ValueError(f"Role '{name}' already exists")
+        # Validate permissions exist
+        valid_perms = {p.name for p in self.get_permissions()}
+        invalid = [p for p in permissions if p not in valid_perms]
+        if invalid:
+            raise ValueError(f"Invalid permissions: {invalid}")
+        role = Role(name=name, description=description, permissions=permissions, is_system=is_system)
+        self.db.add(role)
+        self.db.commit()
+        self.db.refresh(role)
+        return role
+
+    def update_role(self, name: str, description: Optional[str] = None, permissions: Optional[List[str]] = None) -> Role:
+        """Update an existing role by name."""
+        role = self.db.query(Role).filter(Role.name == name).first()
+        if not role:
+            raise ValueError(f"Role '{name}' not found")
+        if role.is_system:
+            raise ValueError("Cannot modify system role")
+        if description is not None:
+            role.description = description
+        if permissions is not None:
+            valid_perms = {p.name for p in self.get_permissions()}
+            invalid = [p for p in permissions if p not in valid_perms]
+            if invalid:
+                raise ValueError(f"Invalid permissions: {invalid}")
+            role.permissions = permissions
+        self.db.commit()
+        self.db.refresh(role)
+        return role
+
+    def delete_role(self, name: str) -> bool:
+        """Delete a custom role by name."""
+        role = self.db.query(Role).filter(Role.name == name).first()
+        if not role:
+            raise ValueError(f"Role '{name}' not found")
+        if role.is_system:
+            raise ValueError("Cannot delete system role")
+        self.db.delete(role)
+        self.db.commit()
+        return True

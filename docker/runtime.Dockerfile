@@ -35,6 +35,6 @@ ENV JAVA_BIN=/usr/local/bin/java21
 
 WORKDIR /data
 EXPOSE 25565
-COPY runtime-entrypoint.sh /usr/local/bin/runtime-entrypoint.sh
+COPY docker/runtime-entrypoint.sh /usr/local/bin/runtime-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/runtime-entrypoint.sh && chmod +x /usr/local/bin/runtime-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/runtime-entrypoint.sh"]

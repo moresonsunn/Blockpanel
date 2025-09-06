@@ -619,6 +619,49 @@ class DockerManager:
                 # For installer-based servers, re-raise the exception since fix_server_jar won't help
                 raise
 
+    def create_server_from_existing(self, name: str, host_port: int | None = None, min_ram: str = "1G", max_ram: str = "2G") -> dict:
+        """Create a container for an existing server directory under /data/servers/{name} using the runtime image.
+        Does not attempt to download any files; assumes files (including server.jar or installers) already exist.
+        """
+        self._ensure_runtime_image()
+        server_dir: Path = SERVERS_ROOT / name
+        if not server_dir.exists() or not server_dir.is_dir():
+            raise RuntimeError(f"Server directory {server_dir} does not exist")
+
+        port_binding = {}
+        if host_port:
+            port_binding[f"{MINECRAFT_PORT}/tcp"] = host_port
+        else:
+            port_binding[f"{MINECRAFT_PORT}/tcp"] = None
+
+        env_vars = {
+            "SERVER_DIR_NAME": name,
+            "MIN_RAM": min_ram,
+            "MAX_RAM": max_ram,
+        }
+        labels = {
+            MINECRAFT_LABEL: "true",
+            "mc.type": "custom",
+        }
+        try:
+            container = self.client.containers.run(
+                RUNTIME_IMAGE,
+                name=name,
+                labels=labels,
+                environment=env_vars,
+                ports=port_binding,
+                volumes=self._get_bind_volume(server_dir),
+                detach=True,
+                tty=True,
+                stdin_open=True,
+                working_dir="/data",
+            )
+            logger.info(f"Container {container.id} created from existing dir for server {name}")
+            return {"id": container.id, "name": container.name, "status": container.status}
+        except Exception as e:
+            logger.error(f"Failed to create container from existing dir for {name}: {e}")
+            raise RuntimeError(f"Failed to create Docker container for server {name}: {e}")
+
         # Configure port binding
         port_binding = {}
         if host_port:
@@ -698,6 +741,16 @@ class DockerManager:
     def stop_server(self, container_id):
         container = self.client.containers.get(container_id)
         container.stop()
+        return {"id": container.id, "status": container.status}
+
+    def restart_server(self, container_id):
+        container = self.client.containers.get(container_id)
+        container.restart()
+        return {"id": container.id, "status": container.status}
+
+    def kill_server(self, container_id):
+        container = self.client.containers.get(container_id)
+        container.kill()
         return {"id": container.id, "status": container.status}
 
     def delete_server(self, container_id):
@@ -887,6 +940,65 @@ class DockerManager:
                 "network_rx_mb": 0.0,
                 "network_tx_mb": 0.0,
             }
+
+    def get_player_info(self, container_id: str) -> dict:
+        """
+        Retrieve player info using RCON only to avoid spamming the console.
+        If RCON is not enabled or fails, return zeros without attempting console-based fallbacks.
+        Returns a dict: { 'online': int, 'max': int, 'names': list[str] }
+        """
+        try:
+            container = self.client.containers.get(container_id)
+            env_vars = container.attrs.get("Config", {}).get("Env", [])
+            env_dict = dict(var.split("=", 1) for var in env_vars if "=" in var)
+
+            from mcrcon import MCRcon
+            rcon_enabled = env_dict.get("ENABLE_RCON", "false").lower() == "true"
+            rcon_password = env_dict.get("RCON_PASSWORD", "")
+            rcon_port_env = env_dict.get("RCON_PORT", "25575")
+
+            # Determine mapped host port for RCON
+            rcon_port = None
+            network_settings = container.attrs.get("NetworkSettings", {}).get("Ports", {})
+            for port, mappings in (network_settings or {}).items():
+                # Look for mapping that contains the RCON port or default 25575
+                if port.endswith("/tcp") and (port.startswith(str(rcon_port_env)) or port.startswith("25575")):
+                    if mappings and isinstance(mappings, list) and len(mappings) > 0:
+                        rcon_port = int(mappings[0].get("HostPort")) if mappings[0].get("HostPort") else None
+                        break
+
+            if not (rcon_enabled and rcon_password and rcon_port):
+                return {"online": 0, "max": 0, "names": []}
+
+            # Query using RCON (does not spam console)
+            output = ""
+            try:
+                with MCRcon("localhost", rcon_password, port=rcon_port, timeout=2) as mcr:
+                    output = mcr.command("list") or ""
+            except Exception as rcon_err:
+                logger.debug(f"RCON list failed for {container_id}: {rcon_err}")
+                return {"online": 0, "max": 0, "names": []}
+
+            text = str(output)
+            online = 0
+            maxp = 0
+            names: List[str] = []
+            import re as _re
+            m = _re.search(r"There are\s+(\d+)\s+of a max of\s+(\d+)\s+players online", text)
+            if not m:
+                m = _re.search(r"(\d+)\s*/\s*(\d+)\s*players? online", text)
+            if m:
+                online = int(m.group(1))
+                maxp = int(m.group(2))
+                colon_idx = text.find(":")
+                if colon_idx != -1 and colon_idx + 1 < len(text):
+                    names_str = text[colon_idx + 1:].strip()
+                    if names_str:
+                        names = [n.strip() for n in names_str.split(",") if n.strip()]
+            return {"online": online, "max": maxp, "names": names}
+        except Exception as e:
+            logger.warning(f"Failed to get player info (RCON) for container {container_id}: {e}")
+            return {"online": 0, "max": 0, "names": []}
 
     def get_server_terminal(self, container_id: str, tail: int = 100) -> dict:
         """

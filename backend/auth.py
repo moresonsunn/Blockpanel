@@ -271,11 +271,11 @@ def require_role(required_role: str):
             )
         return user
     return role_dependency
-
 # Convenience role dependencies
 require_admin = require_role("admin")
 require_moderator = require_role("moderator")
-require_moderator_or_admin = lambda: require_any_permission(["server.config", "system.backup"])
+# Require either server.config.edit or system.backup for moderator-or-admin convenience
+require_moderator_or_admin = lambda: require_any_permission(["server.config.edit", "system.backup"]) 
 
 # Convenience permission dependencies
 require_server_view = require_permission("server.view")
@@ -283,20 +283,22 @@ require_server_create = require_permission("server.create")
 require_server_start = require_permission("server.start")
 require_server_stop = require_permission("server.stop")
 require_server_delete = require_permission("server.delete")
-require_server_console = require_permission("server.console")
-require_server_files = require_permission("server.files")
-require_server_config = require_permission("server.config")
+require_server_console = require_permission("server.console.view")
+require_server_files = require_permission("server.files.view")
+require_server_config = require_permission("server.config.view")
 
 require_user_view = require_permission("user.view")
 require_user_create = require_permission("user.create")
 require_user_edit = require_permission("user.edit")
 require_user_delete = require_permission("user.delete")
-require_user_manage_roles = require_permission("user.manage_roles")
+# Use role.view for viewing roles
+require_user_manage_roles = require_permission("role.view")
 
 require_system_backup = require_permission("system.backup")
 require_system_schedule = require_permission("system.schedule")
-require_system_monitoring = require_permission("system.monitoring")
-require_system_audit = require_permission("system.audit")
+require_system_monitoring = require_permission("system.monitoring.view")
+require_system_audit = require_permission("system.audit.view")
+require_system_settings = require_permission("system.settings.view")
 require_system_settings = require_permission("system.settings")
 
 def log_user_action(user: User, action: str, resource_type: Optional[str] = None,

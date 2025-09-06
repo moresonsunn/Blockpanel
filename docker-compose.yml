@@ -1,4 +1,14 @@
 services:
+  # Build-only service to ensure the Minecraft runtime image exists
+  runtime:
+    build:
+      context: .
+      dockerfile: docker/runtime.Dockerfile
+    image: mc-runtime:latest
+    container_name: mc-runtime-image
+    command: ["sh", "-c", "exit 0"]
+    restart: "no"
+
   controller:
     build:
       context: .
@@ -18,6 +28,7 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres123@db:5432/minecraft_controller
     restart: unless-stopped
     depends_on:
+      - runtime
       - db
 
   db:

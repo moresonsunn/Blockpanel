@@ -24,6 +24,7 @@ from plugin_routes import router as plugin_router
 from api.user_routes import router as user_router
 from monitoring_routes import router as monitoring_router
 from health_routes import router as health_router
+from modpack_routes import router as modpack_router
 from auth import require_auth, get_current_user, require_admin, require_moderator
 from scheduler import get_scheduler
 from models import User
@@ -82,6 +83,7 @@ app.include_router(plugin_router)
 app.include_router(user_router)
 app.include_router(monitoring_router)
 app.include_router(health_router)
+app.include_router(modpack_router)
 
 try:
     app.mount("/ui", StaticFiles(directory="static", html=True), name="ui")
@@ -274,12 +276,93 @@ def stop_server(container_id: str):
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
+from pydantic import BaseModel
+
+class PowerSignal(BaseModel):
+    signal: str  # start | stop | restart | kill
+
+class MkdirRequest(BaseModel):
+    path: str
+
+@app.post("/servers/{container_id}/power")
+def power_server(container_id: str, payload: PowerSignal, current_user: User = Depends(require_moderator)):
+    try:
+        signal = payload.signal.lower().strip()
+        dm = get_docker_manager()
+        if signal == "start":
+            return dm.start_server(container_id)
+        elif signal == "stop":
+            return dm.stop_server(container_id)
+        elif signal == "restart":
+            return dm.restart_server(container_id)
+        elif signal == "kill":
+            return dm.kill_server(container_id)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid signal. Must be one of: start, stop, restart, kill")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
+
+@app.get("/servers/{container_id}/resources")
+def get_server_resources(container_id: str, current_user: User = Depends(require_auth)):
+    try:
+        dm = get_docker_manager()
+        stats = dm.get_server_stats(container_id)
+        players = dm.get_player_info(container_id)
+        # Backward-compatible flat fields plus structured payload
+        response = {
+            "id": stats.get("id", container_id),
+            "cpu_percent": stats.get("cpu_percent", 0.0),
+            "memory_usage_mb": stats.get("memory_usage_mb", 0.0),
+            "memory_limit_mb": stats.get("memory_limit_mb", 0.0),
+            "memory_percent": stats.get("memory_percent", 0.0),
+            "network_rx_mb": stats.get("network_rx_mb", 0.0),
+            "network_tx_mb": stats.get("network_tx_mb", 0.0),
+            "player_count": players.get("online", 0),
+            "resources": {
+                "cpu_percent": stats.get("cpu_percent", 0.0),
+                "memory": {
+                    "used_mb": stats.get("memory_usage_mb", 0.0),
+                    "limit_mb": stats.get("memory_limit_mb", 0.0),
+                    "percent": stats.get("memory_percent", 0.0),
+                },
+                "network": {
+                    "rx_mb": stats.get("network_rx_mb", 0.0),
+                    "tx_mb": stats.get("network_tx_mb", 0.0),
+                },
+            },
+            "players": {
+                "online": players.get("online", 0),
+                "max": players.get("max", 0),
+                "names": players.get("names", []),
+            },
+        }
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
+
 @app.delete("/servers/{container_id}")
 def delete_server(container_id: str, current_user: User = Depends(require_moderator)):
     try:
         return get_docker_manager().delete_server(container_id)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
+
+# Simple directory creation endpoint for Files panel
+@app.post("/servers/{name}/mkdir")
+def mkdir_path(name: str, req: MkdirRequest, current_user: User = Depends(require_moderator)):
+    try:
+        base = Path("/data/servers").resolve() / name
+        target = (base / req.path).resolve()
+        if not str(target).startswith(str(base)):
+            raise HTTPException(status_code=400, detail="Invalid path")
+        target.mkdir(parents=True, exist_ok=True)
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/servers/{container_id}/logs")
 def get_server_logs(container_id: str):

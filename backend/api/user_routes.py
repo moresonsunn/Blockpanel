@@ -8,7 +8,8 @@ from database import get_db
 from models import User
 from user_service import UserService
 from auth import get_current_user, require_auth, require_admin, require_user_view, require_user_create, require_user_edit
-from auth import require_user_delete, require_user_manage_roles, log_user_action
+from auth import require_user_delete, require_user_manage_roles, require_system_audit, log_user_action
+from auth import require_permission
 from pydantic import BaseModel, Field, validator
 
 # Custom email validation that allows localhost domains for development
@@ -289,6 +290,133 @@ async def list_users(
     )
     
     return result
+
+# Move static routes before dynamic /{user_id} to avoid path conflicts
+# Role and permission routes
+@router.get("/roles", response_model=List[RoleResponse])
+async def get_roles(
+    request: Request,
+    current_user: User = Depends(require_user_view),
+    db: Session = Depends(get_db)
+):
+    """Get all available roles."""
+    user_service = UserService(db)
+    roles = user_service.get_roles()
+    
+    # Log the action
+    log_user_action(
+        user=current_user,
+        action="role.list",
+        resource_type="roles",
+        request=request,
+        db=db
+    )
+    
+    return roles
+
+@router.get("/permissions", response_model=List[PermissionResponse])
+async def get_permissions(
+    request: Request,
+    current_user: User = Depends(require_user_view),
+    db: Session = Depends(get_db)
+):
+    """Get all available permissions."""
+    user_service = UserService(db)
+    permissions = user_service.get_permissions()
+    
+    # Log the action
+    log_user_action(
+        user=current_user,
+        action="permission.list",
+        resource_type="permissions",
+        request=request,
+        db=db
+    )
+    
+    return permissions
+
+# Audit logs
+@router.get("/audit-logs", response_model=AuditLogListResponse)
+async def get_audit_logs(
+    request: Request,
+    user_id: Optional[int] = None,
+    action: Optional[str] = None,
+    page: int = 1, 
+    page_size: int = 50,
+    current_user: User = Depends(require_system_audit),
+    db: Session = Depends(get_db)
+):
+    """Get audit logs with filtering and pagination."""
+    user_service = UserService(db)
+    result = user_service.get_audit_logs(user_id, action, page, page_size)
+    
+    # Log the action
+    log_user_action(
+        user=current_user,
+        action="audit.view",
+        resource_type="audit_logs",
+        details={"user_id": user_id, "action": action, "page": page, "page_size": page_size},
+        request=request,
+        db=db
+    )
+    
+    return result
+
+# Role management (create/update/delete custom roles)
+class RoleCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    permissions: List[str] = []
+
+class RoleUpdate(BaseModel):
+    description: Optional[str] = None
+    permissions: Optional[List[str]] = None
+
+@router.post("/roles")
+async def create_role(
+    request: Request,
+    role: RoleCreate,
+    current_user: User = Depends(require_permission("role.create")),
+    db: Session = Depends(get_db)
+):
+    service = UserService(db)
+    try:
+        new_role = service.create_role(role.name, role.description, role.permissions)
+        log_user_action(user=current_user, action="role.create", resource_type="role", resource_id=role.name, request=request, db=db)
+        return {"message": "Role created", "role": {"name": new_role.name, "description": new_role.description, "permissions": new_role.permissions, "is_system": new_role.is_system}}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.patch("/roles/{name}")
+async def update_role(
+    request: Request,
+    name: str,
+    role: RoleUpdate,
+    current_user: User = Depends(require_permission("role.edit")),
+    db: Session = Depends(get_db)
+):
+    service = UserService(db)
+    try:
+        updated = service.update_role(name, description=role.description, permissions=role.permissions)
+        log_user_action(user=current_user, action="role.edit", resource_type="role", resource_id=name, request=request, db=db)
+        return {"message": "Role updated", "role": {"name": updated.name, "description": updated.description, "permissions": updated.permissions, "is_system": updated.is_system}}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.delete("/roles/{name}")
+async def delete_role(
+    request: Request,
+    name: str,
+    current_user: User = Depends(require_permission("role.delete")),
+    db: Session = Depends(get_db)
+):
+    service = UserService(db)
+    try:
+        service.delete_role(name)
+        log_user_action(user=current_user, action="role.delete", resource_type="role", resource_id=name, request=request, db=db)
+        return {"message": "Role deleted"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
