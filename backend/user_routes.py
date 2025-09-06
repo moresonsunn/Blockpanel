@@ -1,12 +1,25 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, validator
+import re
+
+# Custom email validation that allows localhost domains for development
+def validate_email(email: str) -> str:
+    """Custom email validator that allows localhost domains."""
+    # Basic email format validation
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    localhost_pattern = r'^[a-zA-Z0-9._%+-]+@localhost$'
+    
+    if re.match(email_pattern, email) or re.match(localhost_pattern, email):
+        return email
+    else:
+        raise ValueError('Invalid email format')
 from typing import List, Optional
 from datetime import datetime
 
 from database import get_db
 from models import User
-from auth import require_auth, require_admin, require_user_view, require_user_create, require_user_edit
+from auth import require_auth, require_admin, require_user_view, require_user_create, require_user_edit, require_moderator, get_password_hash
 
 router = APIRouter(prefix="/users", tags=["user_management"])
 
@@ -31,14 +44,24 @@ class UserActivity(BaseModel):
 
 class UserCreateRequest(BaseModel):
     username: str
-    email: EmailStr
+    email: str
     password: str
     role: str = "user"
+    
+    @validator('email')
+    def validate_email_field(cls, v):
+        return validate_email(v)
 
 class UserUpdateRequest(BaseModel):
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
+    
+    @validator('email')
+    def validate_email_field(cls, v):
+        if v is not None:
+            return validate_email(v)
+        return v
 
 class PasswordResetRequest(BaseModel):
     new_password: str

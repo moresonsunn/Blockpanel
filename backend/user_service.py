@@ -14,52 +14,214 @@ logger = logging.getLogger(__name__)
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Default permissions for the system
+# Comprehensive permission system inspired by Crafty Controller
 DEFAULT_PERMISSIONS = {
-    # Server permissions
-    "server.view": {"description": "View server list and details", "category": "server"},
-    "server.create": {"description": "Create new servers", "category": "server"},
-    "server.start": {"description": "Start servers", "category": "server"},
-    "server.stop": {"description": "Stop servers", "category": "server"},
-    "server.delete": {"description": "Delete servers", "category": "server"},
-    "server.console": {"description": "Access server console", "category": "server"},
-    "server.files": {"description": "Access server files", "category": "server"},
-    "server.config": {"description": "Modify server configuration", "category": "server"},
+    # Server Control Permissions
+    "server.view": {"description": "View server list and basic details", "category": "server_control", "level": 1},
+    "server.create": {"description": "Create new servers", "category": "server_control", "level": 3},
+    "server.start": {"description": "Start servers", "category": "server_control", "level": 2},
+    "server.stop": {"description": "Stop servers", "category": "server_control", "level": 2},
+    "server.restart": {"description": "Restart servers", "category": "server_control", "level": 2},
+    "server.kill": {"description": "Force kill servers", "category": "server_control", "level": 3},
+    "server.delete": {"description": "Delete servers permanently", "category": "server_control", "level": 4},
+    "server.clone": {"description": "Clone/duplicate servers", "category": "server_control", "level": 3},
     
-    # User management permissions
-    "user.view": {"description": "View user list and details", "category": "user"},
-    "user.create": {"description": "Create new users", "category": "user"},
-    "user.edit": {"description": "Edit user details", "category": "user"},
-    "user.delete": {"description": "Delete users", "category": "user"},
-    "user.manage_roles": {"description": "Manage user roles", "category": "user"},
+    # Server Console & Commands
+    "server.console.view": {"description": "View server console output", "category": "server_console", "level": 1},
+    "server.console.send": {"description": "Send commands to server console", "category": "server_console", "level": 2},
+    "server.console.history": {"description": "Access console command history", "category": "server_console", "level": 2},
     
-    # System permissions
-    "system.backup": {"description": "Create and manage backups", "category": "system"},
-    "system.schedule": {"description": "Manage scheduled tasks", "category": "system"},
-    "system.monitoring": {"description": "View system monitoring", "category": "system"},
-    "system.audit": {"description": "View audit logs", "category": "system"},
-    "system.settings": {"description": "Manage system settings", "category": "system"},
+    # Server Configuration
+    "server.config.view": {"description": "View server configuration files", "category": "server_config", "level": 1},
+    "server.config.edit": {"description": "Edit server configuration files", "category": "server_config", "level": 3},
+    "server.properties.edit": {"description": "Edit server.properties", "category": "server_config", "level": 2},
+    "server.startup.edit": {"description": "Modify server startup parameters", "category": "server_config", "level": 3},
+    
+    # File Management
+    "server.files.view": {"description": "Browse server files and folders", "category": "server_files", "level": 1},
+    "server.files.download": {"description": "Download files from server", "category": "server_files", "level": 2},
+    "server.files.upload": {"description": "Upload files to server", "category": "server_files", "level": 2},
+    "server.files.edit": {"description": "Edit text files on server", "category": "server_files", "level": 2},
+    "server.files.delete": {"description": "Delete server files", "category": "server_files", "level": 3},
+    "server.files.create": {"description": "Create new files and folders", "category": "server_files", "level": 2},
+    "server.files.compress": {"description": "Create/extract archives", "category": "server_files", "level": 2},
+    
+    # Player Management
+    "server.players.view": {"description": "View online players and stats", "category": "server_players", "level": 1},
+    "server.players.kick": {"description": "Kick players from server", "category": "server_players", "level": 2},
+    "server.players.ban": {"description": "Ban/unban players", "category": "server_players", "level": 2},
+    "server.players.whitelist": {"description": "Manage server whitelist", "category": "server_players", "level": 2},
+    "server.players.op": {"description": "Grant/revoke operator status", "category": "server_players", "level": 3},
+    "server.players.chat": {"description": "Send messages as server/view chat", "category": "server_players", "level": 2},
+    
+    # Backup Management
+    "server.backup.view": {"description": "View server backups", "category": "server_backup", "level": 1},
+    "server.backup.create": {"description": "Create server backups", "category": "server_backup", "level": 2},
+    "server.backup.restore": {"description": "Restore server from backup", "category": "server_backup", "level": 3},
+    "server.backup.delete": {"description": "Delete server backups", "category": "server_backup", "level": 3},
+    "server.backup.download": {"description": "Download backup files", "category": "server_backup", "level": 2},
+    "server.backup.schedule": {"description": "Schedule automatic backups", "category": "server_backup", "level": 3},
+    
+    # User Management Permissions
+    "user.view": {"description": "View user list and basic details", "category": "user_management", "level": 2},
+    "user.create": {"description": "Create new users", "category": "user_management", "level": 3},
+    "user.edit": {"description": "Edit user details and settings", "category": "user_management", "level": 3},
+    "user.delete": {"description": "Delete users from system", "category": "user_management", "level": 4},
+    "user.password.reset": {"description": "Reset user passwords", "category": "user_management", "level": 3},
+    "user.sessions.view": {"description": "View active user sessions", "category": "user_management", "level": 3},
+    "user.sessions.revoke": {"description": "Revoke user sessions", "category": "user_management", "level": 3},
+    
+    # Role & Permission Management
+    "role.view": {"description": "View roles and permissions", "category": "role_management", "level": 2},
+    "role.create": {"description": "Create custom roles", "category": "role_management", "level": 4},
+    "role.edit": {"description": "Modify role permissions", "category": "role_management", "level": 4},
+    "role.delete": {"description": "Delete custom roles", "category": "role_management", "level": 4},
+    "role.assign": {"description": "Assign roles to users", "category": "role_management", "level": 3},
+    
+    # System Administration
+    "system.monitoring.view": {"description": "View system monitoring and stats", "category": "system_admin", "level": 2},
+    "system.logs.view": {"description": "View system and application logs", "category": "system_admin", "level": 2},
+    "system.audit.view": {"description": "View audit logs and security events", "category": "system_admin", "level": 3},
+    "system.settings.view": {"description": "View system settings", "category": "system_admin", "level": 2},
+    "system.settings.edit": {"description": "Modify system settings", "category": "system_admin", "level": 4},
+    "system.maintenance": {"description": "Perform system maintenance tasks", "category": "system_admin", "level": 4},
+    "system.updates": {"description": "Manage system updates", "category": "system_admin", "level": 4},
+    
+    # Scheduling & Automation
+    "schedule.view": {"description": "View scheduled tasks", "category": "automation", "level": 2},
+    "schedule.create": {"description": "Create scheduled tasks", "category": "automation", "level": 3},
+    "schedule.edit": {"description": "Modify scheduled tasks", "category": "automation", "level": 3},
+    "schedule.delete": {"description": "Delete scheduled tasks", "category": "automation", "level": 3},
+    "schedule.execute": {"description": "Manually execute scheduled tasks", "category": "automation", "level": 3},
+    
+    # Plugin & Mod Management
+    "plugins.view": {"description": "View installed plugins/mods", "category": "plugin_management", "level": 1},
+    "plugins.install": {"description": "Install new plugins/mods", "category": "plugin_management", "level": 3},
+    "plugins.remove": {"description": "Remove plugins/mods", "category": "plugin_management", "level": 3},
+    "plugins.configure": {"description": "Configure plugin settings", "category": "plugin_management", "level": 2},
+    "plugins.update": {"description": "Update plugins/mods", "category": "plugin_management", "level": 3},
 }
 
-# Default roles with their permissions
+# Comprehensive role system inspired by Crafty Controller
 DEFAULT_ROLES = {
-    "admin": {
-        "description": "Full system administrator",
+    "owner": {
+        "description": "System owner with unrestricted access to everything",
         "permissions": list(DEFAULT_PERMISSIONS.keys()),
-        "is_system": True
+        "is_system": True,
+        "level": 5,
+        "color": "#dc2626"  # Red
+    },
+    "admin": {
+        "description": "System administrator with full server and user management",
+        "permissions": [
+            # Server Control
+            "server.view", "server.create", "server.start", "server.stop", "server.restart",
+            "server.kill", "server.delete", "server.clone",
+            # Console & Config
+            "server.console.view", "server.console.send", "server.console.history",
+            "server.config.view", "server.config.edit", "server.properties.edit", "server.startup.edit",
+            # Files
+            "server.files.view", "server.files.download", "server.files.upload", 
+            "server.files.edit", "server.files.delete", "server.files.create", "server.files.compress",
+            # Players
+            "server.players.view", "server.players.kick", "server.players.ban", 
+            "server.players.whitelist", "server.players.op", "server.players.chat",
+            # Backups
+            "server.backup.view", "server.backup.create", "server.backup.restore", 
+            "server.backup.delete", "server.backup.download", "server.backup.schedule",
+            # Users (but not roles)
+            "user.view", "user.create", "user.edit", "user.password.reset",
+            "user.sessions.view", "user.sessions.revoke",
+            # System
+            "system.monitoring.view", "system.logs.view", "system.audit.view", "system.settings.view",
+            # Scheduling
+            "schedule.view", "schedule.create", "schedule.edit", "schedule.delete", "schedule.execute",
+            # Plugins
+            "plugins.view", "plugins.install", "plugins.remove", "plugins.configure", "plugins.update"
+        ],
+        "is_system": True,
+        "level": 4,
+        "color": "#ea580c"  # Orange
     },
     "moderator": {
-        "description": "Server moderator with limited admin rights",
+        "description": "Server moderator with management rights but limited system access",
         "permissions": [
-            "server.view", "server.start", "server.stop", "server.console",
-            "server.files", "server.config", "system.backup", "user.view"
+            # Server Control
+            "server.view", "server.start", "server.stop", "server.restart",
+            # Console & Config
+            "server.console.view", "server.console.send", "server.console.history",
+            "server.config.view", "server.properties.edit",
+            # Files (limited)
+            "server.files.view", "server.files.download", "server.files.upload", 
+            "server.files.edit", "server.files.create",
+            # Players
+            "server.players.view", "server.players.kick", "server.players.ban", 
+            "server.players.whitelist", "server.players.chat",
+            # Backups
+            "server.backup.view", "server.backup.create", "server.backup.download",
+            # System (view only)
+            "system.monitoring.view", "system.logs.view",
+            # Plugins (limited)
+            "plugins.view", "plugins.configure"
         ],
-        "is_system": True
+        "is_system": True,
+        "level": 3,
+        "color": "#0ea5e9"  # Blue
+    },
+    "helper": {
+        "description": "Server helper with console access and basic management",
+        "permissions": [
+            # Server Control (basic)
+            "server.view", "server.start", "server.stop",
+            # Console & Config
+            "server.console.view", "server.console.send",
+            "server.config.view",
+            # Files (view only)
+            "server.files.view", "server.files.download",
+            # Players (basic)
+            "server.players.view", "server.players.kick", "server.players.chat",
+            # Backups
+            "server.backup.view", "server.backup.create",
+            # System (view only)
+            "system.monitoring.view",
+            # Plugins (view only)
+            "plugins.view"
+        ],
+        "is_system": True,
+        "level": 2,
+        "color": "#10b981"  # Green
     },
     "user": {
-        "description": "Regular user with basic access",
-        "permissions": ["server.view"],
-        "is_system": True
+        "description": "Regular user with read-only access to assigned servers",
+        "permissions": [
+            # Server Control (view only)
+            "server.view",
+            # Console (view only)
+            "server.console.view",
+            "server.config.view",
+            # Files (view only)
+            "server.files.view", "server.files.download",
+            # Players (view only)
+            "server.players.view",
+            # Backups (view only)
+            "server.backup.view",
+            # Plugins (view only)
+            "plugins.view"
+        ],
+        "is_system": True,
+        "level": 1,
+        "color": "#6b7280"  # Gray
+    },
+    "guest": {
+        "description": "Guest user with minimal read-only access",
+        "permissions": [
+            "server.view",
+            "server.console.view",
+            "server.players.view"
+        ],
+        "is_system": True,
+        "level": 0,
+        "color": "#9ca3af"  # Light Gray
     }
 }
 

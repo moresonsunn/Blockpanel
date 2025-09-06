@@ -2,20 +2,37 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Body
 from sqlalchemy.orm import Session
 from datetime import datetime
+import re
 
 from database import get_db
 from models import User
 from user_service import UserService
 from auth import get_current_user, require_auth, require_admin, require_user_view, require_user_create, require_user_edit
 from auth import require_user_delete, require_user_manage_roles, log_user_action
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, Field, validator
+
+# Custom email validation that allows localhost domains for development
+def validate_email(email: str) -> str:
+    """Custom email validator that allows localhost domains."""
+    # Basic email format validation
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    localhost_pattern = r'^[a-zA-Z0-9._%+-]+@localhost$'
+    
+    if re.match(email_pattern, email) or re.match(localhost_pattern, email):
+        return email
+    else:
+        raise ValueError('Invalid email format')
 
 # Pydantic models for request/response
 class UserBase(BaseModel):
     username: str
-    email: EmailStr
+    email: str
     role: str = "user"
     full_name: Optional[str] = None
+    
+    @validator('email')
+    def validate_email_field(cls, v):
+        return validate_email(v)
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
@@ -34,11 +51,17 @@ class UserCreate(UserBase):
         return v
 
 class UserUpdate(BaseModel):
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
     full_name: Optional[str] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
+    
+    @validator('email')
+    def validate_email_field(cls, v):
+        if v is not None:
+            return validate_email(v)
+        return v
     
     @validator('password')
     def password_strength(cls, v):
@@ -83,7 +106,7 @@ class UserResponse(UserBase):
     last_login: Optional[datetime] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class UserListResponse(BaseModel):
     users: List[UserResponse]
@@ -103,7 +126,7 @@ class RoleResponse(BaseModel):
     is_system: bool
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class PermissionResponse(BaseModel):
     name: str
@@ -111,7 +134,7 @@ class PermissionResponse(BaseModel):
     category: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class AuditLogResponse(BaseModel):
     id: int
@@ -124,7 +147,7 @@ class AuditLogResponse(BaseModel):
     ip_address: Optional[str]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class AuditLogListResponse(BaseModel):
     logs: List[AuditLogResponse]

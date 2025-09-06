@@ -1552,289 +1552,389 @@ function PageLoadingSpinner() {
   );
 }
 
-// User Management Components - INSTANT with preloaded data
-function UserManagementPageImpl() {
-  // Get all data instantly from global store
+// Advanced User Management System - Inspired by Crafty Controller
+function AdvancedUserManagementPageImpl() {
+  // Get all data instantly from global store with fallbacks
   const globalData = useGlobalData();
-  const { users, roles, auditLogs } = globalData;
+  const { users, roles, auditLogs, isInitialized } = globalData;
   
+  // Provide fallback data if backend endpoints aren't ready
+  const safeUsers = users || [];
+  const safeRoles = roles && roles.length > 0 ? roles : [
+    { name: 'admin', description: 'System Administrator', color: '#dc2626', level: 4, is_system: true, permissions: [] },
+    { name: 'moderator', description: 'Server Moderator', color: '#0ea5e9', level: 3, is_system: true, permissions: [] },
+    { name: 'user', description: 'Regular User', color: '#6b7280', level: 1, is_system: true, permissions: [] }
+  ];
+  const safeAuditLogs = auditLogs || [];
+  
+  // State management
+  const [activeTab, setActiveTab] = useState('users');
   const [showCreateUser, setShowCreateUser] = useState(false);
-  const [newUser, setNewUser] = useState({ username: '', email: '', role: 'user', password: '' });
+  const [showCreateRole, setShowCreateRole] = useState(false);
+  const [showPermissionMatrix, setShowPermissionMatrix] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedRole, setSelectedRole] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterRole, setFilterRole] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  
+  // New user form
+  const [newUser, setNewUser] = useState({ 
+    username: '', 
+    email: '', 
+    password: '', 
+    confirmPassword: '',
+    role: 'user', 
+    fullName: '',
+    mustChangePassword: true
+  });
+  
+  // New role form  
+  const [newRole, setNewRole] = useState({
+    name: '',
+    description: '',
+    color: '#6b7280',
+    permissions: []
+  });
+  
+  // Function to refresh user data
+  const loadUsers = async () => {
+    try {
+      // Trigger refresh of global data
+      window.location.reload();
+    } catch (error) {
+      console.error('Failed to refresh users data:', error);
+    }
+  };
+  
+  // Define comprehensive permission categories inspired by Crafty Controller
+  const permissionCategories = {
+    server_control: {
+      name: 'Server Control',
+      icon: FaServer,
+      color: '#dc2626',
+      permissions: [
+        'server.view', 'server.create', 'server.start', 'server.stop', 
+        'server.restart', 'server.kill', 'server.delete', 'server.clone'
+      ]
+    },
+    server_console: {
+      name: 'Console & Commands',
+      icon: FaTerminal,
+      color: '#059669',
+      permissions: [
+        'server.console.view', 'server.console.send', 'server.console.history'
+      ]
+    },
+    server_config: {
+      name: 'Configuration',
+      icon: FaCog,
+      color: '#0ea5e9',
+      permissions: [
+        'server.config.view', 'server.config.edit', 'server.properties.edit', 'server.startup.edit'
+      ]
+    },
+    server_files: {
+      name: 'File Management',
+      icon: FaFolder,
+      color: '#7c3aed',
+      permissions: [
+        'server.files.view', 'server.files.download', 'server.files.upload',
+        'server.files.edit', 'server.files.delete', 'server.files.create', 'server.files.compress'
+      ]
+    },
+    server_players: {
+      name: 'Player Management',
+      icon: FaUsers,
+      color: '#ea580c',
+      permissions: [
+        'server.players.view', 'server.players.kick', 'server.players.ban',
+        'server.players.whitelist', 'server.players.op', 'server.players.chat'
+      ]
+    },
+    server_backup: {
+      name: 'Backup Management',
+      icon: FaDatabase,
+      color: '#10b981',
+      permissions: [
+        'server.backup.view', 'server.backup.create', 'server.backup.restore',
+        'server.backup.delete', 'server.backup.download', 'server.backup.schedule'
+      ]
+    },
+    user_management: {
+      name: 'User Management',
+      icon: FaUserCog,
+      color: '#f59e0b',
+      permissions: [
+        'user.view', 'user.create', 'user.edit', 'user.delete',
+        'user.password.reset', 'user.sessions.view', 'user.sessions.revoke'
+      ]
+    },
+    role_management: {
+      name: 'Role & Permissions',
+      icon: FaShieldAlt,
+      color: '#dc2626',
+      permissions: [
+        'role.view', 'role.create', 'role.edit', 'role.delete', 'role.assign'
+      ]
+    },
+    system_admin: {
+      name: 'System Administration',
+      icon: FaTools,
+      color: '#991b1b',
+      permissions: [
+        'system.monitoring.view', 'system.logs.view', 'system.audit.view',
+        'system.settings.view', 'system.settings.edit', 'system.maintenance', 'system.updates'
+      ]
+    }
+  };
 
   async function createUser() {
     try {
+      if (newUser.password !== newUser.confirmPassword) {
+        setError('Passwords do not match');
+        return;
+      }
+      
       await fetch(`${API}/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newUser),
+        body: JSON.stringify({
+          username: newUser.username,
+          email: newUser.email,
+          password: newUser.password,
+          role: newUser.role,
+          full_name: newUser.fullName,
+          must_change_password: newUser.mustChangePassword
+        }),
       });
       setShowCreateUser(false);
-      setNewUser({ username: '', email: '', role: 'user', password: '' });
+      setNewUser({ 
+        username: '', email: '', password: '', confirmPassword: '',
+        role: 'user', fullName: '', mustChangePassword: true
+      });
+      setSuccess('User created successfully');
       loadUsers();
     } catch (e) {
+      setError('Failed to create user: ' + e.message);
       console.error('Failed to create user:', e);
     }
   }
+  
+  async function createRole() {
+    try {
+      await fetch(`${API}/roles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newRole),
+      });
+      setShowCreateRole(false);
+      setNewRole({ name: '', description: '', color: '#6b7280', permissions: [] });
+      setSuccess('Role created successfully');
+      loadUsers();
+    } catch (e) {
+      setError('Failed to create role: ' + e.message);
+      console.error('Failed to create role:', e);
+    }
+  }
 
+  // Filtered users based on search and filters
+  const filteredUsers = safeUsers.filter(user => {
+    const matchesSearch = user.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         user.email?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesRole = filterRole === 'all' || user.role === filterRole;
+    const matchesStatus = filterStatus === 'all' || 
+                         (filterStatus === 'active' && user.is_active) ||
+                         (filterStatus === 'inactive' && !user.is_active);
+    return matchesSearch && matchesRole && matchesStatus;
+  });
+
+  // Helper functions for user actions
   async function updateUserRole(userId, newRole) {
     try {
-      await fetch(`${API}/users/${userId}/role`, {
+      await fetch(`${API}/users/${userId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: newRole }),
       });
+      setSuccess('User role updated successfully');
       loadUsers();
     } catch (e) {
-      console.error('Failed to update user role:', e);
+      setError('Failed to update user role: ' + e.message);
     }
   }
 
   async function toggleUserActive(userId, isActive) {
     try {
-      await fetch(`${API}/users/${userId}/${isActive ? 'activate' : 'deactivate'}`, {
-        method: 'PUT',
+      await fetch(`${API}/users/${userId}`, {
+        method: 'PUT', 
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: isActive }),
       });
+      setSuccess(`User ${isActive ? 'activated' : 'deactivated'} successfully`);
       loadUsers();
     } catch (e) {
-      console.error('Failed to toggle user status:', e);
+      setError('Failed to update user status: ' + e.message);
     }
   }
 
   async function deleteUser(userId) {
-    if (!confirm('Are you sure you want to delete this user?')) return;
+    if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) return;
     try {
       await fetch(`${API}/users/${userId}`, { method: 'DELETE' });
+      setSuccess('User deleted successfully');
       loadUsers();
     } catch (e) {
-      console.error('Failed to delete user:', e);
+      setError('Failed to delete user: ' + e.message);
     }
   }
 
-  const filteredUsers = users.filter(user => 
-    user.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    user.email?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  // No loading needed - data is always available!
-
   return (
     <div className="p-6 space-y-6">
+      {/* Header with tabs */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-3">
-            <FaUsers className="text-brand-500" /> User Management
+            <FaShieldAlt className="text-brand-500" /> Advanced User Management
           </h1>
-          <p className="text-white/70 mt-2">Manage users, roles, and permissions</p>
+          <p className="text-white/70 mt-2">Comprehensive user, role, and permission management system</p>
         </div>
-        <button
-          onClick={() => setShowCreateUser(true)}
-          className="bg-brand-500 hover:bg-brand-600 px-4 py-2 rounded-lg flex items-center gap-2"
-        >
-          <FaPlus /> Create User
-        </button>
-      </div>
-
-      {/* Backend notice */}
-      {users.length === 0 && (
-        <div className="bg-blue-500/10 border border-blue-500/20 text-blue-300 p-4 rounded-lg">
-          <div className="flex items-center gap-3 mb-2">
-            <FaInfoCircle /> 
-            <span className="font-semibold">User Management Backend</span>
-          </div>
-          <p className="text-sm text-blue-200">
-            The user management backend endpoints are not yet fully implemented. This interface is ready and will work once the backend user management API is connected.
-          </p>
-        </div>
-      )}
-
-      {/* Search and filters */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-4">
-        <div className="flex items-center gap-4">
-          <div className="flex-1 relative">
-            <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-white/50" />
-            <input
-              type="text"
-              placeholder="Search users by username or email..."
-              className="w-full pl-10 pr-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          <button className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg flex items-center gap-2">
-            <FaFilter /> Filter
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowPermissionMatrix(true)}
+            className="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg flex items-center gap-2"
+          >
+            <FaTable /> Permission Matrix
+          </button>
+          <button
+            onClick={() => setShowCreateRole(true)}
+            className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg flex items-center gap-2"
+          >
+            <FaShieldAlt /> Create Role
+          </button>
+          <button
+            onClick={() => setShowCreateUser(true)}
+            className="bg-brand-500 hover:bg-brand-600 px-4 py-2 rounded-lg flex items-center gap-2"
+          >
+            <FaPlus /> Create User
           </button>
         </div>
       </div>
 
-      {/* Users table */}
-      <div className="bg-white/5 border border-white/10 rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-white/10">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">User</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Role</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Last Login</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/10">
-              {filteredUsers.map((user) => (
-                <tr key={user.id} className="hover:bg-white/5">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="w-8 h-8 bg-brand-500 rounded-full flex items-center justify-center">
-                        <FaUsers className="text-sm text-white" />
-                      </div>
-                      <div className="ml-3">
-                        <div className="text-sm font-medium text-white">{user.username}</div>
-                        <div className="text-sm text-white/60">{user.email}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <select
-                      value={user.role}
-                      onChange={(e) => updateUserRole(user.id, e.target.value)}
-                      className="bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm"
-                    >
-                      {roles.map(role => (
-                        <option key={role.name} value={role.name} style={{ backgroundColor: '#1f2937' }}>
-                          {role.name}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                      user.is_active
-                        ? 'bg-green-500/20 text-green-300'
-                        : 'bg-red-500/20 text-red-300'
-                    }`}>
-                      {user.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-white/70">
-                    {user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button
-                      onClick={() => setSelectedUser(user)}
-                      className="text-blue-400 hover:text-blue-300"
-                    >
-                      <FaEye />
-                    </button>
-                    <button
-                      onClick={() => toggleUserActive(user.id, !user.is_active)}
-                      className={`${user.is_active ? 'text-red-400 hover:text-red-300' : 'text-green-400 hover:text-green-300'}`}
-                    >
-                      {user.is_active ? <FaEyeSlash /> : <FaEye />}
-                    </button>
-                    <button
-                      onClick={() => deleteUser(user.id)}
-                      className="text-red-400 hover:text-red-300"
-                    >
-                      <FaTrash />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Audit Logs */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <FaHistory /> Recent Audit Logs
-        </h3>
-        <div className="space-y-2 max-h-64 overflow-y-auto">
-          {auditLogs.map((log, idx) => (
-            <div key={idx} className="flex items-center gap-3 text-sm p-2 bg-white/5 rounded">
-              <div className="text-brand-400 text-xs">
-                {new Date(log.timestamp).toLocaleString()}
-              </div>
-              <div className="text-white/80">{log.action}</div>
-              <div className="text-white/60">{log.user_id}</div>
-              {log.details && <div className="text-white/50 text-xs">{JSON.stringify(log.details)}</div>}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Create User Modal */}
-      {showCreateUser && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white/10 border border-white/20 rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold mb-4">Create New User</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-2">Username</label>
-                <input
-                  type="text"
-                  value={newUser.username}
-                  onChange={(e) => setNewUser({...newUser, username: e.target.value})}
-                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
-                  placeholder="Enter username"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-2">Email</label>
-                <input
-                  type="email"
-                  value={newUser.email}
-                  onChange={(e) => setNewUser({...newUser, email: e.target.value})}
-                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
-                  placeholder="Enter email"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-2">Password</label>
-                <input
-                  type="password"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser({...newUser, password: e.target.value})}
-                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
-                  placeholder="Enter password"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-2">Role</label>
-                <select
-                  value={newUser.role}
-                  onChange={(e) => setNewUser({...newUser, role: e.target.value})}
-                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
-                >
-                  {roles.map(role => (
-                    <option key={role.name} value={role.name} style={{ backgroundColor: '#1f2937' }}>
-                      {role.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setShowCreateUser(false)}
-                className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded text-white"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={createUser}
-                className="px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded text-white"
-              >
-                Create User
-              </button>
-            </div>
-          </div>
+      {/* Success/Error Messages */}
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/20 text-red-300 p-4 rounded-lg flex items-center gap-3">
+          <FaExclamationTriangle />
+          <span>{error}</span>
+          <button onClick={() => setError('')} className="ml-auto text-red-400 hover:text-red-300">
+            <FaTimes />
+          </button>
         </div>
       )}
+      
+      {success && (
+        <div className="bg-green-500/10 border border-green-500/20 text-green-300 p-4 rounded-lg flex items-center gap-3">
+          <FaCheckCircle />
+          <span>{success}</span>
+          <button onClick={() => setSuccess('')} className="ml-auto text-green-400 hover:text-green-300">
+            <FaTimes />
+          </button>
+        </div>
+      )}
+
+      {/* Tab Navigation */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-1 flex">
+        <button
+          onClick={() => setActiveTab('users')}
+          className={`flex-1 px-4 py-2 rounded-md flex items-center justify-center gap-2 transition-all ${
+            activeTab === 'users' 
+              ? 'bg-brand-500 text-white' 
+              : 'text-white/70 hover:text-white hover:bg-white/10'
+          }`}
+        >
+          <FaUsers /> Users ({safeUsers.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('roles')}
+          className={`flex-1 px-4 py-2 rounded-md flex items-center justify-center gap-2 transition-all ${
+            activeTab === 'roles' 
+              ? 'bg-brand-500 text-white' 
+              : 'text-white/70 hover:text-white hover:bg-white/10'
+          }`}
+        >
+          <FaShieldAlt /> Roles ({safeRoles.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('audit')}
+          className={`flex-1 px-4 py-2 rounded-md flex items-center justify-center gap-2 transition-all ${
+            activeTab === 'audit' 
+              ? 'bg-brand-500 text-white' 
+              : 'text-white/70 hover:text-white hover:bg-white/10'
+          }`}
+        >
+          <FaHistory /> Audit Logs ({safeAuditLogs.length})
+        </button>
+      </div>
+
+      {/* Content based on active tab */}
+      {activeTab === 'users' && (
+        <UsersTab 
+          users={filteredUsers}
+          roles={safeRoles}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          filterRole={filterRole}
+          setFilterRole={setFilterRole}
+          filterStatus={filterStatus}
+          setFilterStatus={setFilterStatus}
+          updateUserRole={updateUserRole}
+          toggleUserActive={toggleUserActive}
+          deleteUser={deleteUser}
+          setSelectedUser={setSelectedUser}
+        />
+      )}
+      
+      {activeTab === 'roles' && (
+        <RolesTab 
+          roles={safeRoles}
+          permissionCategories={permissionCategories}
+          setSelectedRole={setSelectedRole}
+        />
+      )}
+      
+      {activeTab === 'audit' && (
+        <AuditTab auditLogs={safeAuditLogs} />
+      )}
+
+      {/* Create User Modal */}
+      <CreateUserModal 
+        show={showCreateUser}
+        onClose={() => setShowCreateUser(false)}
+        newUser={newUser}
+        setNewUser={setNewUser}
+        roles={safeRoles}
+        onSubmit={createUser}
+      />
+      
+      {/* Create Role Modal */}
+      <CreateRoleModal 
+        show={showCreateRole}
+        onClose={() => setShowCreateRole(false)}
+        newRole={newRole}
+        setNewRole={setNewRole}
+        permissionCategories={permissionCategories}
+        onSubmit={createRole}
+      />
+      
+      {/* Permission Matrix Modal */}
+      <PermissionMatrixModal 
+        show={showPermissionMatrix}
+        onClose={() => setShowPermissionMatrix(false)}
+        roles={safeRoles}
+        permissionCategories={permissionCategories}
+      />
     </div>
   );
 }
@@ -1845,6 +1945,16 @@ function MonitoringPageImpl() {
   const globalData = useGlobalData();
   const { systemHealth, dashboardData, alerts, isInitialized } = globalData;
   
+  // Function to refresh monitoring data
+  const refreshMonitoringData = async () => {
+    try {
+      // Trigger refresh of global data
+      window.location.reload();
+    } catch (error) {
+      console.error('Failed to refresh monitoring data:', error);
+    }
+  };
+  
   // Always show data - no loading states needed!
 
   return (
@@ -1852,13 +1962,13 @@ function MonitoringPageImpl() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-3">
-            <FaChartLine className="text-brand-500" /> System Monitoring
+            <FaChartLine className="text-brand-500" /> Server Status
           </h1>
-          <p className="text-white/70 mt-2">Real-time system and server performance monitoring</p>
+          <p className="text-white/70 mt-2">Monitor your servers and system performance</p>
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={loadMonitoringData}
+            onClick={refreshMonitoringData}
             className="bg-brand-500 hover:bg-brand-600 px-4 py-2 rounded-lg flex items-center gap-2"
           >
             <FaSync /> Refresh
@@ -1866,69 +1976,58 @@ function MonitoringPageImpl() {
         </div>
       </div>
 
-      {/* Backend notice - always show if no data */}
-      {!systemHealth && !dashboardData && (
-        <div className="bg-blue-500/10 border border-blue-500/20 text-blue-300 p-4 rounded-lg">
-          <div className="flex items-center gap-3 mb-2">
-            <FaInfoCircle /> 
-            <span className="font-semibold">Monitoring Backend</span>
-          </div>
-          <p className="text-sm text-blue-200">
-            Advanced monitoring data is being loaded in the background. All data will appear instantly once available.
-          </p>
-        </div>
-      )}
-
-      {/* System Health Overview */}
-      {systemHealth && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white/70 text-sm">Total Servers</p>
-                <p className="text-2xl font-bold text-white">{systemHealth.total_servers}</p>
-              </div>
-              <FaServer className="text-3xl text-brand-500" />
-            </div>
-          </div>
-          <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white/70 text-sm">Running Servers</p>
-                <p className="text-2xl font-bold text-green-400">{systemHealth.running_servers}</p>
-              </div>
-              <FaPlay className="text-3xl text-green-500" />
-            </div>
-          </div>
-          <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white/70 text-sm">CPU Usage</p>
-                <p className="text-2xl font-bold text-white">{systemHealth.cpu_usage_percent}%</p>
-              </div>
-              <FaMicrochip className="text-3xl text-yellow-500" />
-            </div>
-          </div>
-          <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white/70 text-sm">Memory Usage</p>
-                <p className="text-2xl font-bold text-white">
-                  {systemHealth.used_memory_gb} / {systemHealth.total_memory_gb} GB
-                </p>
-              </div>
-              <FaMemory className="text-3xl text-purple-500" />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Alerts */}
-      {alerts.length > 0 && (
+      {/* System Health Overview - Always show with fallback values */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <FaBell /> System Alerts
-          </h3>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white/70 text-sm">Total Servers</p>
+              <p className="text-2xl font-bold text-white">{systemHealth?.total_servers || globalData.servers?.length || 0}</p>
+            </div>
+            <FaServer className="text-3xl text-brand-500" />
+          </div>
+        </div>
+        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white/70 text-sm">Running Servers</p>
+              <p className="text-2xl font-bold text-green-400">
+                {systemHealth?.running_servers || globalData.servers?.filter(s => s.status === 'running').length || 0}
+              </p>
+            </div>
+            <FaPlay className="text-3xl text-green-500" />
+          </div>
+        </div>
+        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white/70 text-sm">CPU Usage</p>
+              <p className="text-2xl font-bold text-white">{systemHealth?.cpu_usage_percent || '--'}%</p>
+            </div>
+            <FaMicrochip className="text-3xl text-yellow-500" />
+          </div>
+        </div>
+        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white/70 text-sm">Memory Usage</p>
+              <p className="text-2xl font-bold text-white">
+                {systemHealth ? `${systemHealth.used_memory_gb} / ${systemHealth.total_memory_gb} GB` : '--'}
+              </p>
+            </div>
+            <FaMemory className="text-3xl text-purple-500" />
+          </div>
+        </div>
+      </div>
+
+      )}
+
+      {/* Alerts - Always show section */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <FaBell /> System Alerts
+        </h3>
+        {alerts && alerts.length > 0 ? (
           <div className="space-y-3">
             {alerts.map((alert, idx) => (
               <div key={idx} className={`p-4 rounded-lg border ${
@@ -1952,47 +2051,62 @@ function MonitoringPageImpl() {
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* Server Overview */}
-      {dashboardData && (
-        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <FaProjectDiagram /> Server Overview
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {dashboardData.server_overview.map((server, idx) => (
-              <div key={idx} className="bg-white/5 border border-white/10 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="font-medium">{server.name}</div>
-                  <div className={`px-2 py-1 rounded text-xs ${
-                    server.status === 'running'
-                      ? 'bg-green-500/20 text-green-300'
-                      : 'bg-red-500/20 text-red-300'
-                  }`}>
-                    {server.status}
-                  </div>
-                </div>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-white/70">CPU:</span>
-                    <span>{server.cpu_percent}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-white/70">Memory:</span>
-                    <span>{server.memory_percent}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-white/70">Players:</span>
-                    <span>{server.player_count}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
+        ) : (
+          <div className="text-center py-6 text-white/60">
+            <FaBell className="text-3xl mx-auto mb-2 text-white/30" />
+            <p className="text-sm">No active alerts</p>
+            <p className="text-xs text-white/40 mt-1">System is running normally</p>
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* Server Overview - Always show with available servers */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <FaProjectDiagram /> Server Overview
+        </h3>
+        {globalData.servers && globalData.servers.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {globalData.servers.map((server, idx) => {
+              const serverStats = globalData.serverStats?.[server.id];
+              return (
+                <div key={server.id || idx} className="bg-white/5 border border-white/10 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="font-medium">{server.name}</div>
+                    <div className={`px-2 py-1 rounded text-xs ${
+                      server.status === 'running'
+                        ? 'bg-green-500/20 text-green-300'
+                        : 'bg-red-500/20 text-red-300'
+                    }`}>
+                      {server.status || 'unknown'}
+                    </div>
+                  </div>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-white/70">CPU:</span>
+                      <span>{serverStats?.cpu_percent || '--'}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-white/70">Memory:</span>
+                      <span>{serverStats?.memory_usage_mb ? `${serverStats.memory_usage_mb} MB` : '--'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-white/70">Players:</span>
+                      <span>{serverStats?.player_count || 0}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-white/60">
+            <FaServer className="text-4xl mx-auto mb-3 text-white/30" />
+            <p className="text-lg">No servers created yet</p>
+            <p className="text-sm text-white/40 mt-2">Create your first Minecraft server to see monitoring data here</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2940,16 +3054,12 @@ function App() {
     selectedServer &&
     servers.find((s) => s.id === selectedServer);
 
+  // Navigation with advanced user management like Crafty Controller
   const sidebarItems = [
     { id: 'dashboard', label: 'Dashboard', icon: FaHome },
-    { id: 'servers', label: 'Servers', icon: FaServer },
-    { id: 'monitoring', label: 'Monitoring', icon: FaChartLine },
-    { id: 'users', label: 'User Management', icon: FaUsers },
-    { id: 'backups', label: 'Backups', icon: FaDatabase },
-    { id: 'schedule', label: 'Scheduler', icon: FaClock },
-    { id: 'plugins', label: 'Plugin Manager', icon: FaRocket },
-    { id: 'templates', label: 'Templates', icon: FaLayerGroup },
-    { id: 'security', label: 'Security', icon: FaShieldAlt },
+    { id: 'servers', label: 'My Servers', icon: FaServer },
+    { id: 'monitoring', label: 'Server Status', icon: FaChartLine },
+    { id: 'users', label: 'User Management', icon: FaUsers, adminOnly: true },
     { id: 'settings', label: 'Settings', icon: FaCog },
   ];
 
@@ -2995,17 +3105,7 @@ function App() {
       case 'monitoring':
         return <MonitoringPageImpl />;
       case 'users':
-        return <UserManagementPageImpl />;
-      case 'backups':
-        return <BackupManagementPage />;
-      case 'schedule':
-        return <SchedulerPage />;
-      case 'plugins':
-        return <PluginManagerPage />;
-      case 'templates':
-        return <TemplatesPage />;
-      case 'security':
-        return <SecurityPage />;
+        return <AdvancedUserManagementPageImpl />;
       case 'settings':
         return <SettingsPageImpl />;
       default:
@@ -3170,6 +3270,430 @@ function App() {
       </div>
       </div>
     </GlobalDataProvider>
+  );
+}
+
+// Advanced User Management Components
+
+// Users Tab Component
+function UsersTab({ 
+  users, roles, searchTerm, setSearchTerm, filterRole, setFilterRole, 
+  filterStatus, setFilterStatus, updateUserRole, toggleUserActive, 
+  deleteUser, setSelectedUser 
+}) {
+  return (
+    <div className="space-y-4">
+      {/* Search and Filters */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="relative">
+            <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-white/50" />
+            <input
+              type="text"
+              placeholder="Search users by username or email..."
+              className="w-full pl-10 pr-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/50 focus:ring-2 focus:ring-brand-500"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <select
+            value={filterRole}
+            onChange={(e) => setFilterRole(e.target.value)}
+            className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white"
+          >
+            <option value="all">All Roles</option>
+            {roles.map(role => (
+              <option key={role.name} value={role.name}>{role.name}</option>
+            ))}
+          </select>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white"
+          >
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Users Table */}
+      <div className="bg-white/5 border border-white/10 rounded-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-white/10">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">User</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Role</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Last Login</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/10">
+              {users.map((user) => {
+                const userRole = roles.find(r => r.name === user.role);
+                return (
+                  <tr key={user.id} className="hover:bg-white/5">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center">
+                        <div 
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold"
+                          style={{ backgroundColor: userRole?.color || '#6b7280' }}
+                        >
+                          {user.username?.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="ml-3">
+                          <div className="text-sm font-medium text-white">{user.username}</div>
+                          <div className="text-sm text-white/60">{user.email}</div>
+                          {user.fullName && <div className="text-xs text-white/50">{user.fullName}</div>}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <div 
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: userRole?.color || '#6b7280' }}
+                        />
+                        <span className="text-sm font-medium" style={{ color: userRole?.color || '#6b7280' }}>
+                          {user.role}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                        user.is_active
+                          ? 'bg-green-500/20 text-green-300 border border-green-500/30'
+                          : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                      }`}>
+                        {user.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-white/70">
+                      {user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setSelectedUser(user)}
+                          className="p-2 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 rounded"
+                          title="View Details"
+                        >
+                          <FaEye />
+                        </button>
+                        <button
+                          onClick={() => toggleUserActive(user.id, !user.is_active)}
+                          className={`p-2 rounded ${
+                            user.is_active 
+                              ? 'text-red-400 hover:text-red-300 hover:bg-red-500/10' 
+                              : 'text-green-400 hover:text-green-300 hover:bg-green-500/10'
+                          }`}
+                          title={user.is_active ? 'Deactivate User' : 'Activate User'}
+                        >
+                          {user.is_active ? <FaUserSlash /> : <FaUserCheck />}
+                        </button>
+                        <button
+                          onClick={() => deleteUser(user.id)}
+                          className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded"
+                          title="Delete User"
+                        >
+                          <FaTrash />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        
+        {users.length === 0 && (
+          <div className="text-center py-12 text-white/60">
+            <FaUsers className="text-4xl mx-auto mb-3 text-white/30" />
+            <p className="text-lg">No users found</p>
+            <p className="text-sm text-white/40 mt-2">Create your first user or adjust your search filters</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Roles Tab Component
+function RolesTab({ roles, permissionCategories, setSelectedRole }) {
+  return (
+    <div className="space-y-4">
+      {/* Role Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {roles.map((role) => {
+          const permissionCount = role.permissions?.length || 0;
+          return (
+            <div key={role.name} className="bg-white/5 border border-white/10 rounded-lg p-6 hover:bg-white/10 transition-colors">
+              <div className="flex items-center gap-4 mb-4">
+                <div 
+                  className="w-12 h-12 rounded-lg flex items-center justify-center"
+                  style={{ backgroundColor: role.color || '#6b7280' }}
+                >
+                  <FaShieldAlt className="text-xl text-white" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-lg" style={{ color: role.color || '#ffffff' }}>
+                    {role.name}
+                  </h3>
+                  <p className="text-sm text-white/60">{role.description}</p>
+                </div>
+                {role.is_system && (
+                  <div className="bg-blue-500/20 text-blue-300 px-2 py-1 rounded text-xs font-medium">
+                    System
+                  </div>
+                )}
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-white/70">Permissions</span>
+                  <span className="text-sm font-medium text-white">{permissionCount}</span>
+                </div>
+                
+                {role.level !== undefined && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-white/70">Access Level</span>
+                    <div className="flex items-center gap-1">
+                      {[...Array(5)].map((_, i) => (
+                        <div
+                          key={i}
+                          className={`w-2 h-2 rounded-full ${
+                            i < (role.level || 0) ? 'bg-brand-500' : 'bg-white/20'
+                          }`}
+                        />
+                      ))}
+                      <span className="ml-2 text-xs text-white/60">{role.level}/5</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              <div className="mt-4 pt-4 border-t border-white/10">
+                <button 
+                  onClick={() => setSelectedRole(role)}
+                  className="w-full py-2 px-4 bg-white/10 hover:bg-white/20 rounded-lg text-sm font-medium transition-colors"
+                >
+                  View Details
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      
+      {roles.length === 0 && (
+        <div className="text-center py-12 text-white/60">
+          <FaShieldAlt className="text-4xl mx-auto mb-3 text-white/30" />
+          <p className="text-lg">No roles configured</p>
+          <p className="text-sm text-white/40 mt-2">Create your first role to get started</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Audit Tab Component 
+function AuditTab({ auditLogs }) {
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+      <div className="space-y-3 max-h-96 overflow-y-auto">
+        {auditLogs.length > 0 ? (
+          auditLogs.map((log, idx) => (
+            <div key={idx} className="flex items-center gap-4 p-3 bg-white/5 rounded-lg">
+              <div className="w-8 h-8 bg-brand-500/20 rounded-full flex items-center justify-center">
+                <FaHistory className="text-xs text-brand-400" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-medium text-white">{log.action}</span>
+                  <span className="text-white/60">by user {log.user_id}</span>
+                  <span className="text-xs text-brand-400">
+                    {new Date(log.timestamp).toLocaleString()}
+                  </span>
+                </div>
+                {log.details && (
+                  <div className="text-xs text-white/50 mt-1">
+                    {typeof log.details === 'object' ? JSON.stringify(log.details) : log.details}
+                  </div>
+                )}
+              </div>
+              <div className="text-xs text-white/40">
+                {log.resource_type && `${log.resource_type}:${log.resource_id}`}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="text-center py-8 text-white/60">
+            <FaHistory className="text-3xl mx-auto mb-2 text-white/30" />
+            <p className="text-sm">No audit logs available</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Create User Modal Component
+function CreateUserModal({ show, onClose, newUser, setNewUser, roles, onSubmit }) {
+  if (!show) return null;
+  
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white/10 border border-white/20 rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-semibold text-white">Create New User</h3>
+          <button 
+            onClick={onClose}
+            className="text-white/60 hover:text-white"
+          >
+            <FaTimes />
+          </button>
+        </div>
+        
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-white/70 mb-2">Username *</label>
+            <input
+              type="text"
+              value={newUser.username}
+              onChange={(e) => setNewUser({...newUser, username: e.target.value})}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white focus:ring-2 focus:ring-brand-500"
+              placeholder="Enter username"
+              required
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-white/70 mb-2">Email *</label>
+            <input
+              type="email"
+              value={newUser.email}
+              onChange={(e) => setNewUser({...newUser, email: e.target.value})}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white focus:ring-2 focus:ring-brand-500"
+              placeholder="Enter email"
+              required
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-white/70 mb-2">Full Name</label>
+            <input
+              type="text"
+              value={newUser.fullName}
+              onChange={(e) => setNewUser({...newUser, fullName: e.target.value})}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white focus:ring-2 focus:ring-brand-500"
+              placeholder="Enter full name (optional)"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-white/70 mb-2">Password *</label>
+            <input
+              type="password"
+              value={newUser.password}
+              onChange={(e) => setNewUser({...newUser, password: e.target.value})}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white focus:ring-2 focus:ring-brand-500"
+              placeholder="Enter password"
+              required
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-white/70 mb-2">Confirm Password *</label>
+            <input
+              type="password"
+              value={newUser.confirmPassword}
+              onChange={(e) => setNewUser({...newUser, confirmPassword: e.target.value})}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white focus:ring-2 focus:ring-brand-500"
+              placeholder="Confirm password"
+              required
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-white/70 mb-2">Role</label>
+            <select
+              value={newUser.role}
+              onChange={(e) => setNewUser({...newUser, role: e.target.value})}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white focus:ring-2 focus:ring-brand-500"
+            >
+              {roles.map(role => (
+                <option key={role.name} value={role.name} style={{ backgroundColor: '#1f2937' }}>
+                  {role.name} - {role.description}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="mustChangePassword"
+              checked={newUser.mustChangePassword}
+              onChange={(e) => setNewUser({...newUser, mustChangePassword: e.target.checked})}
+              className="w-4 h-4 text-brand-500 bg-white/10 border-white/20 rounded focus:ring-brand-500"
+            />
+            <label htmlFor="mustChangePassword" className="text-sm text-white/70">
+              Require password change on first login
+            </label>
+          </div>
+        </div>
+        
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded text-white transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSubmit}
+            className="px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded text-white transition-colors"
+          >
+            Create User
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Placeholder components for CreateRoleModal and PermissionMatrixModal
+function CreateRoleModal({ show, onClose }) {
+  if (!show) return null;
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white/10 border border-white/20 rounded-lg p-6 w-full max-w-md">
+        <h3 className="text-lg font-semibold mb-4">Create Role</h3>
+        <p className="text-white/70 mb-4">Role creation interface coming soon...</p>
+        <button onClick={onClose} className="px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded text-white">
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PermissionMatrixModal({ show, onClose }) {
+  if (!show) return null;
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white/10 border border-white/20 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+        <h3 className="text-lg font-semibold mb-4">Permission Matrix</h3>
+        <p className="text-white/70 mb-4">Advanced permission matrix interface coming soon...</p>
+        <button onClick={onClose} className="px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded text-white">
+          Close
+        </button>
+      </div>
+    </div>
   );
 }
 
