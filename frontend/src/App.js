@@ -18,6 +18,54 @@ import {
   FaMicrochip,
   FaNetworkWired,
   FaChevronRight,
+  FaHome,
+  FaUserCog,
+  FaChartLine,
+  FaDatabase,
+  FaBell,
+  FaShieldAlt,
+  FaClipboardList,
+  FaFileExport,
+  FaHistory,
+  FaRocket,
+  FaCode,
+  FaHeart,
+  FaExclamationTriangle,
+  FaCheckCircle,
+  FaTimesCircle,
+  FaInfoCircle,
+  FaEdit,
+  FaPlus,
+  FaMinus,
+  FaSearch,
+  FaFilter,
+  FaSort,
+  FaSync,
+  FaEye,
+  FaEyeSlash,
+  FaKey,
+  FaCopy,
+  FaGlobe,
+  FaEnvelope,
+  FaTasks,
+  FaLayerGroup,
+  FaProjectDiagram,
+  FaTools,
+  FaWrench,
+  FaBug,
+  FaLifeRing,
+  FaQuestionCircle,
+  FaBook,
+  FaNewspaper,
+  FaCalendarAlt,
+  FaStopwatch,
+  FaBackward,
+  FaForward,
+  FaPause,
+  FaStepBackward,
+  FaStepForward,
+  FaFastBackward,
+  FaFastForward,
 } from 'react-icons/fa';
 
 const API = 'http://localhost:8000';
@@ -1209,6 +1257,1077 @@ function ServerListCard({ server, onClick }) {
   );
 }
 
+// User Management Components
+function UserManagementPage() {
+  const [users, setUsers] = useState([]);
+  const [roles, setRoles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [newUser, setNewUser] = useState({ username: '', email: '', role: 'user', password: '' });
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    loadUsers();
+    loadRoles();
+    loadAuditLogs();
+  }, []);
+
+  async function loadUsers() {
+    try {
+      const r = await fetch(`${API}/users`);
+      const data = await r.json();
+      setUsers(data.users || []);
+    } catch (e) {
+      console.error('Failed to load users:', e);
+    }
+  }
+
+  async function loadRoles() {
+    try {
+      const r = await fetch(`${API}/users/roles`);
+      const data = await r.json();
+      setRoles(data.roles || []);
+    } catch (e) {
+      console.error('Failed to load roles:', e);
+    }
+  }
+
+  async function loadAuditLogs() {
+    try {
+      const r = await fetch(`${API}/users/audit-logs?limit=50`);
+      const data = await r.json();
+      setAuditLogs(data.logs || []);
+    } catch (e) {
+      console.error('Failed to load audit logs:', e);
+    }
+    setLoading(false);
+  }
+
+  async function createUser() {
+    try {
+      await fetch(`${API}/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser),
+      });
+      setShowCreateUser(false);
+      setNewUser({ username: '', email: '', role: 'user', password: '' });
+      loadUsers();
+    } catch (e) {
+      console.error('Failed to create user:', e);
+    }
+  }
+
+  async function updateUserRole(userId, newRole) {
+    try {
+      await fetch(`${API}/users/${userId}/role`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
+      loadUsers();
+    } catch (e) {
+      console.error('Failed to update user role:', e);
+    }
+  }
+
+  async function toggleUserActive(userId, isActive) {
+    try {
+      await fetch(`${API}/users/${userId}/${isActive ? 'activate' : 'deactivate'}`, {
+        method: 'PUT',
+      });
+      loadUsers();
+    } catch (e) {
+      console.error('Failed to toggle user status:', e);
+    }
+  }
+
+  async function deleteUser(userId) {
+    if (!confirm('Are you sure you want to delete this user?')) return;
+    try {
+      await fetch(`${API}/users/${userId}`, { method: 'DELETE' });
+      loadUsers();
+    } catch (e) {
+      console.error('Failed to delete user:', e);
+    }
+  }
+
+  const filteredUsers = users.filter(user => 
+    user.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    user.email?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  if (loading) return <div className="p-6"><div className="text-white/70">Loading users...</div></div>;
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-3">
+            <FaUsers className="text-brand-500" /> User Management
+          </h1>
+          <p className="text-white/70 mt-2">Manage users, roles, and permissions</p>
+        </div>
+        <button
+          onClick={() => setShowCreateUser(true)}
+          className="bg-brand-500 hover:bg-brand-600 px-4 py-2 rounded-lg flex items-center gap-2"
+        >
+          <FaPlus /> Create User
+        </button>
+      </div>
+
+      {/* Search and filters */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+        <div className="flex items-center gap-4">
+          <div className="flex-1 relative">
+            <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-white/50" />
+            <input
+              type="text"
+              placeholder="Search users by username or email..."
+              className="w-full pl-10 pr-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <button className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg flex items-center gap-2">
+            <FaFilter /> Filter
+          </button>
+        </div>
+      </div>
+
+      {/* Users table */}
+      <div className="bg-white/5 border border-white/10 rounded-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-white/10">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">User</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Role</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Last Login</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/10">
+              {filteredUsers.map((user) => (
+                <tr key={user.id} className="hover:bg-white/5">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex items-center">
+                      <div className="w-8 h-8 bg-brand-500 rounded-full flex items-center justify-center">
+                        <FaUsers className="text-sm text-white" />
+                      </div>
+                      <div className="ml-3">
+                        <div className="text-sm font-medium text-white">{user.username}</div>
+                        <div className="text-sm text-white/60">{user.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <select
+                      value={user.role}
+                      onChange={(e) => updateUserRole(user.id, e.target.value)}
+                      className="bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm"
+                    >
+                      {roles.map(role => (
+                        <option key={role.name} value={role.name} style={{ backgroundColor: '#1f2937' }}>
+                          {role.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                      user.is_active
+                        ? 'bg-green-500/20 text-green-300'
+                        : 'bg-red-500/20 text-red-300'
+                    }`}>
+                      {user.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-white/70">
+                    {user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                    <button
+                      onClick={() => setSelectedUser(user)}
+                      className="text-blue-400 hover:text-blue-300"
+                    >
+                      <FaEye />
+                    </button>
+                    <button
+                      onClick={() => toggleUserActive(user.id, !user.is_active)}
+                      className={`${user.is_active ? 'text-red-400 hover:text-red-300' : 'text-green-400 hover:text-green-300'}`}
+                    >
+                      {user.is_active ? <FaEyeSlash /> : <FaEye />}
+                    </button>
+                    <button
+                      onClick={() => deleteUser(user.id)}
+                      className="text-red-400 hover:text-red-300"
+                    >
+                      <FaTrash />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Audit Logs */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <FaHistory /> Recent Audit Logs
+        </h3>
+        <div className="space-y-2 max-h-64 overflow-y-auto">
+          {auditLogs.map((log, idx) => (
+            <div key={idx} className="flex items-center gap-3 text-sm p-2 bg-white/5 rounded">
+              <div className="text-brand-400 text-xs">
+                {new Date(log.timestamp).toLocaleString()}
+              </div>
+              <div className="text-white/80">{log.action}</div>
+              <div className="text-white/60">{log.user_id}</div>
+              {log.details && <div className="text-white/50 text-xs">{JSON.stringify(log.details)}</div>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Create User Modal */}
+      {showCreateUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white/10 border border-white/20 rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Create New User</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">Username</label>
+                <input
+                  type="text"
+                  value={newUser.username}
+                  onChange={(e) => setNewUser({...newUser, username: e.target.value})}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+                  placeholder="Enter username"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">Email</label>
+                <input
+                  type="email"
+                  value={newUser.email}
+                  onChange={(e) => setNewUser({...newUser, email: e.target.value})}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+                  placeholder="Enter email"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">Password</label>
+                <input
+                  type="password"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser({...newUser, password: e.target.value})}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+                  placeholder="Enter password"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">Role</label>
+                <select
+                  value={newUser.role}
+                  onChange={(e) => setNewUser({...newUser, role: e.target.value})}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+                >
+                  {roles.map(role => (
+                    <option key={role.name} value={role.name} style={{ backgroundColor: '#1f2937' }}>
+                      {role.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setShowCreateUser(false)}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={createUser}
+                className="px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded text-white"
+              >
+                Create User
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Monitoring Dashboard
+function MonitoringPage() {
+  const [systemHealth, setSystemHealth] = useState(null);
+  const [serverMetrics, setServerMetrics] = useState([]);
+  const [alerts, setAlerts] = useState([]);
+  const [dashboardData, setDashboardData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadMonitoringData();
+    const interval = setInterval(loadMonitoringData, 10000); // Update every 10 seconds
+    return () => clearInterval(interval);
+  }, []);
+
+  async function loadMonitoringData() {
+    try {
+      const [healthRes, dashboardRes, alertsRes] = await Promise.all([
+        fetch(`${API}/monitoring/system-health`),
+        fetch(`${API}/monitoring/dashboard-data`),
+        fetch(`${API}/monitoring/alerts`)
+      ]);
+      
+      if (healthRes.ok) setSystemHealth(await healthRes.json());
+      if (dashboardRes.ok) setDashboardData(await dashboardRes.json());
+      if (alertsRes.ok) setAlerts((await alertsRes.json()).alerts || []);
+    } catch (e) {
+      console.error('Failed to load monitoring data:', e);
+    }
+    setLoading(false);
+  }
+
+  if (loading) return <div className="p-6"><div className="text-white/70">Loading monitoring data...</div></div>;
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-3">
+            <FaChartLine className="text-brand-500" /> System Monitoring
+          </h1>
+          <p className="text-white/70 mt-2">Real-time system and server performance monitoring</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={loadMonitoringData}
+            className="bg-brand-500 hover:bg-brand-600 px-4 py-2 rounded-lg flex items-center gap-2"
+          >
+            <FaSync /> Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* System Health Overview */}
+      {systemHealth && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-white/70 text-sm">Total Servers</p>
+                <p className="text-2xl font-bold text-white">{systemHealth.total_servers}</p>
+              </div>
+              <FaServer className="text-3xl text-brand-500" />
+            </div>
+          </div>
+          <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-white/70 text-sm">Running Servers</p>
+                <p className="text-2xl font-bold text-green-400">{systemHealth.running_servers}</p>
+              </div>
+              <FaPlay className="text-3xl text-green-500" />
+            </div>
+          </div>
+          <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-white/70 text-sm">CPU Usage</p>
+                <p className="text-2xl font-bold text-white">{systemHealth.cpu_usage_percent}%</p>
+              </div>
+              <FaMicrochip className="text-3xl text-yellow-500" />
+            </div>
+          </div>
+          <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-white/70 text-sm">Memory Usage</p>
+                <p className="text-2xl font-bold text-white">
+                  {systemHealth.used_memory_gb} / {systemHealth.total_memory_gb} GB
+                </p>
+              </div>
+              <FaMemory className="text-3xl text-purple-500" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alerts */}
+      {alerts.length > 0 && (
+        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <FaBell /> System Alerts
+          </h3>
+          <div className="space-y-3">
+            {alerts.map((alert, idx) => (
+              <div key={idx} className={`p-4 rounded-lg border ${
+                alert.type === 'warning' 
+                  ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-300'
+                  : alert.type === 'error'
+                  ? 'bg-red-500/10 border-red-500/20 text-red-300'
+                  : 'bg-blue-500/10 border-blue-500/20 text-blue-300'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {alert.type === 'warning' && <FaExclamationTriangle />}
+                    {alert.type === 'error' && <FaTimesCircle />}
+                    {alert.type === 'info' && <FaInfoCircle />}
+                    <span>{alert.message}</span>
+                  </div>
+                  <span className="text-sm opacity-70">
+                    {new Date(alert.timestamp).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Server Overview */}
+      {dashboardData && (
+        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <FaProjectDiagram /> Server Overview
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {dashboardData.server_overview.map((server, idx) => (
+              <div key={idx} className="bg-white/5 border border-white/10 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="font-medium">{server.name}</div>
+                  <div className={`px-2 py-1 rounded text-xs ${
+                    server.status === 'running'
+                      ? 'bg-green-500/20 text-green-300'
+                      : 'bg-red-500/20 text-red-300'
+                  }`}>
+                    {server.status}
+                  </div>
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-white/70">CPU:</span>
+                    <span>{server.cpu_percent}%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-white/70">Memory:</span>
+                    <span>{server.memory_percent}%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-white/70">Players:</span>
+                    <span>{server.player_count}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// System Settings Page
+function SettingsPage() {
+  const [settings, setSettings] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [backupSettings, setBackupSettings] = useState({
+    auto_backup: true,
+    backup_interval: 24,
+    keep_backups: 7,
+    backup_location: '/data/backups'
+  });
+  const [notificationSettings, setNotificationSettings] = useState({
+    email_enabled: false,
+    email_smtp_host: '',
+    email_smtp_port: 587,
+    email_username: '',
+    email_password: '',
+    webhook_url: '',
+    alert_on_server_crash: true,
+    alert_on_high_cpu: true,
+    alert_on_high_memory: true
+  });
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  async function loadSettings() {
+    try {
+      // This would load from backend settings API
+      setLoading(false);
+    } catch (e) {
+      console.error('Failed to load settings:', e);
+      setLoading(false);
+    }
+  }
+
+  async function saveSettings() {
+    setSaving(true);
+    try {
+      // This would save to backend settings API
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API call
+      alert('Settings saved successfully!');
+    } catch (e) {
+      console.error('Failed to save settings:', e);
+      alert('Failed to save settings');
+    }
+    setSaving(false);
+  }
+
+  if (loading) return <div className="p-6"><div className="text-white/70">Loading settings...</div></div>;
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-3">
+            <FaCog className="text-brand-500" /> System Settings
+          </h1>
+          <p className="text-white/70 mt-2">Configure system preferences and integrations</p>
+        </div>
+        <button
+          onClick={saveSettings}
+          disabled={saving}
+          className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded-lg flex items-center gap-2"
+        >
+          <FaSave /> {saving ? 'Saving...' : 'Save Settings'}
+        </button>
+      </div>
+
+      {/* Backup Settings */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <FaDatabase /> Backup Settings
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="auto_backup"
+                checked={backupSettings.auto_backup}
+                onChange={(e) => setBackupSettings({...backupSettings, auto_backup: e.target.checked})}
+                className="w-4 h-4 text-brand-500 bg-white/10 border-white/20 rounded focus:ring-brand-500"
+              />
+              <label htmlFor="auto_backup" className="text-white/80">Enable automatic backups</label>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Backup Interval (hours)</label>
+              <input
+                type="number"
+                value={backupSettings.backup_interval}
+                onChange={(e) => setBackupSettings({...backupSettings, backup_interval: parseInt(e.target.value)})}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+              />
+            </div>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Keep Backups (days)</label>
+              <input
+                type="number"
+                value={backupSettings.keep_backups}
+                onChange={(e) => setBackupSettings({...backupSettings, keep_backups: parseInt(e.target.value)})}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Backup Location</label>
+              <input
+                type="text"
+                value={backupSettings.backup_location}
+                onChange={(e) => setBackupSettings({...backupSettings, backup_location: e.target.value})}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Notification Settings */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <FaBell /> Notification Settings
+        </h3>
+        <div className="space-y-6">
+          <div className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              id="email_enabled"
+              checked={notificationSettings.email_enabled}
+              onChange={(e) => setNotificationSettings({...notificationSettings, email_enabled: e.target.checked})}
+              className="w-4 h-4 text-brand-500 bg-white/10 border-white/20 rounded focus:ring-brand-500"
+            />
+            <label htmlFor="email_enabled" className="text-white/80">Enable email notifications</label>
+          </div>
+          
+          {notificationSettings.email_enabled && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 ml-7">
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">SMTP Host</label>
+                <input
+                  type="text"
+                  value={notificationSettings.email_smtp_host}
+                  onChange={(e) => setNotificationSettings({...notificationSettings, email_smtp_host: e.target.value})}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+                  placeholder="smtp.gmail.com"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">SMTP Port</label>
+                <input
+                  type="number"
+                  value={notificationSettings.email_smtp_port}
+                  onChange={(e) => setNotificationSettings({...notificationSettings, email_smtp_port: parseInt(e.target.value)})}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">Email Username</label>
+                <input
+                  type="text"
+                  value={notificationSettings.email_username}
+                  onChange={(e) => setNotificationSettings({...notificationSettings, email_username: e.target.value})}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">Email Password</label>
+                <input
+                  type="password"
+                  value={notificationSettings.email_password}
+                  onChange={(e) => setNotificationSettings({...notificationSettings, email_password: e.target.value})}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+                />
+              </div>
+            </div>
+          )}
+          
+          <div>
+            <label className="block text-sm font-medium text-white/70 mb-2">Webhook URL</label>
+            <input
+              type="url"
+              value={notificationSettings.webhook_url}
+              onChange={(e) => setNotificationSettings({...notificationSettings, webhook_url: e.target.value})}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+              placeholder="https://hooks.slack.com/services/..."
+            />
+          </div>
+          
+          <div className="space-y-3">
+            <h4 className="font-medium text-white/80">Alert Types</h4>
+            <div className="space-y-2">
+              {[
+                { key: 'alert_on_server_crash', label: 'Server crashes' },
+                { key: 'alert_on_high_cpu', label: 'High CPU usage' },
+                { key: 'alert_on_high_memory', label: 'High memory usage' }
+              ].map(alert => (
+                <div key={alert.key} className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id={alert.key}
+                    checked={notificationSettings[alert.key]}
+                    onChange={(e) => setNotificationSettings({...notificationSettings, [alert.key]: e.target.checked})}
+                    className="w-4 h-4 text-brand-500 bg-white/10 border-white/20 rounded focus:ring-brand-500"
+                  />
+                  <label htmlFor={alert.key} className="text-white/70">{alert.label}</label>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Dashboard Page
+function DashboardPage({ servers = [] }) {
+  const [systemStats, setSystemStats] = useState(null);
+  const [recentActivity, setRecentActivity] = useState([]);
+  const [quickStats, setQuickStats] = useState({
+    totalServers: 0,
+    runningServers: 0,
+    totalPlayers: 0,
+    totalMemoryUsage: 0
+  });
+
+  useEffect(() => {
+    // Calculate quick stats
+    const running = servers.filter(s => s.status === 'running').length;
+    setQuickStats({
+      totalServers: servers.length,
+      runningServers: running,
+      totalPlayers: 0, // This would be calculated from server stats
+      totalMemoryUsage: 0 // This would be calculated from server stats
+    });
+  }, [servers]);
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-3">
+            <FaHome className="text-brand-500" /> Dashboard
+          </h1>
+          <p className="text-white/70 mt-2">Overview of your Minecraft server infrastructure</p>
+        </div>
+      </div>
+
+      {/* Quick Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white/70 text-sm">Total Servers</p>
+              <p className="text-3xl font-bold text-white">{quickStats.totalServers}</p>
+            </div>
+            <FaServer className="text-4xl text-brand-500" />
+          </div>
+        </div>
+        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white/70 text-sm">Running Servers</p>
+              <p className="text-3xl font-bold text-green-400">{quickStats.runningServers}</p>
+            </div>
+            <FaPlay className="text-4xl text-green-500" />
+          </div>
+        </div>
+        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white/70 text-sm">Total Players</p>
+              <p className="text-3xl font-bold text-blue-400">{quickStats.totalPlayers}</p>
+            </div>
+            <FaUsers className="text-4xl text-blue-500" />
+          </div>
+        </div>
+        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white/70 text-sm">System Health</p>
+              <p className="text-3xl font-bold text-yellow-400">Good</p>
+            </div>
+            <FaHeart className="text-4xl text-red-500" />
+          </div>
+        </div>
+      </div>
+
+      {/* Server Status Overview */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <FaServer /> Server Status
+          </h3>
+          <div className="space-y-3">
+            {servers.slice(0, 5).map(server => (
+              <div key={server.id} className="flex items-center justify-between p-3 bg-white/5 rounded">
+                <div className="flex items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full ${
+                    server.status === 'running' ? 'bg-green-500' : 'bg-red-500'
+                  }`} />
+                  <span className="font-medium">{server.name}</span>
+                </div>
+                <span className={`text-sm px-2 py-1 rounded ${
+                  server.status === 'running'
+                    ? 'bg-green-500/20 text-green-300'
+                    : 'bg-red-500/20 text-red-300'
+                }`}>
+                  {server.status}
+                </span>
+              </div>
+            ))}
+            {servers.length === 0 && (
+              <div className="text-white/60 text-center py-8">
+                No servers created yet
+              </div>
+            )}
+          </div>
+        </div>
+        
+        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <FaBell /> Recent Activity
+          </h3>
+          <div className="space-y-3">
+            {recentActivity.length > 0 ? (
+              recentActivity.map((activity, idx) => (
+                <div key={idx} className="flex items-center gap-3 p-3 bg-white/5 rounded">
+                  <FaInfoCircle className="text-blue-400" />
+                  <div>
+                    <div className="text-sm">{activity.message}</div>
+                    <div className="text-xs text-white/60">{activity.timestamp}</div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-white/60 text-center py-8">
+                No recent activity
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Actions */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <FaRocket /> Quick Actions
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <button className="flex items-center gap-3 p-4 bg-brand-500/20 hover:bg-brand-500/30 border border-brand-500/30 rounded-lg transition-colors">
+            <FaPlusCircle className="text-brand-400" />
+            <span>Create Server</span>
+          </button>
+          <button className="flex items-center gap-3 p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors">
+            <FaDownload className="text-white/60" />
+            <span>Backup All</span>
+          </button>
+          <button className="flex items-center gap-3 p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors">
+            <FaChartLine className="text-white/60" />
+            <span>View Metrics</span>
+          </button>
+          <button className="flex items-center gap-3 p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors">
+            <FaCog className="text-white/60" />
+            <span>Settings</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Servers Page
+function ServersPage({
+  servers, serversLoading, onSelectServer, onCreateServer,
+  types, versionsData, selectedType, setSelectedType,
+  name, setName, version, setVersion, hostPort, setHostPort,
+  minRam, setMinRam, maxRam, setMaxRam, loaderVersion, setLoaderVersion,
+  loaderVersionsData, installerVersion, setInstallerVersion
+}) {
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-3">
+            <FaServer className="text-brand-500" /> Server Management
+          </h1>
+          <p className="text-white/70 mt-2">Create and manage your Minecraft servers</p>
+        </div>
+      </div>
+
+      {/* Create Server Form */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <FaPlusCircle /> Create New Server
+        </h3>
+        <form onSubmit={onCreateServer} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Server Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-white/50"
+                placeholder="Enter server name"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Server Type</label>
+              <select
+                value={selectedType}
+                onChange={(e) => setSelectedType(e.target.value)}
+                className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white"
+              >
+                {types.map((t) => (
+                  <option key={t} value={t} style={{ backgroundColor: '#1f2937' }}>{t}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Version</label>
+              <select
+                value={version}
+                onChange={(e) => setVersion(e.target.value)}
+                className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white"
+              >
+                {(versionsData?.versions || []).map((v) => (
+                  <option key={v} value={v} style={{ backgroundColor: '#1f2937' }}>{v}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Host Port</label>
+              <input
+                type="number"
+                value={hostPort}
+                onChange={(e) => setHostPort(e.target.value)}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-white/50"
+                placeholder="25565"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Min RAM (MB)</label>
+              <input
+                type="number"
+                value={minRam}
+                onChange={(e) => setMinRam(e.target.value)}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Max RAM (MB)</label>
+              <input
+                type="number"
+                value={maxRam}
+                onChange={(e) => setMaxRam(e.target.value)}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+              />
+            </div>
+          </div>
+          <button
+            type="submit"
+            className="bg-brand-500 hover:bg-brand-600 px-6 py-3 rounded-lg text-white font-medium flex items-center gap-2"
+          >
+            <FaPlusCircle /> Create Server
+          </button>
+        </form>
+      </div>
+
+      {/* Servers List */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4">Your Servers</h3>
+        {serversLoading ? (
+          <div className="text-white/70">Loading servers...</div>
+        ) : servers.length === 0 ? (
+          <div className="text-white/60 text-center py-8">
+            No servers created yet. Create your first server above.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {servers.map((server) => (
+              <ServerListCard
+                key={server.id}
+                server={server}
+                onClick={() => onSelectServer(server.id)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Placeholder components for missing pages
+function BackupManagementPage() {
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold flex items-center gap-3">
+          <FaDatabase className="text-brand-500" /> Backup Management
+        </h1>
+        <p className="text-white/70 mt-2">Manage automatic and manual backups</p>
+      </div>
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
+        <FaDatabase className="text-6xl text-white/20 mx-auto mb-4" />
+        <h3 className="text-xl font-semibold mb-2">Backup Management</h3>
+        <p className="text-white/60">Advanced backup management features coming soon!</p>
+      </div>
+    </div>
+  );
+}
+
+function SchedulerPage() {
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold flex items-center gap-3">
+          <FaClock className="text-brand-500" /> Task Scheduler
+        </h1>
+        <p className="text-white/70 mt-2">Schedule automated tasks and maintenance</p>
+      </div>
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
+        <FaClock className="text-6xl text-white/20 mx-auto mb-4" />
+        <h3 className="text-xl font-semibold mb-2">Task Scheduler</h3>
+        <p className="text-white/60">Advanced scheduling features coming soon!</p>
+      </div>
+    </div>
+  );
+}
+
+function PluginManagerPage() {
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold flex items-center gap-3">
+          <FaRocket className="text-brand-500" /> Plugin Manager
+        </h1>
+        <p className="text-white/70 mt-2">Browse and install plugins for your servers</p>
+      </div>
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
+        <FaRocket className="text-6xl text-white/20 mx-auto mb-4" />
+        <h3 className="text-xl font-semibold mb-2">Plugin Manager</h3>
+        <p className="text-white/60">Plugin marketplace and management coming soon!</p>
+      </div>
+    </div>
+  );
+}
+
+function TemplatesPage() {
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold flex items-center gap-3">
+          <FaLayerGroup className="text-brand-500" /> Server Templates
+        </h1>
+        <p className="text-white/70 mt-2">Create and manage server templates</p>
+      </div>
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
+        <FaLayerGroup className="text-6xl text-white/20 mx-auto mb-4" />
+        <h3 className="text-xl font-semibold mb-2">Server Templates</h3>
+        <p className="text-white/60">Template system coming soon!</p>
+      </div>
+    </div>
+  );
+}
+
+function SecurityPage() {
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold flex items-center gap-3">
+          <FaShieldAlt className="text-brand-500" /> Security Center
+        </h1>
+        <p className="text-white/70 mt-2">Manage security settings and access controls</p>
+      </div>
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
+        <FaShieldAlt className="text-6xl text-white/20 mx-auto mb-4" />
+        <h3 className="text-xl font-semibold mb-2">Security Center</h3>
+        <p className="text-white/60">Advanced security features coming soon!</p>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   // Auth state
   const [authToken, setAuthToken] = useState(getStoredToken());
@@ -1217,8 +2336,13 @@ function App() {
   const [loginPassword, setLoginPassword] = useState('admin123');
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  
+  // Main navigation state
+  const [currentPage, setCurrentPage] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Validate token on load and whenever it changes
+  // Validate token and fetch current user
   useEffect(() => {
     let cancelled = false;
     async function validate() {
@@ -1226,9 +2350,14 @@ function App() {
       try {
         const r = await fetch(`${API}/auth/me`);
         if (!r.ok) throw new Error('invalid');
+        const user = await r.json();
+        if (!cancelled) setCurrentUser(user);
       } catch (_) {
         clearStoredToken();
-        if (!cancelled) setAuthToken('');
+        if (!cancelled) {
+          setAuthToken('');
+          setCurrentUser(null);
+        }
       }
     }
     validate();
@@ -1428,243 +2557,233 @@ function App() {
     selectedServer &&
     servers.find((s) => s.id === selectedServer);
 
+  const sidebarItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: FaHome },
+    { id: 'servers', label: 'Servers', icon: FaServer },
+    { id: 'monitoring', label: 'Monitoring', icon: FaChartLine },
+    { id: 'users', label: 'User Management', icon: FaUsers },
+    { id: 'backups', label: 'Backups', icon: FaDatabase },
+    { id: 'schedule', label: 'Scheduler', icon: FaClock },
+    { id: 'plugins', label: 'Plugin Manager', icon: FaRocket },
+    { id: 'templates', label: 'Templates', icon: FaLayerGroup },
+    { id: 'security', label: 'Security', icon: FaShieldAlt },
+    { id: 'settings', label: 'Settings', icon: FaCog },
+  ];
+
+  function renderCurrentPage() {
+    switch (currentPage) {
+      case 'dashboard':
+        return <DashboardPage servers={servers} />;
+      case 'servers':
+        return selectedServer ? (
+          selectedServerObj && (
+            <ServerDetailsPage
+              server={selectedServerObj}
+              onBack={() => setSelectedServer(null)}
+              onStart={start}
+              onStop={stop}
+              onDelete={del}
+              onRestart={restart}
+            />
+          )
+        ) : (
+          <ServersPage
+            servers={servers}
+            serversLoading={serversLoading}
+            onSelectServer={setSelectedServer}
+            onCreateServer={createServer}
+            types={types}
+            versionsData={versionsData}
+            selectedType={selectedType}
+            setSelectedType={setSelectedType}
+            name={name}
+            setName={setName}
+            version={version}
+            setVersion={setVersion}
+            hostPort={hostPort}
+            setHostPort={setHostPort}
+            minRam={minRam}
+            setMinRam={setMinRam}
+            maxRam={maxRam}
+            setMaxRam={setMaxRam}
+            loaderVersion={loaderVersion}
+            setLoaderVersion={setLoaderVersion}
+            loaderVersionsData={loaderVersionsData}
+            installerVersion={installerVersion}
+            setInstallerVersion={setInstallerVersion}
+          />
+        );
+      case 'monitoring':
+        return <MonitoringPage />;
+      case 'users':
+        return <UserManagementPage />;
+      case 'backups':
+        return <BackupManagementPage />;
+      case 'schedule':
+        return <SchedulerPage />;
+      case 'plugins':
+        return <PluginManagerPage />;
+      case 'templates':
+        return <TemplatesPage />;
+      case 'security':
+        return <SecurityPage />;
+      case 'settings':
+        return <SettingsPage />;
+      default:
+        return <DashboardPage servers={servers} />;
+    }
+  }
+
   return (
-    <div className="min-h-full bg-ink bg-hero-gradient">
-      <header className="border-b border-white/10 bg-ink/80 backdrop-blur supports-[backdrop-filter]:bg-ink/60">
-        <div className="container flex items-center justify-between h-14">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-md bg-brand-500 inline-flex items-center justify-center shadow-card">
-              <FaServer className="text-white" />
+    <div className="min-h-screen bg-ink bg-hero-gradient flex">
+      {/* Sidebar */}
+      {isAuthenticated && (
+        <div className={`${sidebarOpen ? 'w-64' : 'w-16'} bg-black/20 border-r border-white/10 transition-all duration-300 flex flex-col`}>
+          <div className="p-4 border-b border-white/10">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-md bg-brand-500 inline-flex items-center justify-center shadow-card">
+                <FaServer className="text-white" />
+              </div>
+              {sidebarOpen && <div className="font-semibold">Minecraft Panel</div>}
             </div>
-            <div className="font-semibold">Minecraft Panel</div>
           </div>
-          <div>
-            {isAuthenticated && (
-              <button onClick={handleLogout} className="text-sm text-white/70 hover:text-white border border-white/10 rounded px-3 py-1.5">
-                Logout
-              </button>
-            )}
+          <nav className="flex-1 p-4">
+            <div className="space-y-2">
+              {sidebarItems.map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setCurrentPage(item.id);
+                    setSelectedServer(null); // Clear server selection when changing pages
+                  }}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                    currentPage === item.id
+                      ? 'bg-brand-500 text-white'
+                      : 'text-white/70 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <item.icon className={`${sidebarOpen ? 'text-lg' : 'text-xl'}`} />
+                  {sidebarOpen && <span>{item.label}</span>}
+                </button>
+              ))}
+            </div>
+          </nav>
+          <div className="p-4 border-t border-white/10">
+            <div className="flex items-center gap-3 mb-3">
+              {currentUser && (
+                <>
+                  <div className="w-8 h-8 bg-brand-500 rounded-full flex items-center justify-center">
+                    <FaUsers className="text-sm text-white" />
+                  </div>
+                  {sidebarOpen && (
+                    <div className="text-sm">
+                      <div className="text-white font-medium">{currentUser.username}</div>
+                      <div className="text-white/60">{currentUser.role}</div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <FaArrowLeft />
+              {sidebarOpen && <span>Logout</span>}
+            </button>
           </div>
         </div>
-      </header>
-
-      {!isAuthenticated && (
-        <section className="container mt-8">
-          <div className="max-w-md mx-auto rounded-xl bg-black/30 border border-white/10 p-6 space-y-4">
-            <div className="text-white/80 text-lg font-medium">Login</div>
-            {loginError && <div className="text-red-400 text-sm">{loginError}</div>}
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="text-base text-white/70">Username</label>
-                <input
-                  className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-base"
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  required
-                />
-              </div>
-              <div>
-                <label className="text-base text-white/70">Password</label>
-                <input
-                  type="password"
-                  className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-base"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  required
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={loginLoading}
-                className="w-full py-3 rounded-md bg-brand-500 hover:bg-brand-600 text-white font-medium"
-              >
-                {loginLoading ? 'Logging in…' : 'Login'}
-              </button>
-            </form>
-          </div>
-        </section>
       )}
-
-      {isAuthenticated && (
-      <section className="container mt-8">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-8 shadow-card">
-            <div className="grid md:grid-cols-2 gap-10 items-center">
-              <div>
-                <h1 className="text-4xl md:text-5xl font-bold leading-tight">
-                  Minecraft Panel
-                </h1>
-                <p className="text-white/70 mt-4 text-lg">
-                  Supports sometimes vanilla, paper, purpur, fabric, forge, and neoforge.
-                </p>
-                <div className="grid grid-cols-3 gap-6 mt-8">
-                  <Stat label="Server Types" value={types.length || 0} />
-                  <Stat label="Active Servers" value={servers.length || 0} />
-                  <Stat
-                    label="Docker"
-                    value={!serversError ? 'Connected' : 'Unavailable'}
-                  />
-                </div>
-              </div>
-              <form
-                onSubmit={createServer}
-                className="rounded-xl bg-black/30 border border-white/10 p-6 space-y-4"
-              >
-                <div className="flex items-center gap-3 text-white/80 text-lg">
-                  <FaPlusCircle />{' '}
-                  <span className="font-medium">Create new server</span>
-                </div>
-                <div>
-                  <label className="text-base text-white/70">Server name</label>
-                  <input
-                    className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-base"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-base text-white/70">Type</label>
-                    <select
-                      className="mt-2 w-full rounded-md bg-gray-800 border border-white/20 px-4 py-3 text-base text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      value={selectedType}
-                      onChange={(e) => setSelectedType(e.target.value)}
-                      style={{ backgroundColor: '#1f2937', color: '#ffffff' }}
-                    >
-                      {types.map((t) => (
-                        <option key={t} value={t} style={{ backgroundColor: '#1f2937', color: '#ffffff' }}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-base text-white/70">Version</label>
-                    <select
-                      className="mt-2 w-full rounded-md bg-gray-800 border border-white/20 px-4 py-3 text-base text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      value={version}
-                      onChange={(e) => setVersion(e.target.value)}
-                      style={{ backgroundColor: '#1f2937', color: '#ffffff' }}
-                    >
-                      {(versionsData && versionsData.versions ? versionsData.versions : []).map((v) => (
-                        <option key={v} value={v} style={{ backgroundColor: '#1f2937', color: '#ffffff' }}>
-                          {v}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {SERVER_TYPES_WITH_LOADER.includes(selectedType) && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-sm text-white/70">Loader Version</label>
-                      <select
-                        className="mt-1 w-full rounded bg-gray-800 border border-white/20 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        value={loaderVersion}
-                        onChange={(e) => setLoaderVersion(e.target.value)}
-                        style={{ backgroundColor: '#1f2937', color: '#ffffff' }}
-                      >
-                        {(loaderVersionsData?.loader_versions || []).map((lv) => (
-                          <option key={lv} value={lv} style={{ backgroundColor: '#1f2937', color: '#ffffff' }}>
-                            {lv}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    {selectedType === 'fabric' && (
-                      <div>
-                        <label className="text-sm text-white/70">Installer Version</label>
-                        <input
-                          className="mt-1 w-full rounded bg-white/5 border border-white/10 px-3 py-2"
-                          placeholder="e.g., 1.1.0"
-                          value={installerVersion}
-                          onChange={(e) => setInstallerVersion(e.target.value)}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-base text-white/70">Host port</label>
-                    <input
-                      type="number"
-                      className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-base"
-                      value={hostPort}
-                      onChange={(e) => setHostPort(e.target.value)}
-                      placeholder="25565"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-base text-white/70">Min RAM (MB)</label>
-                      <input
-                        type="number"
-                        className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-base"
-                        value={minRam}
-                        onChange={(e) => setMinRam(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-base text-white/70">Max RAM (MB)</label>
-                      <input
-                        type="number"
-                        className="mt-2 w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-base"
-                        value={maxRam}
-                        onChange={(e) => setMaxRam(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                </div>
-
+      
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col">
+        {/* Top Header */}
+        {isAuthenticated && (
+          <header className="border-b border-white/10 bg-ink/80 backdrop-blur supports-[backdrop-filter]:bg-ink/60">
+            <div className="px-6 flex items-center justify-between h-14">
+              <div className="flex items-center gap-3">
                 <button
-                  type="submit"
-                  className="w-full py-3 rounded-md bg-brand-500 hover:bg-brand-600 text-white font-medium"
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="p-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors"
                 >
-                  Create server
+                  {sidebarOpen ? <FaBackward /> : <FaForward />}
                 </button>
-              </form>
+                <h1 className="text-lg font-semibold text-white">
+                  {sidebarItems.find(item => item.id === currentPage)?.label || 'Dashboard'}
+                </h1>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-sm text-white/70">
+                  Welcome back, {currentUser?.username || 'User'}
+                </div>
+              </div>
             </div>
-          </div>
-        </section>
-      )}
-      {!selectedServer ? (
-        <section className="container mt-16 mb-16">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-semibold">Your servers</h2>
-          </div>
-          {serversLoading && (
-            <div className="text-white/70 text-lg">Loading servers…</div>
-          )}
-          {!serversLoading && servers.length === 0 && (
-            <div className="text-white/70 text-lg">
-              No servers yet. Create your first one above.
+          </header>
+        )}
+
+        {/* Main Content Area */}
+        <main className="flex-1">
+          {!isAuthenticated ? (
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="max-w-md w-full mx-4">
+                <div className="rounded-xl bg-black/30 border border-white/10 p-6 space-y-4">
+                  <div className="text-center mb-6">
+                    <div className="w-16 h-16 bg-brand-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <FaServer className="text-2xl text-white" />
+                    </div>
+                    <h1 className="text-2xl font-bold text-white">Minecraft Panel</h1>
+                    <p className="text-white/70 mt-2">Please sign in to continue</p>
+                  </div>
+                  
+                  {loginError && (
+                    <div className="bg-red-500/10 border border-red-500/20 text-red-300 p-3 rounded-lg text-sm">
+                      {loginError}
+                    </div>
+                  )}
+                  
+                  <form onSubmit={handleLogin} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-white/70 mb-2">Username</label>
+                      <input
+                        type="text"
+                        className="w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-white placeholder-white/50"
+                        placeholder="Enter your username"
+                        value={loginUsername}
+                        onChange={(e) => setLoginUsername(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-white/70 mb-2">Password</label>
+                      <input
+                        type="password"
+                        className="w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-white placeholder-white/50"
+                        placeholder="Enter your password"
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={loginLoading}
+                      className="w-full py-3 rounded-md bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white font-medium transition-colors"
+                    >
+                      {loginLoading ? 'Signing in...' : 'Sign In'}
+                    </button>
+                  </form>
+                  
+                  <div className="text-center text-sm text-white/60 border-t border-white/10 pt-4">
+                    Default credentials: admin / admin123
+                  </div>
+                </div>
+              </div>
             </div>
+          ) : (
+            renderCurrentPage()
           )}
-          <div className="grid md:grid-cols-1 lg:grid-cols-1 xl:grid-cols-1 gap-6">
-            {servers.map((s) => (
-              <ServerListCard
-                key={s.id}
-                server={s}
-                onClick={() => setSelectedServer(s.id)}
-              />
-            ))}
-          </div>
-        </section>
-      ) : (
-        selectedServerObj && (
-          <ServerDetailsPage
-            server={selectedServerObj}
-            onBack={() => setSelectedServer(null)}
-            onStart={start}
-            onStop={stop}
-            onDelete={del}
-            onRestart={restart}
-          />
-        )
-      )}
+        </main>
+      </div>
     </div>
   );
 }
