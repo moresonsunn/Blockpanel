@@ -78,6 +78,8 @@ import PluginsPanel from './components/server-details/PluginsPanel';
 import WorldsPanel from './components/server-details/WorldsPanel';
 import SchedulePanel from './components/server-details/SchedulePanel';
 import PlayersPanel from './components/server-details/PlayersPanel';
+import FilesPanelWrapper from './components/server-details/FilesPanelWrapper';
+import EditingPanel from './components/server-details/EditingPanel';
 import { useFetch } from './lib/useFetch';
 
 const API = 'http://localhost:8000';
@@ -341,6 +343,7 @@ function useServerStats(serverId) {
     let active = true;
     let interval = null;
     const abortController = new AbortController();
+    let es = null;
 
     async function fetchStats() {
       if (!active || !isVisible) return;
@@ -365,14 +368,37 @@ function useServerStats(serverId) {
       }
     }
 
-    fetchStats();
-    // Reduced frequency from 2 seconds to 5 seconds to reduce server load
-    interval = setInterval(fetchStats, 5000);
+    // Try to establish SSE stream; fallback to polling if it fails
+    try {
+      es = new EventSource(`${API}/monitoring/events?container_id=${encodeURIComponent(serverId)}`);
+      es.onmessage = (ev) => {
+        if (!active) return;
+        try {
+          const payload = JSON.parse(ev.data);
+          if (payload?.type === 'resources' && payload?.data) {
+            setStats(payload.data);
+          }
+        } catch {}
+      };
+      es.onerror = () => {
+        // Close and fallback to polling
+        if (es) { try { es.close(); } catch(_) {} }
+        if (!interval) {
+          fetchStats();
+          interval = setInterval(fetchStats, 5000);
+        }
+      };
+    } catch (_) {
+      // SSE not available; use polling
+      fetchStats();
+      interval = setInterval(fetchStats, 5000);
+    }
 
     return () => {
       active = false;
       abortController.abort();
       if (interval) clearInterval(interval);
+      if (es) { try { es.close(); } catch(_) {} }
     };
   }, [serverId, isVisible]);
 
@@ -392,37 +418,6 @@ function Stat({ label, value, icon }) {
 }
 
 
-function FilesPanel({ serverName, onEditStateChange }) {
-  // This component is now unused, see FilesPanelWrapper in ServerDetailsPage
-  return null;
-}
-
-function EditingPanel({ editPath, editContent, setEditContent, onSave, onCancel }) {
-  return (
-    <div className="mt-4">
-      <div className="text-xs text-white/70 mb-1">Editing: {editPath}</div>
-      <textarea
-        className="w-full h-40 rounded bg-black/40 border border-white/10 p-2 text-xs"
-        value={editContent}
-        onChange={(e) => setEditContent(e.target.value)}
-      />
-      <div className="mt-2 flex gap-2">
-        <button
-          onClick={onSave}
-          className="rounded bg-brand-500 hover:bg-brand-400 px-3 py-1.5 inline-flex items-center gap-2 text-xs"
-        >
-          <FaSave /> Save
-        </button>
-        <button
-          onClick={onCancel}
-          className="rounded bg-white/10 hover:bg-white/20 px-3 py-1.5 text-xs"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // List of server types that require loader version input
 const SERVER_TYPES_WITH_LOADER = ['fabric', 'forge', 'neoforge'];
@@ -441,6 +436,13 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
   const [blockedFileError, setBlockedFileError] = useState('');
   const stats = useServerStats(server.id);
 
+  const handleEditStart = useCallback((filePath, content) => {
+    setEditPath(filePath);
+    setEditContent(content);
+    setIsEditing(true);
+    setFilesEditing(true);
+  }, []);
+
   const { data: typeVersionData } = useFetch(
     server?.id ? `${API}/servers/${server.id}/info` : null,
     [server?.id]
@@ -457,174 +459,7 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
     { id: 'schedule', label: 'Schedule', icon: FaClock },
   ];
 
-  // FilesPanelWrapper implements the new/changed file methods
-  function FilesPanelWrapper({ serverName }) {
-    const [path, setPath] = useState('.');
-    const [items, setItems] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [err, setErr] = useState('');
-    const [blockedFileErrorLocal, setBlockedFileErrorLocal] = useState('');
-
-    useEffect(() => {
-      loadDir('.');
-      // eslint-disable-next-line
-    }, [serverName]);
-
-    async function loadDir(p = path) {
-      setLoading(true);
-      setErr('');
-      try {
-        const r = await fetch(
-          `${API}/servers/${encodeURIComponent(serverName)}/files?path=${encodeURIComponent(
-            p
-          )}`
-        );
-        const d = await r.json();
-        setItems(d.items || []);
-        setPath(p);
-      } catch (e) {
-        setErr(String(e));
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    async function openFile(name) {
-      setBlockedFileErrorLocal('');
-      setBlockedFileError('');
-      if (isBlockedFile(name)) {
-        setBlockedFileErrorLocal('Cannot open this file type in the editor.');
-        setBlockedFileError('Cannot open this file type in the editor.');
-        return;
-      }
-      const filePath = path === '.' ? name : `${path}/${name}`;
-      // Backend should check file size and type, and only return content for text files
-      const r = await fetch(
-        `${API}/servers/${encodeURIComponent(serverName)}/file?path=${encodeURIComponent(
-          filePath
-        )}`
-      );
-      const d = await r.json();
-      if (d && d.error) {
-        setBlockedFileErrorLocal(d.error);
-        setBlockedFileError(d.error);
-        return;
-      }
-      setEditPath(filePath);
-      setEditContent(d.content || '');
-      setIsEditing(true);
-      setFilesEditing(true);
-    }
-    async function openDir(name) {
-      await loadDir(path === '.' ? name : `${path}/${name}`);
-    }
-    function goUp() {
-      if (path === '.' || !path) return;
-      const parts = path.split('/');
-      parts.pop();
-      const p = parts.length ? parts.join('/') : '.';
-      loadDir(p);
-    }
-    async function del(name, isDir) {
-      const p = path === '.' ? name : `${path}/${name}`;
-      await fetch(
-        `${API}/servers/${encodeURIComponent(serverName)}/file?path=${encodeURIComponent(
-          p
-        )}`,
-        { method: 'DELETE' }
-      );
-      loadDir(path);
-    }
-    async function upload(ev) {
-      const file = ev.target.files?.[0];
-      if (!file) return;
-      const fd = new window.FormData();
-      fd.append('path', path);
-      fd.append('file', file);
-      await fetch(
-        `${API}/servers/${encodeURIComponent(serverName)}/upload`,
-        { method: 'POST', body: fd }
-      );
-      loadDir(path);
-    }
-
-    const sortedItems = useMemo(() => {
-      return [...items].sort((a, b) => {
-        if (a.is_dir && !b.is_dir) return -1;
-        if (!a.is_dir && b.is_dir) return 1;
-        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-      });
-    }, [items]);
-
-    return (
-      <div className="p-2 bg-black/20 rounded-lg" style={{ maxWidth: 520, minWidth: 320 }}>
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-xs text-white/70">
-            Path: <span className="text-white">{path}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={goUp}
-              className="text-xs rounded bg-white/10 hover:bg-white/20 px-2 py-1"
-            >
-              Up
-            </button>
-            <label className="text-xs rounded bg-brand-500 hover:bg-brand-400 px-2 py-1 cursor-pointer inline-flex items-center gap-2">
-              <FaUpload /> Upload
-              <input type="file" className="hidden" onChange={upload} />
-            </label>
-          </div>
-        </div>
-        {loading && <div className="text-white/70 text-xs">Loading…</div>}
-        {err && <div className="text-red-400 text-xs">{err}</div>}
-        {blockedFileErrorLocal && <div className="text-red-400 text-xs">{blockedFileErrorLocal}</div>}
-        {!loading && (
-          <div className="space-y-1">
-            {sortedItems.map((it) => (
-              <div
-                key={it.name}
-                className="flex items-center justify-between bg-white/5 border border-white/10 rounded px-2 py-1"
-                style={{ minHeight: 32 }}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-yellow-400 text-base">
-                    {it.is_dir ? <FaFolder /> : '📄'}
-                  </span>
-                  <span className="text-xs">{it.name}</span>
-                </div>
-                <div className="flex items-center gap-1 text-xs">
-                  {it.is_dir ? (
-                    <button
-                      onClick={() => openDir(it.name)}
-                      className="rounded bg-white/10 hover:bg-white/20 px-2 py-1"
-                    >
-                      Open
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => openFile(it.name)}
-                      className="rounded bg-white/10 hover:bg-white/20 px-2 py-1 inline-flex items-center gap-1"
-                      disabled={isBlockedFile(it.name)}
-                      style={isBlockedFile(it.name) ? { opacity: 0.5, pointerEvents: 'none' } : {}}
-                      title={isBlockedFile(it.name) ? "Cannot open this file type in the editor" : "Edit"}
-                    >
-                      <FaSave /> Edit
-                    </button>
-                  )}
-                  <button
-                    onClick={() => del(it.name, it.is_dir)}
-                    className="rounded bg-red-600 hover:bg-red-500 px-2 py-1"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
+// FilesPanelWrapper moved to components/server-details/FilesPanelWrapper.jsx
 
   async function saveFile() {
     const body = new URLSearchParams({ content: editContent });
@@ -658,7 +493,12 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
       case 'files':
         return (
           <div className="flex flex-row gap-6 w-full">
-            <FilesPanelWrapper serverName={server.name} />
+            <FilesPanelWrapper 
+              serverName={server.name} 
+              isBlockedFile={isBlockedFile}
+              onEditStart={handleEditStart}
+              onBlockedFileError={setBlockedFileError}
+            />
             <div className="flex-1 min-w-[0]">
               {isEditing ? (
                 <EditingPanel
@@ -2272,6 +2112,36 @@ function TemplatesPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
+  const [templates, setTemplates] = useState([]);
+  const [templateCategories, setTemplateCategories] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [templatesError, setTemplatesError] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [searchTermTpl, setSearchTermTpl] = useState('');
+  const [popularOnly, setPopularOnly] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTemplates() {
+      setTemplatesLoading(true);
+      setTemplatesError('');
+      try {
+        const r = await fetch(`${API}/templates`);
+        const d = await r.json();
+        if (!cancelled) {
+          setTemplates(Array.isArray(d?.templates) ? d.templates : []);
+          setTemplateCategories(Array.isArray(d?.categories) ? d.categories : []);
+        }
+      } catch (e) {
+        if (!cancelled) setTemplatesError(String(e.message || e));
+      } finally {
+        if (!cancelled) setTemplatesLoading(false);
+      }
+    }
+    loadTemplates();
+    return () => { cancelled = true; };
+  }, []);
+
   async function importPack(e) {
     e.preventDefault();
     setBusy(true);
@@ -2299,13 +2169,36 @@ function TemplatesPage() {
     }
   }
 
+  async function createFromTemplate(tplId) {
+    setBusy(true);
+    setMsg('');
+    try {
+      const r = await fetch(`${API}/servers/from-template`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          template_id: tplId, 
+          name: serverName, 
+          host_port: hostPort ? Number(hostPort) : null 
+        })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+      setMsg('Server created from template. Go to Servers to see it.');
+    } catch (e) {
+      setMsg(`Error: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-3">
           <FaLayerGroup className="text-brand-500" /> Templates & Modpacks
         </h1>
-        <p className="text-white/70 mt-2">Create templates or import modpack server packs</p>
+        <p className="text-white/70 mt-2">Create from curated templates or import modpack server packs</p>
       </div>
 
       <div className="bg-white/5 border border-white/10 rounded-lg p-6">
@@ -2338,10 +2231,85 @@ function TemplatesPage() {
         </form>
       </div>
 
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
-        <FaLayerGroup className="text-6xl text-white/20 mx-auto mb-4" />
-        <h3 className="text-xl font-semibold mb-2">Server Templates</h3>
-        <p className="text-white/60">Use templates to quickly create configured servers. (UI for CRUD coming next.)</p>
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Curated Templates</h3>
+          {templatesLoading && <div className="text-sm text-white/60">Loading…</div>}
+        </div>
+        <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <input 
+              className="rounded bg-white/5 border border-white/10 px-3 py-2 text-white placeholder-white/50"
+              placeholder="Search templates..."
+              value={searchTermTpl}
+              onChange={(e) => setSearchTermTpl(e.target.value)}
+              style={{ minWidth: 220 }}
+            />
+            <select 
+              className="rounded bg-white/10 border border-white/20 px-3 py-2 text-white"
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              style={{ backgroundColor: '#1f2937' }}
+            >
+              <option value="all" style={{ backgroundColor: '#1f2937' }}>All Categories</option>
+              {templateCategories.map(cat => (
+                <option key={cat.id} value={cat.id} style={{ backgroundColor: '#1f2937' }}>
+                  {cat.icon} {cat.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <label className="inline-flex items-center gap-2 text-sm text-white/70">
+            <input type="checkbox" checked={popularOnly} onChange={(e) => setPopularOnly(e.target.checked)} />
+            Popular only
+          </label>
+        </div>
+        {templatesError && (
+          <div className="text-sm text-red-400 mb-3">{templatesError}</div>
+        )}
+        {(() => {
+          const filtered = (templates || [])
+            .filter(t => selectedCategory === 'all' || t.category === selectedCategory)
+            .filter(t => !popularOnly || t.popular)
+            .filter(t => {
+              const q = searchTermTpl.trim().toLowerCase();
+              if (!q) return true;
+              return (
+                t.name?.toLowerCase().includes(q) ||
+                t.description?.toLowerCase().includes(q) ||
+                t.type?.toLowerCase().includes(q) ||
+                (Array.isArray(t.tags) && t.tags.some(tag => String(tag).toLowerCase().includes(q)))
+              );
+            });
+          return (!templatesLoading && filtered.length === 0) ? (
+            <div className="text-white/60 text-center py-6">No templates match your filters</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filtered.map((tpl) => (
+                <div key={tpl.id} className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="text-2xl">{tpl.icon || '🎮'}</div>
+                    <div>
+                      <div className="font-semibold">{tpl.name}</div>
+                      <div className="text-xs text-white/60">{tpl.type} • {tpl.version}</div>
+                    </div>
+                  </div>
+                  <div className="text-sm text-white/70 flex-1">{tpl.description}</div>
+                  <div className="text-xs text-white/50 mt-2">RAM {tpl.min_ram}–{tpl.max_ram}</div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button 
+                      onClick={() => createFromTemplate(tpl.id)}
+                      disabled={busy}
+                      className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-3 py-1.5 rounded text-sm"
+                    >
+                      {busy ? 'Working…' : 'Create from Template'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

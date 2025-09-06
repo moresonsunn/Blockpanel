@@ -9,9 +9,15 @@ export default function SchedulePanel() {
   const [serverName, setServerName] = useState('');
   const [cron, setCron] = useState('0 2 * * *');
   const [command, setCommand] = useState('');
+  const [retentionDays, setRetentionDays] = useState(30);
 
   async function createTask() {
-    const body = { name, task_type: taskType, server_name: serverName || null, cron_expression: cron, command: command || null };
+    // For cleanup tasks, pack retention into command if not explicitly provided
+    let cmd = command || null;
+    if (taskType === 'cleanup') {
+      cmd = `retention_days=${retentionDays}`;
+    }
+    const body = { name, task_type: taskType, server_name: serverName || null, cron_expression: cron, command: cmd };
     const r = await fetch(`${API}/schedule/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (r.ok) { const task = await r.json(); setData([...(data || []), task]); setName(''); setServerName(''); setCommand(''); }
   }
@@ -34,6 +40,9 @@ export default function SchedulePanel() {
         </select>
         <input className="rounded bg-gray-800 border border-white/20 px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Server name (backup/restart/command)" value={serverName} onChange={e => setServerName(e.target.value)} />
         <input className="rounded bg-gray-800 border border-white/20 px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Cron (e.g., 0 2 * * *)" value={cron} onChange={e => setCron(e.target.value)} />
+        {taskType === 'cleanup' && (
+          <input className="rounded bg-gray-800 border border-white/20 px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500" type="number" min={1} placeholder="Retention days (e.g., 30)" value={retentionDays} onChange={e => setRetentionDays(parseInt(e.target.value || '0') || 1)} />
+        )}
         <input className="rounded bg-gray-800 border border-white/20 px-3 py-2 md:col-span-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Command (for command tasks)" value={command} onChange={e => setCommand(e.target.value)} />
         <button onClick={createTask} className="rounded bg-brand-500 hover:bg-brand-400 px-3 py-2">Create Task</button>
       </div>

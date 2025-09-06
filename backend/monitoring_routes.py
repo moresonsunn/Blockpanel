@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -8,6 +8,9 @@ from database import get_db
 from models import User, ServerPerformance
 from auth import require_auth, require_admin, require_moderator
 from docker_manager import DockerManager
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
@@ -396,6 +399,39 @@ async def get_monitoring_alerts(
                 "unacknowledged": 1
             }
         }
+
+@router.get("/events")
+async def stream_events(request: Request, container_id: str | None = None):
+    """Server-Sent Events stream for real-time resources and alerts.
+    If container_id is provided, streams that server's resources; otherwise streams system health summary.
+    Note: Authentication is not enforced here for simplicity; add token validation if needed.
+    """
+    dm = get_docker_manager()
+
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                payload = {}
+                if container_id:
+                    try:
+                        stats = dm.get_server_stats(container_id)
+                        payload = {"type": "resources", "container_id": container_id, "data": stats}
+                    except Exception as e:
+                        payload = {"type": "error", "message": f"Stats unavailable: {e}"}
+                else:
+                    try:
+                        servers = dm.list_servers()
+                        payload = {"type": "system", "data": {"total": len(servers), "running": len([s for s in servers if s.get('status')=='running'])}}
+                    except Exception as e:
+                        payload = {"type": "error", "message": f"System info unavailable: {e}"}
+                yield f"data: {json.dumps(payload)}\n\n"
+                await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            pass
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @router.get("/dashboard-data")
 async def get_dashboard_data(

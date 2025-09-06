@@ -264,11 +264,26 @@ class TaskScheduler:
             
             try:
                 # Clean up old backups based on retention policy
-                cutoff_date = datetime.utcnow() - timedelta(days=30)
-                old_backups = db.query(BackupTask).filter(
+                # Parse retention_days from command if provided (e.g., "retention_days=14")
+                retention_days = 30
+                try:
+                    if task.command:
+                        parts = dict(
+                            kv.split("=", 1) for kv in str(task.command).split(";") if "=" in kv
+                        )
+                        if 'retention_days' in parts:
+                            retention_days = int(parts['retention_days'])
+                except Exception:
+                    pass
+
+                cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+                q = db.query(BackupTask).filter(
                     BackupTask.is_auto_created == True,
                     BackupTask.created_at < cutoff_date
-                ).all()
+                )
+                if task.server_name:
+                    q = q.filter(BackupTask.server_name == task.server_name)
+                old_backups = q.all()
                 
                 for backup in old_backups:
                     try:
@@ -285,7 +300,7 @@ class TaskScheduler:
                     except Exception as e:
                         logger.error(f"Failed to clean up backup {backup.backup_file}: {e}")
                 
-                logger.info(f"Cleanup completed, removed {len(old_backups)} old backups")
+                logger.info(f"Cleanup completed, removed {len(old_backups)} old backups older than {retention_days} days")
                 
             except Exception as e:
                 logger.error(f"Cleanup task failed: {e}")

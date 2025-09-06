@@ -5,7 +5,17 @@ import server_providers  # noqa: F401 - ensure providers register
 from server_providers.providers import get_provider_names, get_provider
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
-from file_manager import list_dir as fm_list_dir, read_file as fm_read_file, write_file as fm_write_file, delete_path as fm_delete_path, upload_file as fm_upload_file
+from file_manager import (
+    list_dir as fm_list_dir,
+    read_file as fm_read_file,
+    write_file as fm_write_file,
+    delete_path as fm_delete_path,
+    upload_file as fm_upload_file,
+    upload_files as fm_upload_files,
+    rename_path as fm_rename_path,
+    zip_path as fm_zip_path,
+    unzip_path as fm_unzip_path,
+)
 from backup_manager import list_backups as bk_list, create_backup as bk_create, restore_backup as bk_restore
 from ai_error_fixer import start_ai_monitoring, stop_ai_monitoring, get_ai_status, manual_fix, upload_to_docker
 import requests
@@ -485,11 +495,45 @@ def file_delete(name: str, path: str):
     return {"ok": True}
 
 @app.post("/servers/{name}/upload")
-async def file_upload(name: str, path: str = ".", file: UploadFile | None = None):
+async def file_upload(name: str, path: str = ".", file: UploadFile | None = None, current_user: User = Depends(require_moderator)):
     if not file:
         raise HTTPException(status_code=400, detail="No file provided")
     fm_upload_file(name, path, file)
     return {"ok": True}
+
+class RenameRequest(BaseModel):
+    src: str
+    dest: str
+
+@app.post("/servers/{name}/rename")
+def file_rename(name: str, req: RenameRequest, current_user: User = Depends(require_moderator)):
+    fm_rename_path(name, req.src, req.dest)
+    return {"ok": True}
+
+@app.post("/servers/{name}/upload-multiple")
+async def files_upload(name: str, path: str = ".", files: list[UploadFile] | None = None, current_user: User = Depends(require_moderator)):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+    count = fm_upload_files(name, path, files)
+    return {"ok": True, "count": count}
+
+class ZipRequest(BaseModel):
+    path: str
+    dest: str | None = None
+
+class UnzipRequest(BaseModel):
+    path: str
+    dest: str | None = None
+
+@app.post("/servers/{name}/zip")
+def make_zip(name: str, req: ZipRequest, current_user: User = Depends(require_moderator)):
+    archive_rel = fm_zip_path(name, req.path, req.dest)
+    return {"ok": True, "archive": archive_rel}
+
+@app.post("/servers/{name}/unzip")
+def do_unzip(name: str, req: UnzipRequest, current_user: User = Depends(require_moderator)):
+    dest_rel = fm_unzip_path(name, req.path, req.dest)
+    return {"ok": True, "dest": dest_rel}
 
 @app.get("/servers/{name}/backups")
 def backups_list(name: str):
