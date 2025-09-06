@@ -5,7 +5,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Official Fabric Meta API endpoints
 API_BASE = "https://meta.fabricmc.net/v2"
 GAME_VERSIONS_URL = f"{API_BASE}/versions/game"
 LOADER_VERSIONS_URL = f"{API_BASE}/versions/loader"
@@ -37,13 +36,11 @@ class FabricProvider:
             resp.raise_for_status()
             data = resp.json()
             
-            # Filter for stable release versions only
             versions = []
             for version_info in data:
                 if version_info.get("stable", False):
                     versions.append(version_info["version"])
             
-            # Cache for future use
             self._cached_versions = versions
             logger.info(f"Found {len(versions)} stable Fabric-compatible versions")
             return versions
@@ -63,7 +60,6 @@ class FabricProvider:
             resp.raise_for_status()
             data = resp.json()
             
-            # Cache the result
             self._cached_loaders[game_version] = data
             logger.info(f"Found {len(data)} loader versions for {game_version}")
             return data
@@ -83,7 +79,6 @@ class FabricProvider:
             resp.raise_for_status()
             data = resp.json()
             
-            # Cache the result
             self._cached_installers = data
             logger.info(f"Found {len(data)} installer versions")
             return data
@@ -98,7 +93,6 @@ class FabricProvider:
         if not loaders:
             raise ValueError(f"No Fabric loaders available for {game_version}")
         
-        # The API returns loaders sorted by newest first
         latest_loader = loaders[0]
         return latest_loader["loader"]["version"]
 
@@ -108,12 +102,10 @@ class FabricProvider:
         if not installers:
             raise ValueError("No Fabric installers available")
         
-        # Find the latest stable installer
         for installer in installers:
             if installer.get("stable", False):
                 return installer["version"]
         
-        # If no stable installer found, use the first one
         return installers[0]["version"]
 
     def get_download_url(self, version: str) -> str:
@@ -133,20 +125,16 @@ class FabricProvider:
             loader_version: Specific Fabric loader version (latest if None)
             installer_version: Specific installer version (latest stable if None)
         """
-        # Resolve loader version
         if not loader_version:
             loader_version = self.get_latest_loader_version(version)
         else:
-            # Validate that this loader version exists for this game version
             loaders = self.get_loader_versions(version)
             if not any(l["loader"]["version"] == loader_version for l in loaders):
                 raise ValueError(f"Fabric loader {loader_version} not available for Minecraft {version}")
         
-        # Resolve installer version
         if not installer_version:
             installer_version = self.get_latest_installer_version()
         else:
-            # Validate that this installer version exists
             installers = self.get_installer_versions()
             if not any(i["version"] == installer_version for i in installers):
                 raise ValueError(f"Fabric installer {installer_version} not available")
