@@ -74,7 +74,6 @@ import {
 import TerminalPanel from './components/TerminalPanel';
 import BackupsPanel from './components/server-details/BackupsPanel';
 import ConfigPanel from './components/server-details/ConfigPanel';
-import PluginsPanel from './components/server-details/PluginsPanel';
 import WorldsPanel from './components/server-details/WorldsPanel';
 import SchedulePanel from './components/server-details/SchedulePanel';
 import PlayersPanel from './components/server-details/PlayersPanel';
@@ -105,33 +104,32 @@ function GlobalDataProvider({ children }) {
     isInitialized: false
   });
 
-  // Background refresh intervals
+  // Keep latest servers in a ref for interval callbacks
+  const serversRef = useRef(globalData.servers);
+  useEffect(() => { serversRef.current = globalData.servers; }, [globalData.servers]);
+
+  // Background timers/handles
   const refreshIntervals = useRef({});
   const abortControllers = useRef({});
 
-  // Aggressive preloading function - loads EVERYTHING immediately
+  // Aggressive preloading function - loads EVERYTHING immediately (run once on mount)
   const preloadAllData = useCallback(async () => {
     const endpoints = [
       { key: 'servers', url: `${API}/servers` },
-      { key: 'dashboardData', url: `${API}/monitoring/dashboard-data` },
-      { key: 'systemHealth', url: `${API}/monitoring/system-health` },
-      { key: 'alerts', url: `${API}/monitoring/alerts` },
-      { key: 'users', url: `${API}/users` },
-      { key: 'roles', url: `${API}/users/roles` },
-      { key: 'auditLogs', url: `${API}/users/audit-logs?page=1&page_size=50` },
       { key: 'serverTypes', url: `${API}/server-types` }
     ];
 
     // Create abort controllers for all requests
-    endpoints.forEach(endpoint => {
-      abortControllers.current[endpoint.key] = new AbortController();
-    });
+    const localControllers = Object.fromEntries(
+      endpoints.map(e => [e.key, new AbortController()])
+    );
+    abortControllers.current = localControllers;
 
-    // Execute all requests in parallel for maximum speed
-    const promises = endpoints.map(async endpoint => {
+    // Execute all requests in parallel
+    const results = await Promise.all(endpoints.map(async endpoint => {
       try {
         const response = await fetch(endpoint.url, {
-          signal: abortControllers.current[endpoint.key]?.signal,
+          signal: localControllers[endpoint.key]?.signal,
           headers: authHeaders()
         });
         if (response.ok) {
@@ -144,75 +142,43 @@ function GlobalDataProvider({ children }) {
         }
       }
       return { key: endpoint.key, data: null };
-    });
+    }));
 
-    // Wait for all data to load
-    const results = await Promise.all(promises);
-    
-    // Process results and update global state
-    const newData = { ...globalData };
-    
+    // Build a single update object and commit once
+    const updates = {};
     results.forEach(result => {
       if (result.data) {
         switch (result.key) {
           case 'servers':
-            newData.servers = Array.isArray(result.data) ? result.data : [];
-            break;
-          case 'alerts':
-            newData.alerts = result.data.alerts || [];
-            break;
-          case 'users':
-            newData.users = result.data.users || [];
-            break;
-          case 'roles':
-            newData.roles = result.data.roles || [];
-            break;
-          case 'auditLogs':
-            newData.auditLogs = result.data.logs || [];
+            updates.servers = Array.isArray(result.data) ? result.data : [];
             break;
           case 'serverTypes':
-            newData.serverTypes = result.data.types || [];
+            updates.serverTypes = result.data.types || [];
             break;
           default:
-            newData[result.key] = result.data;
+            updates[result.key] = result.data;
         }
       }
     });
 
-    // Preload server stats for all servers
-    if (newData.servers.length > 0) {
-      const serverStatsPromises = newData.servers.map(async server => {
-        try {
-          const response = await fetch(`${API}/servers/${server.id}/resources`, {
-            headers: authHeaders()
-          });
-          if (response.ok) {
-            const stats = await response.json();
-            return { serverId: server.id, stats };
-          }
-        } catch (error) {
-          console.warn(`Failed to preload stats for server ${server.id}:`, error);
-        }
-        return { serverId: server.id, stats: null };
-      });
+    // Schedule deferred background preloads once
+    const t = setTimeout(() => {
+      refreshDataInBackground('dashboardData', `${API}/monitoring/dashboard-data`);
+      refreshDataInBackground('systemHealth', `${API}/monitoring/system-health`);
+      refreshDataInBackground('alerts', `${API}/monitoring/alerts`, (d) => d.alerts || []);
+      refreshDataInBackground('users', `${API}/users`, (d) => d.users || []);
+      refreshDataInBackground('roles', `${API}/users/roles`, (d) => d.roles || []);
+      refreshDataInBackground('auditLogs', `${API}/users/audit-logs?page=1&page_size=50`, (d) => d.logs || []);
+    }, 1500);
+    refreshIntervals.current.deferredPreloads = t;
 
-      const serverStatsResults = await Promise.all(serverStatsPromises);
-      const serverStats = {};
-      serverStatsResults.forEach(result => {
-        if (result.stats) {
-          serverStats[result.serverId] = result.stats;
-        }
-      });
-      newData.serverStats = serverStats;
-    }
-
-    newData.isInitialized = true;
-    setGlobalData(newData);
-  }, [globalData]);
+    setGlobalData(current => ({ ...current, ...updates, isInitialized: true }));
+  }, []);
 
   // Background refresh function - updates data silently
   const refreshDataInBackground = useCallback(async (dataKey, url, processor = null) => {
     try {
+      if (typeof window !== 'undefined' && window.HEAVY_PANEL_ACTIVE) return;
       const response = await fetch(url, { headers: authHeaders() });
       if (response.ok) {
         const data = await response.json();
@@ -226,43 +192,50 @@ function GlobalDataProvider({ children }) {
     }
   }, []);
 
-  // Start aggressive preloading on mount
+// Start aggressive preloading on mount
   useEffect(() => {
     preloadAllData();
 
     // Set up optimized background refresh intervals for balanced performance
-    // Reduced frequencies to prevent database connection pool exhaustion
     refreshIntervals.current.servers = setInterval(() => {
-      refreshDataInBackground('servers', `${API}/servers`, (data) => 
-        Array.isArray(data) ? data : []
-      );
-    }, 10000); // Increased from 5s to 10s
+      refreshDataInBackground('servers', `${API}/servers`, (data) => Array.isArray(data) ? data : []);
+    }, 20000);
 
     refreshIntervals.current.dashboardData = setInterval(() => {
       refreshDataInBackground('dashboardData', `${API}/monitoring/dashboard-data`);
-    }, 20000); // Increased from 10s to 20s
+    }, 30000);
 
     refreshIntervals.current.alerts = setInterval(() => {
-      refreshDataInBackground('alerts', `${API}/monitoring/alerts`, (data) => 
-        data.alerts || []
-      );
-    }, 30000); // Increased from 15s to 30s
+      refreshDataInBackground('alerts', `${API}/monitoring/alerts`, (data) => data.alerts || []);
+    }, 60000);
 
-    // Server stats refresh with reduced frequency but still responsive
-    refreshIntervals.current.serverStats = setInterval(() => {
-      globalData.servers.forEach(server => {
-        refreshDataInBackground(`serverStats.${server.id}`, `${API}/servers/${server.id}/resources`);
-      });
-    }, 8000); // Increased from 3s to 8s
+    // Server stats refresh with reduced frequency
+    refreshIntervals.current.serverStats = setInterval(async () => {
+      try {
+        if (typeof window !== 'undefined' && window.HEAVY_PANEL_ACTIVE) return;
+        const servers = Array.isArray(serversRef.current) ? serversRef.current : [];
+        if (!servers.length) return;
+        const results = await Promise.allSettled(
+          servers.map(s => fetch(`${API}/servers/${s.id}/resources`, { headers: authHeaders() }).then(r => r.ok ? r.json() : null))
+        );
+        setGlobalData(current => {
+          const next = { ...(current.serverStats || {}) };
+          servers.forEach((s, idx) => {
+            const res = results[idx];
+            if (res.status === 'fulfilled' && res.value) next[s.id] = res.value;
+          });
+          return { ...current, serverStats: next };
+        });
+      } catch {}
+    }, 12000);
 
     return () => {
       // Cleanup intervals and abort controllers
-      Object.values(refreshIntervals.current).forEach(clearInterval);
-      Object.values(abortControllers.current).forEach(controller => {
-        controller.abort();
-      });
+      Object.values(refreshIntervals.current).forEach((h) => { try { clearInterval(h); } catch {} });
+      if (refreshIntervals.current.deferredPreloads) { try { clearTimeout(refreshIntervals.current.deferredPreloads); } catch {} }
+      Object.values(abortControllers.current).forEach(controller => { try { controller.abort(); } catch {} });
     };
-  }, [preloadAllData, refreshDataInBackground]);
+  }, []);
 
   // Update server stats in the background
   useEffect(() => {
@@ -453,7 +426,6 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
     { id: 'files', label: 'Files', icon: FaFolder },
     { id: 'config', label: 'Config', icon: FaCog },
     { id: 'players', label: 'Players', icon: FaUsers },
-    { id: 'plugins', label: 'Plugins', icon: FaCog },
     { id: 'worlds', label: 'Worlds', icon: FaFolder },
     { id: 'backup', label: 'Backup', icon: FaDownload },
     { id: 'schedule', label: 'Schedule', icon: FaClock },
@@ -488,6 +460,15 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
     setBlockedFileError('');
   }
 
+  useEffect(() => {
+    if (activeTab === 'files' || activeTab === 'config') {
+      if (typeof window !== 'undefined') window.HEAVY_PANEL_ACTIVE = true;
+    } else {
+      if (typeof window !== 'undefined') window.HEAVY_PANEL_ACTIVE = false;
+    }
+    return () => { if (typeof window !== 'undefined') window.HEAVY_PANEL_ACTIVE = false; };
+  }, [activeTab]);
+
   const renderTabContent = () => {
     switch (activeTab) {
       case 'files':
@@ -495,6 +476,7 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
           <div className="flex flex-row gap-6 w-full">
             <FilesPanelWrapper 
               serverName={server.name} 
+              initialItems={typeVersionData?.dir_snapshot}
               isBlockedFile={isBlockedFile}
               onEditStart={handleEditStart}
               onBlockedFileError={setBlockedFileError}
@@ -519,8 +501,6 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
         );
       case 'backup':
         return <BackupsPanel serverName={server.name} />;
-      case 'plugins':
-        return <PluginsPanel serverName={server.name} />;
       case 'worlds':
         return <WorldsPanel serverName={server.name} />;
       case 'config':
@@ -863,8 +843,8 @@ function AdvancedUserManagementPageImpl() {
   // State management
   const [activeTab, setActiveTab] = useState('users');
   const [showCreateUser, setShowCreateUser] = useState(false);
-  const [showCreateRole, setShowCreateRole] = useState(false);
   const [showPermissionMatrix, setShowPermissionMatrix] = useState(false);
+  const [matrixRoleName, setMatrixRoleName] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedRole, setSelectedRole] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -884,13 +864,6 @@ function AdvancedUserManagementPageImpl() {
     mustChangePassword: true
   });
   
-  // New role form  
-  const [newRole, setNewRole] = useState({
-    name: '',
-    description: '',
-    color: '#6b7280',
-    permissions: []
-  });
   
   // Function to refresh user data
   const loadUsers = async () => {
@@ -1016,22 +989,6 @@ function AdvancedUserManagementPageImpl() {
     }
   }
   
-  async function createRole() {
-    try {
-      await fetch(`${API}/roles`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newRole),
-      });
-      setShowCreateRole(false);
-      setNewRole({ name: '', description: '', color: '#6b7280', permissions: [] });
-      setSuccess('Role created successfully');
-      loadUsers();
-    } catch (e) {
-      setError('Failed to create role: ' + e.message);
-      console.error('Failed to create role:', e);
-    }
-  }
 
   // Filtered users based on search and filters
   const filteredUsers = safeUsers.filter(user => {
@@ -1096,16 +1053,10 @@ function AdvancedUserManagementPageImpl() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setShowPermissionMatrix(true)}
+            onClick={() => { setMatrixRoleName(null); setShowPermissionMatrix(true); }}
             className="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg flex items-center gap-2"
           >
             <FaTable /> Permission Matrix
-          </button>
-          <button
-            onClick={() => setShowCreateRole(true)}
-            className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg flex items-center gap-2"
-          >
-            <FaShieldAlt /> Create Role
           </button>
           <button
             onClick={() => setShowCreateUser(true)}
@@ -1196,6 +1147,14 @@ function AdvancedUserManagementPageImpl() {
           setSelectedRole={setSelectedRole}
         />
       )}
+
+      {selectedRole && (
+        <RoleDetailsModal 
+          role={selectedRole}
+          onClose={() => setSelectedRole(null)}
+          onEditPermissions={() => { const name = selectedRole?.name; setSelectedRole(null); setMatrixRoleName(name || null); setShowPermissionMatrix(true); }}
+        />
+      )}
       
       {activeTab === 'audit' && (
         <AuditTab auditLogs={safeAuditLogs} />
@@ -1211,22 +1170,13 @@ function AdvancedUserManagementPageImpl() {
         onSubmit={createUser}
       />
       
-      {/* Create Role Modal */}
-      <CreateRoleModal 
-        show={showCreateRole}
-        onClose={() => setShowCreateRole(false)}
-        newRole={newRole}
-        setNewRole={setNewRole}
-        permissionCategories={permissionCategories}
-        onSubmit={createRole}
-      />
       
       {/* Permission Matrix Modal */}
       <PermissionMatrixModal 
         show={showPermissionMatrix}
-        onClose={() => setShowPermissionMatrix(false)}
+        onClose={() => { setShowPermissionMatrix(false); setMatrixRoleName(null); }}
         roles={safeRoles}
-        permissionCategories={permissionCategories}
+        selectedRoleName={matrixRoleName}
       />
     </div>
   );
@@ -1432,6 +1382,8 @@ function SettingsPageImpl() {
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [curseforgeKey, setCurseforgeKey] = useState('');
+  const [providersStatus, setProvidersStatus] = useState({ curseforge: { configured: false } });
   const [backupSettings, setBackupSettings] = useState({
     auto_backup: true,
     backup_interval: 24,
@@ -1452,6 +1404,7 @@ function SettingsPageImpl() {
 
   useEffect(() => {
     loadSettings();
+    loadIntegrations();
   }, []);
 
   async function loadSettings() {
@@ -1475,6 +1428,30 @@ function SettingsPageImpl() {
       alert('Failed to save settings');
     }
     setSaving(false);
+  }
+
+  async function loadIntegrations() {
+    try {
+      const r = await fetch(`${API}/integrations/status`);
+      const d = await r.json();
+      setProvidersStatus(d || { curseforge: { configured: false } });
+    } catch {}
+  }
+
+  async function saveCurseforgeKey() {
+    try {
+      const r = await fetch(`${API}/integrations/curseforge-key`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: curseforgeKey }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = d?.detail || `HTTP ${r.status}`;
+        alert('Failed to save key: ' + msg);
+        return;
+      }
+      await loadIntegrations();
+      alert('CurseForge API key saved.');
+    } catch (e) {
+      alert('Failed to save key: ' + (e?.message || e));
+    }
   }
 
   if (loading) return <div className="p-6"><div className="text-white/70">Loading settings...</div></div>;
@@ -1543,6 +1520,21 @@ function SettingsPageImpl() {
                 className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
               />
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Integrations */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4">Integrations</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <div className="text-sm text-white/70 mb-1">CurseForge API Key</div>
+            <div className="flex gap-2">
+              <input type="password" className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white" value={curseforgeKey} onChange={(e)=>setCurseforgeKey(e.target.value)} placeholder={providersStatus?.curseforge?.configured ? 'configured' : 'not configured'} />
+              <button onClick={saveCurseforgeKey} className="bg-brand-500 hover:bg-brand-600 px-3 py-2 rounded">Save</button>
+            </div>
+            <div className="text-xs text-white/50 mt-1">Required to search/install from CurseForge catalog.</div>
           </div>
         </div>
       </div>
@@ -1658,6 +1650,22 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
 
   // No loading states needed - data is always available!
 
+  // Featured Modpacks (catalog)
+  const [featured, setFeatured] = useState([]);
+  const [featuredError, setFeaturedError] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    async function loadFeatured(){
+      try {
+        const r = await fetch(`${API}/catalog/search?provider=modrinth&limit=6`);
+        const d = await r.json();
+        if (!cancelled) setFeatured(Array.isArray(d?.results) ? d.results : []);
+      } catch(e){ if (!cancelled) setFeaturedError(String(e.message||e)); }
+    }
+    loadFeatured();
+    return () => { cancelled = true; };
+  }, []);
+
   // Calculate real-time metrics - INSTANT calculation from preloaded data
   const { totalServers, runningServers, totalMemoryMB, avgCpuPercent, criticalAlerts, warningAlerts } = useMemo(() => {
     const total = servers?.length || 0;
@@ -1741,6 +1749,34 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
             <div className="text-2xl font-medium text-white">
               {criticalAlerts + warningAlerts}
             </div>
+          </div>
+        </div>
+
+        {/* Featured Modpacks */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-medium text-white">Featured Modpacks</h2>
+            {featuredError && <div className="text-sm text-red-400">{featuredError}</div>}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-4">
+            {featured.map((p, idx) => (
+              <div key={p.id || p.slug || idx} className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+                <div className="flex items-center gap-3 mb-2">
+                  {p.icon_url ? <img src={p.icon_url} alt="" className="w-8 h-8 rounded"/> : <div className="w-8 h-8 bg-white/10 rounded"/>}
+                  <div>
+                    <div className="text-white font-medium truncate max-w-[220px]" title={p.name}>{p.name}</div>
+                    <div className="text-xs text-gray-400">Modrinth • {typeof p.downloads==='number'?`⬇ ${Intl.NumberFormat().format(p.downloads)}`:''}</div>
+                  </div>
+                </div>
+                <div className="text-sm text-gray-400 line-clamp-2 min-h-[38px]">{p.description}</div>
+                <div className="mt-3">
+                  <button onClick={()=> onNavigate && onNavigate('templates')} className="text-sm text-blue-400 hover:text-blue-300">Install</button>
+                </div>
+              </div>
+            ))}
+            {featured.length === 0 && (
+              <div className="text-gray-400">No featured packs available.</div>
+            )}
           </div>
         </div>
 
@@ -1852,15 +1888,33 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
 
 // Servers Page with Global Data
 function ServersPageWithGlobalData({
+  servers: serversProp,
   onSelectServer, onCreateServer,
   types, versionsData, selectedType, setSelectedType,
   name, setName, version, setVersion, hostPort, setHostPort,
   minRam, setMinRam, maxRam, setMaxRam, loaderVersion, setLoaderVersion,
   loaderVersionsData, installerVersion, setInstallerVersion
 }) {
-  // Get servers from global data - INSTANT access!
+  // Prefer servers passed from parent (kept in sync with details view); fallback to global data
   const globalData = useGlobalData();
-  const { servers } = globalData;
+  const servers = Array.isArray(serversProp) ? serversProp : (globalData?.servers || []);
+
+  // Auto-suggest a free host port on mount or when servers list changes
+  useEffect(() => {
+    let cancelled = false;
+    async function suggest() {
+      try {
+        if (!hostPort) {
+          const r = await fetch(`${API}/ports/suggest?start=25565&end=25999`);
+          if (!r.ok) return;
+          const d = await r.json();
+          if (!cancelled && d?.port) setHostPort(String(d.port));
+        }
+      } catch {}
+    }
+    suggest();
+    return () => { cancelled = true; };
+  }, [servers]);
   
   return (
     <ServersPage
@@ -1970,16 +2024,35 @@ function ServersPage({
                 </select>
               </div>
               {selectedType === 'fabric' && (
-                <div>
-                  <label className="block text-sm font-medium text-white/70 mb-2">Installer Version</label>
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">Installer Version</label>
+                {Array.isArray(loaderVersionsData?.installer_versions) && loaderVersionsData.installer_versions.length > 0 ? (
+                  <select
+                    value={installerVersion}
+                    onChange={(e) => setInstallerVersion(e.target.value)}
+                    className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white"
+                  >
+                    {loaderVersionsData.installer_versions.map((iv) => (
+                      <option key={iv} value={iv} style={{ backgroundColor: '#1f2937' }}>{iv}</option>
+                    ))}
+                  </select>
+                ) : (
                   <input
                     type="text"
                     value={installerVersion}
                     onChange={(e) => setInstallerVersion(e.target.value)}
                     className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-white/50"
-                    placeholder="e.g., 1.1.0"
+                    placeholder="e.g., 1.0.1"
                   />
+                )}
+                <div className="text-xs text-white/40 mt-1">
+                  {loaderVersionsData?.latest_installer_version ? (
+                    <button type="button" className="underline" onClick={() => setInstallerVersion(loaderVersionsData.latest_installer_version)}>
+                      Use latest: {loaderVersionsData.latest_installer_version}
+                    </button>
+                  ) : null}
                 </div>
+              </div>
               )}
             </div>
           )}
@@ -2111,7 +2184,9 @@ function TemplatesPage() {
   const [maxRam, setMaxRam] = useState('4096M');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [zipFile, setZipFile] = useState(null);
 
+  // Curated templates (local)
   const [templates, setTemplates] = useState([]);
   const [templateCategories, setTemplateCategories] = useState([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
@@ -2120,8 +2195,29 @@ function TemplatesPage() {
   const [searchTermTpl, setSearchTermTpl] = useState('');
   const [popularOnly, setPopularOnly] = useState(false);
 
+  // Catalog (remote providers)
+  const [providers, setProviders] = useState([{ id: 'modrinth', name: 'Modrinth' }]);
+  const [provider, setProvider] = useState('modrinth');
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [catalogLoader, setCatalogLoader] = useState(''); // forge|fabric|neoforge
+  const [catalogMC, setCatalogMC] = useState('');
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState('');
+  const [catalogResults, setCatalogResults] = useState([]);
+  const [catalogPage, setCatalogPage] = useState(1);
+  const CATALOG_PAGE_SIZE = 24;
+
+  // Install modal state
+  const [installOpen, setInstallOpen] = useState(false);
+  const [installPack, setInstallPack] = useState(null);
+  const [installVersions, setInstallVersions] = useState([]);
+  const [installVersionId, setInstallVersionId] = useState('');
+  const [installEvents, setInstallEvents] = useState([]);
+  const [installWorking, setInstallWorking] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
+    setCatalogPage(1);
     async function loadTemplates() {
       setTemplatesLoading(true);
       setTemplatesError('');
@@ -2138,9 +2234,100 @@ function TemplatesPage() {
         if (!cancelled) setTemplatesLoading(false);
       }
     }
+    async function loadProviders() {
+      try {
+        const r = await fetch(`${API}/catalog/providers`);
+        const d = await r.json();
+        if (!cancelled && Array.isArray(d?.providers)) setProviders(d.providers);
+      } catch {}
+    }
     loadTemplates();
+    loadProviders();
     return () => { cancelled = true; };
   }, []);
+
+  async function searchCatalog() {
+    setCatalogLoading(true);
+    setCatalogError('');
+    try {
+      const params = new URLSearchParams();
+      if (catalogQuery) params.set('q', catalogQuery);
+      if (catalogLoader) params.set('loader', catalogLoader);
+      if (catalogMC) params.set('mc_version', catalogMC);
+      params.set('provider', provider);
+      params.set('page', String(catalogPage));
+      params.set('page_size', String(CATALOG_PAGE_SIZE));
+      const r = await fetch(`${API}/catalog/search?${params.toString()}`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = d?.detail || `HTTP ${r.status}`;
+        setCatalogError(msg);
+        setCatalogResults([]);
+        return;
+      }
+      setCatalogResults(Array.isArray(d?.results) ? d.results : []);
+    } catch (e) {
+      setCatalogError(String(e.message || e));
+    } finally {
+      setCatalogLoading(false);
+    }
+  }
+
+  async function openInstallFromCatalog(pack) {
+    setInstallPack(pack);
+    setInstallOpen(true);
+    setInstallEvents([]);
+    setInstallWorking(false);
+    try {
+      const r = await fetch(`${API}/catalog/${provider}/packs/${encodeURIComponent(pack.id || pack.slug)}/versions`);
+      const d = await r.json();
+      const vers = Array.isArray(d?.versions) ? d.versions : [];
+      setInstallVersions(vers);
+      setInstallVersionId(vers[0]?.id || '');
+    } catch {
+      setInstallVersions([]);
+      setInstallVersionId('');
+    }
+  }
+
+  async function submitInstall() {
+    if (!installPack) return;
+    setInstallWorking(true);
+    setInstallEvents([{ type: 'progress', message: 'Submitting install task...' }]);
+    try {
+      const body = {
+        provider,
+        pack_id: installPack.id || installPack.slug,
+        version_id: installVersionId || null,
+        name: serverName,
+        host_port: hostPort ? Number(hostPort) : null,
+        min_ram: minRam,
+        max_ram: maxRam,
+      };
+      const r = await fetch(`${API}/modpacks/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      const taskId = d?.task_id;
+      if (!taskId) throw new Error('No task id');
+      const es = new EventSource(`${API}/modpacks/install/events/${taskId}`);
+      es.onmessage = (ev) => {
+        try {
+          const evd = JSON.parse(ev.data);
+          setInstallEvents((prev) => {
+            const next = [...prev, evd];
+            return next.length > 500 ? next.slice(-500) : next;
+          });
+          if (evd.type === 'done' || evd.type === 'error') {
+            es.close();
+            setInstallWorking(false);
+          }
+        } catch {}
+      };
+      es.onerror = () => { try { es.close(); } catch {} setInstallWorking(false); };
+    } catch (e) {
+      setInstallEvents((prev) => [...prev, { type: 'error', message: String(e.message || e) }]);
+      setInstallWorking(false);
+    }
+  }
 
   async function importPack(e) {
     e.preventDefault();
@@ -2231,6 +2418,56 @@ function TemplatesPage() {
         </form>
       </div>
 
+      {/* Import from local ZIP */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4">Import Local Server Pack (.zip)</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Server Name</label>
+            <input value={serverName} onChange={e=>setServerName(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Host Port (optional)</label>
+            <input value={hostPort} onChange={e=>setHostPort(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="e.g. 25565" />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm text-white/70 mb-1">Select ZIP file</label>
+            <input type="file" accept=".zip" onChange={(e)=> setZipFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)} className="w-full text-sm text-white" />
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Min RAM</label>
+            <input value={minRam} onChange={e=>setMinRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Max RAM</label>
+            <input value={maxRam} onChange={e=>setMaxRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
+          </div>
+          <div className="md:col-span-2 flex items-center gap-3">
+            <button disabled={busy || !zipFile} onClick={async ()=>{
+              setBusy(true);
+              setMsg('');
+              try {
+                const fd = new FormData();
+                fd.append('server_name', serverName);
+                if (hostPort) fd.append('host_port', hostPort);
+                fd.append('min_ram', minRam);
+                fd.append('max_ram', maxRam);
+                if (zipFile) fd.append('file', zipFile);
+                const r = await fetch(`${API}/modpacks/import-upload`, { method: 'POST', body: fd });
+                const d = await r.json().catch(()=>({}));
+                if (!r.ok) throw new Error(d?.detail || `HTTP ${r.status}`);
+                setMsg('Server pack uploaded and container started. Go to Servers to see it.');
+              } catch (e) {
+                setMsg(`Error: ${e.message || e}`);
+              } finally {
+                setBusy(false);
+              }
+            }} className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded">{busy ? 'Uploading…' : 'Import ZIP'}</button>
+            {msg && <div className="text-sm text-white/70">{msg}</div>}
+          </div>
+        </div>
+      </div>
+
       <div className="bg-white/5 border border-white/10 rounded-lg p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">Curated Templates</h3>
@@ -2311,6 +2548,117 @@ function TemplatesPage() {
           );
         })()}
       </div>
+
+      {/* Catalog: Modpacks from providers */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Catalog</h3>
+          <div className="flex items-center gap-2 text-sm text-white/70">
+            <button onClick={() => { if (catalogPage > 1) { setCatalogPage(p => p - 1); setTimeout(searchCatalog, 0); } }} disabled={catalogPage<=1} className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded disabled:opacity-50">Prev</button>
+            <span>Page {catalogPage}</span>
+            <button onClick={() => { setCatalogPage(p => p + 1); setTimeout(searchCatalog, 0); }} className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded">Next</button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+          <select className="rounded bg-white/10 border border-white/20 px-3 py-2 text-white" value={provider} onChange={e=>setProvider(e.target.value)} style={{ backgroundColor: '#1f2937' }}>
+            {providers.map(p => (
+              <option key={p.id} value={p.id} disabled={p.requires_key && !p.configured} style={{ backgroundColor: '#1f2937' }}>
+                {p.name}{p.requires_key && !p.configured ? ' (configure in Settings)' : ''}
+              </option>
+            ))}
+          </select>
+          <input className="rounded bg-white/5 border border-white/10 px-3 py-2 text-white placeholder-white/50" placeholder="Search catalog..." value={catalogQuery} onChange={e=>setCatalogQuery(e.target.value)} />
+          <input className="rounded bg-white/5 border border-white/10 px-3 py-2 text-white placeholder-white/50" placeholder="MC Version (e.g. 1.20.4)" value={catalogMC} onChange={e=>setCatalogMC(e.target.value)} />
+          <select className="rounded bg-white/10 border border-white/20 px-3 py-2 text-white" value={catalogLoader} onChange={e=>setCatalogLoader(e.target.value)} style={{ backgroundColor: '#1f2937' }}>
+            <option value="" style={{ backgroundColor: '#1f2937' }}>Any Loader</option>
+            <option value="fabric" style={{ backgroundColor: '#1f2937' }}>Fabric</option>
+            <option value="forge" style={{ backgroundColor: '#1f2937' }}>Forge</option>
+            <option value="neoforge" style={{ backgroundColor: '#1f2937' }}>NeoForge</option>
+          </select>
+          <div className="md:col-span-4 flex items-center gap-2">
+            <button onClick={() => { setCatalogPage(1); searchCatalog(); }} className="bg-brand-500 hover:bg-brand-600 px-3 py-2 rounded">Search</button>
+            {catalogLoading && <div className="text-sm text-white/60">Loading…</div>}
+            {catalogError && <div className="text-sm text-red-400">{catalogError}</div>}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {catalogResults.map((p, idx) => (
+            <div key={p.id || p.slug || idx} className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col">
+              <div className="flex items-center gap-3 mb-2">
+                {p.icon_url ? <img src={p.icon_url} alt="" className="w-8 h-8 rounded" /> : <div className="w-8 h-8 bg-white/10 rounded" />}
+                <div>
+                  <div className="font-semibold">{p.name}</div>
+                  <div className="text-xs text-white/60">{(p.categories || []).slice(0,3).join(' · ')}</div>
+                </div>
+              </div>
+              <div className="text-sm text-white/70 line-clamp-2">{p.description}</div>
+              <div className="mt-2 flex items-center gap-3 text-xs text-white/60">
+                {typeof p.downloads === 'number' && <span>⬇ {Intl.NumberFormat().format(p.downloads)}</span>}
+                {p.updated && <span>Updated {new Date(p.updated).toLocaleDateString()}</span>}
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <button onClick={() => openInstallFromCatalog(p)} className="bg-brand-500 hover:bg-brand-600 px-3 py-1.5 rounded text-sm">Install</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Install Wizard Modal */}
+      {installOpen && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-ink border border-white/10 rounded-lg p-6 w-full max-w-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-lg font-semibold">Install Modpack{installPack?.name ? `: ${installPack.name}` : ''}</div>
+              <button onClick={() => { setInstallOpen(false); setInstallPack(null); }} className="text-white/60 hover:text-white">Close</button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+              <div>
+                <label className="block text-xs text-white/60 mb-1">Version</label>
+                <select className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white" value={installVersionId} onChange={e=>setInstallVersionId(e.target.value)} style={{ backgroundColor: '#1f2937' }}>
+                  {installVersions.map(v => <option key={v.id} value={v.id} style={{ backgroundColor: '#1f2937' }}>{v.name || v.version_number}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-white/60 mb-1">Server Name</label>
+                <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={serverName} onChange={e=>setServerName(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs text-white/60 mb-1">Host Port (optional)</label>
+                <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={hostPort} onChange={e=>setHostPort(e.target.value)} placeholder="25565" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-white/60 mb-1">Min RAM</label>
+                  <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={minRam} onChange={e=>setMinRam(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs text-white/60 mb-1">Max RAM</label>
+                  <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={maxRam} onChange={e=>setMaxRam(e.target.value)} />
+                </div>
+              </div>
+              <div className="md:col-span-2 flex items-center gap-2 mt-2">
+                <button disabled={installWorking} onClick={submitInstall} className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded">{installWorking ? 'Installing…' : 'Start Install'}</button>
+                <div className="text-sm text-white/70">{installPack?.provider || provider}</div>
+              </div>
+            </div>
+            <div className="bg-white/5 border border-white/10 rounded p-3 h-40 overflow-auto text-sm">
+              {installEvents.length === 0 ? (
+                <div className="text-white/50">No events yet…</div>
+              ) : (
+                <ul className="space-y-1">
+                  {installEvents.map((ev, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <span className="w-2 h-2 rounded-full mt-2" style={{ background: ev.type === 'error' ? '#f87171' : ev.type === 'done' ? '#34d399' : '#a78bfa' }}></span>
+                      <span>{ev.message || ev.step}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2464,20 +2812,35 @@ function App() {
         })
         .then((d) => {
           setLoaderVersionsData(d);
+          // Prefer first loader version returned (backend tends to sort newest first); UI keeps user choice open
           if (d?.loader_versions?.length) {
             setLoaderVersion(d.loader_versions[0]);
           } else {
             setLoaderVersion('');
           }
+          // Set installer version default for Fabric when provided by backend
+          if (selectedType === 'fabric') {
+            if (d?.latest_installer_version) {
+              setInstallerVersion(d.latest_installer_version);
+            } else if (Array.isArray(d?.installer_versions) && d.installer_versions.length) {
+              setInstallerVersion(d.installer_versions[0]);
+            } else {
+              setInstallerVersion('');
+            }
+          } else {
+            setInstallerVersion('');
+          }
         })
         .catch((e) => {
           setLoaderVersionsError(e);
           setLoaderVersion('');
+          setInstallerVersion('');
         })
         .finally(() => setLoaderVersionsLoading(false));
     } else {
       setLoaderVersionsData(null);
       setLoaderVersion('');
+      setInstallerVersion('');
     }
   }, [selectedType, version]);
 
@@ -2565,6 +2928,7 @@ function App() {
   const sidebarItems = [
     { id: 'dashboard', label: 'Dashboard', icon: FaHome },
     { id: 'servers', label: 'My Servers', icon: FaServer },
+    { id: 'templates', label: 'Templates', icon: FaLayerGroup },
     { id: 'monitoring', label: 'Server Status', icon: FaChartLine },
     { id: 'users', label: 'User Management', icon: FaUsers, adminOnly: true },
     { id: 'settings', label: 'Settings', icon: FaCog },
@@ -2586,6 +2950,7 @@ function App() {
           />
         ) : (
           <ServersPageWithGlobalData
+            servers={servers}
             onSelectServer={setSelectedServer}
             onCreateServer={createServer}
             types={types}
@@ -2611,6 +2976,8 @@ function App() {
         );
       case 'monitoring':
         return <MonitoringPageImpl />;
+      case 'templates':
+        return <TemplatesPage />;
       case 'users':
         return (
           <ErrorBoundary>
@@ -3190,32 +3557,292 @@ function CreateUserModal({ show, onClose, newUser, setNewUser, roles, onSubmit }
   );
 }
 
-// Placeholder components for CreateRoleModal and PermissionMatrixModal
-function CreateRoleModal({ show, onClose }) {
-  if (!show) return null;
+// Role Details Modal
+function RoleDetailsModal({ role, onClose, onEditPermissions }) {
+  const [permissions, setPermissions] = React.useState([]);
+  React.useEffect(() => {
+    let cancelled = false;
+    async function loadPermissions() {
+      try {
+        const r = await fetch(`${API}/users/permissions`, { headers: authHeaders() });
+        if (!r.ok) return;
+        const data = await r.json();
+        if (!cancelled) setPermissions(data.permissions || []);
+      } catch {}
+    }
+    loadPermissions();
+    return () => { cancelled = true; };
+  }, [role?.name]);
+
+  const permsByCategory = React.useMemo(() => {
+    const map = new Map(permissions.map(p => [p.name, p]));
+    const grouped = {};
+    (role?.permissions || []).forEach(name => {
+      const p = map.get(name) || { name, category: 'uncategorized' };
+      const cat = p.category || 'uncategorized';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(p);
+    });
+    Object.keys(grouped).forEach(cat => grouped[cat].sort((a, b) => a.name.localeCompare(b.name)));
+    return grouped;
+  }, [permissions, role]);
+
+  if (!role) return null;
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white/10 border border-white/20 rounded-lg p-6 w-full max-w-md">
-        <h3 className="text-lg font-semibold mb-4">Create Role</h3>
-        <p className="text-white/70 mb-4">Role creation interface coming soon...</p>
-        <button onClick={onClose} className="px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded text-white">
-          Close
-        </button>
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div className="bg-gray-900 border border-white/10 rounded-lg p-6 w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-xl font-semibold text-white">{role.name}</h3>
+            <p className="text-white/70 text-sm">{role.description}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {role.is_system && <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">system</span>}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {Object.entries(permsByCategory).length === 0 ? (
+            <div className="text-white/60">No permissions assigned.</div>
+          ) : (
+            Object.entries(permsByCategory).map(([cat, perms]) => (
+              <div key={cat} className="bg-gray-800/50 border border-white/10 rounded p-3">
+                <div className="text-white/80 font-medium mb-2">{cat.replace(/_/g,' ')}</div>
+                <ul className="grid grid-cols-1 md:grid-cols-2 gap-1">
+                  {perms.map(p => (
+                    <li key={p.name} className="text-sm text-white/80">{p.name}</li>
+                  ))}
+                </ul>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button onClick={onClose} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded text-white">Close</button>
+          <button onClick={onEditPermissions} className="px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded text-white">Edit Permissions</button>
+        </div>
       </div>
     </div>
   );
 }
 
-function PermissionMatrixModal({ show, onClose }) {
+// Permission Matrix Modal - edit permissions per role
+function PermissionMatrixModal({ show, onClose, roles, selectedRoleName = null }) {
+  const [permissions, setPermissions] = React.useState([]); // [{name, description, category}]
+  const [rolePerms, setRolePerms] = React.useState({}); // { roleName: Set([...]) }
+  const [changedRoles, setChangedRoles] = React.useState({}); // { roleName: true }
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [success, setSuccess] = React.useState('');
+
+  // Build initial state when opened
+  React.useEffect(() => {
+    if (!show) return;
+    let cancelled = false;
+
+    async function load() {
+      try {
+        setError('');
+        setSuccess('');
+        // Fetch permissions from API
+        const resp = await fetch(`${API}/users/permissions`, { headers: authHeaders() });
+        if (!resp.ok) throw new Error('Failed to load permissions');
+        const data = await resp.json();
+        const perms = data.permissions || [];
+        if (cancelled) return;
+        setPermissions(perms);
+
+        // Initialize role permissions map
+        const initial = {};
+        (roles || []).forEach(r => {
+          initial[r.name] = new Set(r.permissions || []);
+        });
+        setRolePerms(initial);
+        setChangedRoles({});
+      } catch (e) {
+        if (!cancelled) setError(e.message || String(e));
+      }
+    }
+
+    load();
+    return () => { cancelled = true; };
+  }, [show]);
+
+  const [query, setQuery] = React.useState('');
+
+  const permsByCategory = React.useMemo(() => {
+    const grouped = {};
+    const filtered = permissions.filter(p => {
+      if (!query) return true;
+      const q = query.toLowerCase();
+      return p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q);
+    });
+    filtered.forEach(p => {
+      if (!grouped[p.category]) grouped[p.category] = [];
+      grouped[p.category].push(p);
+    });
+    // sort permissions within category for stable UI
+    Object.keys(grouped).forEach(cat => {
+      grouped[cat].sort((a, b) => a.name.localeCompare(b.name));
+    });
+    return grouped;
+  }, [permissions, query]);
+
+  function toggle(roleName, permName) {
+    setRolePerms(prev => {
+      const next = { ...prev };
+      const set = new Set(next[roleName] || []);
+      if (set.has(permName)) set.delete(permName); else set.add(permName);
+      next[roleName] = set;
+      return next;
+    });
+    setChangedRoles(prev => ({ ...prev, [roleName]: true }));
+  }
+
+  async function saveChanges() {
+    try {
+      setSaving(true);
+      setError('');
+      setSuccess('');
+      const names = Object.keys(changedRoles).filter(n => changedRoles[n]);
+      for (const name of names) {
+        const permsList = Array.from(rolePerms[name] || []);
+        const resp = await fetch(`${API}/users/roles/${encodeURIComponent(name)}`, {
+          method: 'PATCH',
+          headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ permissions: permsList })
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.detail || `Failed to update role ${name}`);
+        }
+      }
+      setSuccess('Permissions updated successfully');
+      setChangedRoles({});
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (!show) return null;
+
+  const roleList = Array.isArray(roles) ? roles : [];
+  const visibleRoles = selectedRoleName ? roleList.filter(r => r.name === selectedRoleName) : roleList;
+
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white/10 border border-white/20 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold mb-4">Permission Matrix</h3>
-        <p className="text-white/70 mb-4">Advanced permission matrix interface coming soon...</p>
-        <button onClick={onClose} className="px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded text-white">
-          Close
-        </button>
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div className="bg-gray-900 border border-white/10 rounded-lg p-6 w-full max-w-6xl max-h-[90vh] overflow-y-auto shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Permission Matrix</h3>
+          <div className="flex items-center gap-2">
+            {error && <span className="text-sm text-red-300">{error}</span>}
+            {success && <span className="text-sm text-green-300">{success}</span>}
+          </div>
+        </div>
+
+        <div className="overflow-x-auto bg-gray-800/60 rounded-md border border-white/10">
+          <div className="flex items-center justify-between px-3 py-2 bg-gray-800/80 border-b border-white/10">
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search permissions..." className="w-72 px-3 py-1.5 bg-gray-900 border border-white/10 rounded text-white placeholder-white/40 text-sm" />
+            {selectedRoleName && (
+              <div className="text-white/70 text-sm">Editing role: <span className="font-semibold text-white">{selectedRoleName}</span></div>
+            )}
+          </div>
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-900/80 sticky top-0">
+              <tr>
+                <th className="text-left px-3 py-2 text-white/80">Permission</th>
+                {visibleRoles.map(r => (
+                  <th key={r.name} className="px-3 py-2 text-white/80 text-left">
+                    <div className="flex items-center gap-2">
+                      <span>{r.name}</span>
+                      {r.is_system && (
+                        <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">system</span>
+                      )}
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {Object.entries(permsByCategory).map(([cat, perms]) => (
+                <React.Fragment key={cat}>
+                  <tr>
+                    <td colSpan={1 + visibleRoles.length} className="bg-gray-900/70 text-white/80 px-3 py-1 mt-2 font-medium">
+                      <div className="flex items-center justify-between">
+                        <span>{cat.replace(/_/g, ' ')}</span>
+                        <div className="flex items-center gap-2">
+                          {visibleRoles.map(r => (
+                            <div key={r.name} className="flex items-center gap-1">
+                              <button
+                                className="px-2 py-0.5 text-xs bg-white/10 hover:bg-white/20 rounded"
+                                onClick={() => {
+                                  const next = new Set(rolePerms[r.name] || []);
+                                  perms.forEach(p => next.add(p.name));
+                                  setRolePerms(prev => ({ ...prev, [r.name]: next }));
+                                  setChangedRoles(prev => ({ ...prev, [r.name]: true }));
+                                }}
+                              >
+                                Select all ({r.name})
+                              </button>
+                              <button
+                                className="px-2 py-0.5 text-xs bg-white/10 hover:bg-white/20 rounded"
+                                onClick={() => {
+                                  const next = new Set(rolePerms[r.name] || []);
+                                  perms.forEach(p => next.delete(p.name));
+                                  setRolePerms(prev => ({ ...prev, [r.name]: next }));
+                                  setChangedRoles(prev => ({ ...prev, [r.name]: true }));
+                                }}
+                              >
+                                Clear ({r.name})
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                  {perms.map(p => (
+                    <tr key={p.name} className="border-b border-white/5">
+                      <td className="px-3 py-2">
+                        <div className="flex flex-col">
+                          <span className="text-white">{p.name}</span>
+                          {p.description && <span className="text-xs text-white/60">{p.description}</span>}
+                        </div>
+                      </td>
+                      {visibleRoles.map(r => {
+                        const has = (rolePerms[r.name] || new Set()).has(p.name);
+                        return (
+                          <td key={r.name} className="px-3 py-2">
+                            <input
+                              type="checkbox"
+                              className="w-4 h-4 text-brand-500 bg-white/10 border-white/20 rounded"
+                              checked={!!has}
+                              onChange={() => toggle(r.name, p.name)}
+                              disabled={currentUser?.role !== 'admin'}
+                              title={currentUser?.role !== 'admin' ? 'You need admin to edit roles' : ''}
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex justify-end gap-3 mt-4">
+          <button onClick={onClose} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded text-white">Close</button>
+          <button onClick={saveChanges} disabled={saving || Object.keys(changedRoles).length === 0} className={`px-4 py-2 rounded text-white ${saving ? 'bg-brand-500/50' : 'bg-brand-500 hover:bg-brand-600'}`}>
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
       </div>
     </div>
   );

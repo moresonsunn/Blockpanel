@@ -16,7 +16,9 @@ class ForgeProvider:
     """Official MinecraftForge server provider using Forge APIs.
     
     Forge servers require an installer that sets up the server environment.
-    The installer is obtained from: https://maven.minecraftforge.net/net/minecraftforge/forge/{version}-{forge_version}/forge-{version}-{forge_version}-installer.jar
+    The installer is obtained from: https://maven.minecraftforge.net/net/minecraftforge/forge/{maven_coord}/forge-{maven_coord}-installer.jar
+    Where maven_coord is usually "{mc_version}-{forge_version}", but for legacy versions (e.g., 1.7.10)
+    it is "{mc_version}-{forge_version}-{mc_version}".
     
     API Documentation: https://files.minecraftforge.net/
     """
@@ -143,14 +145,42 @@ class ForgeProvider:
             
         raise ValueError(f"No Forge versions available for Minecraft {minecraft_version}")
 
+    def _resolve_installer_url(self, mc_version: str, forge_version: str) -> str:
+        """
+        Build a working installer URL by trying known coordinate patterns and fallbacks.
+        Patterns tried in order:
+          1) {mc}-{forge}
+          2) {mc}-{forge}-{mc}  (legacy coordinates like 1.7.10)
+        For each, try -installer.jar, then fallback to -universal.jar if installer is missing.
+        """
+        import requests
+        candidates = []
+        # pattern 1
+        coord1 = f"{mc_version}-{forge_version}"
+        candidates.append(f"{MAVEN_BASE}/{coord1}/forge-{coord1}-installer.jar")
+        candidates.append(f"{MAVEN_BASE}/{coord1}/forge-{coord1}-universal.jar")
+        # pattern 2 (legacy)
+        coord2 = f"{mc_version}-{forge_version}-{mc_version}"
+        candidates.append(f"{MAVEN_BASE}/{coord2}/forge-{coord2}-installer.jar")
+        candidates.append(f"{MAVEN_BASE}/{coord2}/forge-{coord2}-universal.jar")
+        
+        last_err = None
+        for url in candidates:
+            try:
+                r = requests.head(url, timeout=20)
+                if r.status_code == 200:
+                    return url
+            except Exception as e:
+                last_err = e
+                continue
+        if last_err:
+            raise ValueError(f"No valid Forge installer/universal found for {mc_version} {forge_version}: {last_err}")
+        raise ValueError(f"No valid Forge installer/universal found for {mc_version} {forge_version}")
+
     def get_download_url(self, version: str) -> str:
         """Get download URL for Forge installer with the best available version."""
         forge_version = self.get_best_forge_version(version)
-        
-        path = f"{version}-{forge_version}"
-        filename = f"forge-{version}-{forge_version}-installer.jar"
-        url = f"{MAVEN_BASE}/{path}/{filename}"
-        
+        url = self._resolve_installer_url(version, forge_version)
         logger.info(f"Forge download URL: {url}")
         return url
 
@@ -179,10 +209,7 @@ class ForgeProvider:
             
             forge_version = loader_version
         
-        path = f"{version}-{forge_version}"
-        filename = f"forge-{version}-{forge_version}-installer.jar"
-        url = f"{MAVEN_BASE}/{path}/{filename}"
-        
+        url = self._resolve_installer_url(version, forge_version)
         logger.info(f"Forge download URL (custom): {url}")
         return url
 

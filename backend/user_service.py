@@ -129,9 +129,11 @@ DEFAULT_ROLES = {
             # Backups
             "server.backup.view", "server.backup.create", "server.backup.restore", 
             "server.backup.delete", "server.backup.download", "server.backup.schedule",
-            # Users (but not roles)
+            # Users
             "user.view", "user.create", "user.edit", "user.password.reset",
             "user.sessions.view", "user.sessions.revoke",
+            # Roles (grant admin ability to manage role permissions)
+            "role.view", "role.edit",
             # System
             "system.monitoring.view", "system.logs.view", "system.audit.view", "system.settings.view",
             # Scheduling
@@ -609,8 +611,6 @@ class UserService:
         role = self.db.query(Role).filter(Role.name == name).first()
         if not role:
             raise ValueError(f"Role '{name}' not found")
-        if role.is_system:
-            raise ValueError("Cannot modify system role")
         if description is not None:
             role.description = description
         if permissions is not None:

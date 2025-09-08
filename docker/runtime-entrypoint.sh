@@ -51,6 +51,8 @@ SERVER_VERSION="${SERVER_VERSION:-}"
 # Get Java version from environment or labels
 JAVA_VERSION="${JAVA_VERSION:-}"
 JAVA_BIN="${JAVA_BIN:-}"
+# Optional override for which jar to launch
+SERVER_JAR="${SERVER_JAR:-}"
 
 # If Java version not set in environment, select based on server type and version
 if [ -z "$JAVA_VERSION" ]; then
@@ -70,9 +72,12 @@ echo "DEBUG: Java binary: $JAVA_BIN"
 MIN_RAM="${MIN_RAM:-1G}"
 MAX_RAM="${MAX_RAM:-2G}"
 MEM_ARGS="-Xmx${MAX_RAM} -Xms${MIN_RAM}"
+JAVA_OPTS="${JAVA_OPTS:-}"
+ALL_JAVA_ARGS="$MEM_ARGS $JAVA_OPTS"
 
 echo "DEBUG: Memory configuration - Min: $MIN_RAM, Max: $MAX_RAM"
 echo "DEBUG: Java memory args: $MEM_ARGS"
+echo "DEBUG: Extra Java opts: $JAVA_OPTS"
 
 # Debug: Print environment and directory info
 echo "DEBUG: SERVER_DIR_NAME=$SERVER_DIR_NAME"
@@ -136,16 +141,31 @@ echo "DEBUG: Searching for server jars in $(pwd)"
 echo "DEBUG: Current directory contents: $(ls -la)"
 start_jar=""
 
-# Check for specific JAR patterns in order of preference
-for pattern in "server.jar" "neoforge-*-universal.jar" "*forge-*-universal.jar" "forge-*-server.jar" "*paper*.jar" "*purpur*.jar" "*fabric*.jar" "*server*.jar"; do
-  echo "DEBUG: Checking pattern: $pattern"
-  found=$(ls $pattern 2>/dev/null | head -n 1 || true)
-  if [ -n "$found" ]; then
-    start_jar="$found"
-    echo "DEBUG: Found jar: $start_jar"
-    break
+# Prefer explicit SERVER_JAR if set and exists
+if [ -n "$SERVER_JAR" ]; then
+  if [ -f "$SERVER_JAR" ]; then
+    start_jar="$SERVER_JAR"
+    echo "DEBUG: Using SERVER_JAR specified: $start_jar"
+  elif [ -f "./$SERVER_JAR" ]; then
+    start_jar="./$SERVER_JAR"
+    echo "DEBUG: Using SERVER_JAR specified (relative): $start_jar"
+  else
+    echo "WARNING: SERVER_JAR '$SERVER_JAR' not found; falling back to autodetection"
   fi
-done
+fi
+
+# Check for specific JAR patterns in order of preference
+if [ -z "$start_jar" ]; then
+  for pattern in "server.jar" "neoforge-*-universal.jar" "*forge-*-universal.jar" "forge-*-server.jar" "*paper*.jar" "*purpur*.jar" "*fabric*.jar" "*server*.jar"; do
+    echo "DEBUG: Checking pattern: $pattern"
+    found=$(ls $pattern 2>/dev/null | head -n 1 || true)
+    if [ -n "$found" ]; then
+      start_jar="$found"
+      echo "DEBUG: Found jar: $start_jar"
+      break
+    fi
+  done
+fi
 
 # Fallback: look inside /data/servers/* for a jar
 if [ -z "$start_jar" ] && [ -d "/data/servers" ]; then
@@ -159,7 +179,7 @@ fi
 
 # Handle Fabric servers specially
 if [ "$SERVER_TYPE" = "fabric" ] && [ -n "$start_jar" ]; then
-  echo "Handling Fabric server launcher"
+  echo "Handling Fabric server"
   
   # Validate JAR file before starting
   if [ ! -f "$start_jar" ]; then
@@ -178,15 +198,20 @@ if [ "$SERVER_TYPE" = "fabric" ] && [ -n "$start_jar" ]; then
     exit 1
   fi
   
-  # For Fabric, always use the launcher approach
-  echo "Starting Fabric server via launcher (java -jar server.jar server)"
-  exec "$JAVA_BIN" $MEM_ARGS -jar "$start_jar" server
+  # If the chosen jar filename contains 'fabric', assume it's the launcher and use 'server' argument; otherwise, run normally (nogui)
+  if echo "$start_jar" | grep -qi "fabric"; then
+    echo "Starting Fabric via launcher: $start_jar (with 'server' argument)"
+    exec "$JAVA_BIN" $ALL_JAVA_ARGS -jar "$start_jar" server
+  else
+    echo "Starting Fabric using standard server jar: $start_jar (nogui)"
+    exec "$JAVA_BIN" $ALL_JAVA_ARGS -jar "$start_jar" nogui
+  fi
 fi
 
 # If run script exists, prefer it
 if [ -z "$start_jar" ] && [ -f run.sh ]; then
   echo "Starting via run.sh"
-  exec "$JAVA_BIN" $MEM_ARGS -jar server.jar server
+  exec "$JAVA_BIN" $ALL_JAVA_ARGS -jar server.jar server
 fi
 
 # For other server types
@@ -212,11 +237,11 @@ if [ -n "$start_jar" ]; then
   fi
   
   # Test JAR file integrity
-  if ! "$JAVA_BIN" -jar "$start_jar" --help >/dev/null 2>&1; then
+  if ! "$JAVA_BIN" $ALL_JAVA_ARGS -jar "$start_jar" --help >/dev/null 2>&1; then
     echo "WARNING: JAR file validation failed, but attempting to start anyway..."
   fi
   
-  exec "$JAVA_BIN" $MEM_ARGS -jar "$start_jar" nogui
+  exec "$JAVA_BIN" $ALL_JAVA_ARGS -jar "$start_jar" nogui
 fi
 
 echo "No server jar or run.sh found in $(pwd). Contents:" >&2

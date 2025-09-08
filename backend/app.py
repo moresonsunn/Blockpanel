@@ -1,10 +1,10 @@
-from fastapi import FastAPI, HTTPException, UploadFile, Form, Body, Query, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, Form, Body, Query, Depends, Request
 from pydantic import BaseModel
 from docker_manager import DockerManager
 import server_providers  # noqa: F401 - ensure providers register
 from server_providers.providers import get_provider_names, get_provider
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from file_manager import (
     list_dir as fm_list_dir,
     read_file as fm_read_file,
@@ -35,6 +35,8 @@ from api.user_routes import router as user_router
 from monitoring_routes import router as monitoring_router
 from health_routes import router as health_router
 from modpack_routes import router as modpack_router
+from catalog_routes import router as catalog_router
+from integrations_routes import router as integrations_router
 from auth import require_auth, get_current_user, require_admin, require_moderator
 from scheduler import get_scheduler
 from models import User
@@ -83,6 +85,14 @@ def get_neoforge_loader_versions():
 
 app = FastAPI()
 
+# Enable gzip compression for API responses and static assets
+try:
+    from starlette.middleware.gzip import GZipMiddleware
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+except Exception:
+    # If starlette version lacks middleware or import fails, continue without compression
+    pass
+
 # Include all routers
 app.include_router(auth_router)
 app.include_router(scheduler_router)
@@ -94,11 +104,9 @@ app.include_router(user_router)
 app.include_router(monitoring_router)
 app.include_router(health_router)
 app.include_router(modpack_router)
+app.include_router(catalog_router)
+app.include_router(integrations_router)
 
-try:
-    app.mount("/ui", StaticFiles(directory="static", html=True), name="ui")
-except Exception:
-    pass
 
 @app.on_event("startup")
 async def startup_event():
@@ -181,9 +189,7 @@ class ServerCreateRequest(BaseModel):
     min_ram: int | str = 1024  # Minimum RAM (MB as int, or string like "1G")
     max_ram: int | str = 2048  # Maximum RAM (MB as int, or string like "2G")
 
-@app.get("/")
-def root_redirect():
-    return RedirectResponse(url="/ui")
+# Root now serves the UI via StaticFiles mount
 
 @app.get("/health")
 def healthz():
@@ -210,30 +216,46 @@ def list_loader_versions(
     version: str = Query(..., description="Minecraft version to get loader versions for"),
 ):
     """
-    Returns loader versions for a given server type and Minecraft version,
-    and the URL to the loader site for that type/version.
+    Returns loader versions for a given server type and Minecraft version.
+    For Fabric, also returns installer versions and site URL.
     """
     try:
-        if server_type.lower() == "fabric":
-            loader_versions = get_fabric_loader_versions(version)
+        server_type_l = server_type.lower()
+        loader_site_url = None
+        extra = {}
+        if server_type_l == "fabric":
+            # Fabric: loader and installer come from Fabric Meta
+            try:
+                from server_providers.fabric import FabricProvider as _FP
+            except Exception:
+                from backend.server_providers.fabric import FabricProvider as _FP  # type: ignore
+            fp = _FP()
+            loader_versions = fp.list_loader_versions(version)
+            installers = fp.get_installer_versions()
+            latest_installer = fp.get_latest_installer_version()
             loader_site_url = f"https://meta.fabricmc.net/v2/versions/loader/{version}/"
-        elif server_type.lower() == "forge":
+            extra = {
+                "installer_versions": [i.get("version") for i in installers],
+                "latest_installer_version": latest_installer,
+            }
+        elif server_type_l == "forge":
             loader_versions = get_forge_loader_versions(version)
             loader_site_url = f"https://files.minecraftforge.net/net/minecraftforge/forge/index_{version}.html"
-        elif server_type.lower() == "neoforge":
+        elif server_type_l == "neoforge":
             loader_versions = get_neoforge_loader_versions()  # or pass the version if needed
             loader_site_url = f"https://neoforged.net/"
         else:
             provider = get_provider(server_type)
             loader_versions = provider.list_loader_versions(version)
-            loader_site_url = None
 
-        return {
+        payload = {
             "type": server_type,
             "version": version,
             "loader_versions": loader_versions,
             "loader_site_url": loader_site_url,
         }
+        payload.update(extra)
+        return payload
     except HTTPException:
         raise
     except Exception as e:
@@ -246,6 +268,51 @@ def list_servers(current_user: User = Depends(require_auth)):
         return get_docker_manager().list_servers()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
+
+@app.get("/ports/used")
+def list_used_ports(from_port: int | None = Query(None), to_port: int | None = Query(None), current_user: User = Depends(require_auth)):
+    """
+    List host ports currently used by Docker containers.
+    Optionally filter by range [from_port, to_port].
+    """
+    try:
+        dm = get_docker_manager()
+        used = dm.get_used_host_ports(only_minecraft=False)
+        if from_port is not None and to_port is not None and from_port <= to_port:
+            used = {p for p in used if from_port <= p <= to_port}
+        return {"ports": sorted(list(used))}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
+
+@app.get("/ports/validate")
+def validate_port(port: int = Query(..., ge=1, le=65535), current_user: User = Depends(require_auth)):
+    """
+    Validate if a given host port is available (not used by Docker containers).
+    Note: Does not detect non-Docker processes bound to the host.
+    """
+    try:
+        dm = get_docker_manager()
+        used = dm.get_used_host_ports(only_minecraft=False)
+        return {"port": port, "available": int(port) not in used}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
+
+@app.get("/ports/suggest")
+def suggest_port(
+    start: int = Query(25565, ge=1, le=65535),
+    end: int = Query(25999, ge=1, le=65535),
+    preferred: int | None = Query(None, ge=1, le=65535),
+    current_user: User = Depends(require_auth)
+):
+    """
+    Suggest an available host port by scanning Docker port mappings.
+    """
+    try:
+        dm = get_docker_manager()
+        port = dm.pick_available_port(preferred=preferred, start=start, end=end)
+        return {"port": port}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 @app.post("/servers")
 def create_server(req: ServerCreateRequest, current_user: User = Depends(require_moderator)):
@@ -400,9 +467,46 @@ def get_server_stats(container_id: str):
         raise HTTPException(status_code=404, detail=f"Stats unavailable: {e}")
 
 @app.get("/servers/{container_id}/info")
-def get_server_info(container_id: str):
+def get_server_info(container_id: str, request: Request = None):
     try:
-        return get_docker_manager().get_server_info(container_id)
+        info = get_docker_manager().get_server_info(container_id)
+        # Attach top-level directory snapshot and common subdirs for instant files panel
+        try:
+            name = info.get("name") or info.get("container_name") or info.get("server_name")
+            if name:
+                snap = fm_list_dir(name, ".")
+                info["dir_snapshot"] = snap[:200]
+                # Deep snapshot for common subdirs
+                deep = {}
+                for sub in ["world", "world_nether", "world_the_end", "plugins", "mods", "config", "datapacks"]:
+                    try:
+                        items = fm_list_dir(name, sub)
+                        if isinstance(items, list) and items:
+                            deep[sub] = items[:100]
+                    except Exception:
+                        continue
+                info["dir_snapshot_deep"] = deep
+        except Exception:
+            info.setdefault("dir_snapshot", [])
+            info.setdefault("dir_snapshot_deep", {})
+        
+        # Generate a simple ETag using dir mtime and java_version if present
+        etag = None
+        try:
+            from pathlib import Path
+            import hashlib
+            base = (Path("/data/servers").resolve() / (info.get("name") or "")).resolve()
+            st = base.stat() if base.exists() else None
+            sig = f"{info.get('java_version','')}-{int(st.st_mtime) if st else 0}"
+            etag = 'W/"info-' + hashlib.md5(sig.encode()).hexdigest() + '"'
+        except Exception:
+            etag = None
+
+        inm = request.headers.get("if-none-match") if request else None
+        headers = {"ETag": etag} if etag else {}
+        if etag and inm == etag:
+            return JSONResponse(status_code=304, content=None, headers=headers)
+        return JSONResponse(content=info, headers=headers)
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Server info unavailable: {e}")
 
@@ -477,12 +581,49 @@ def create_server_from_template(
         raise HTTPException(status_code=503, detail=f"Failed to create server: {e}")
 
 @app.get("/servers/{name}/files")
-def files_list(name: str, path: str = "."):
-    return {"items": fm_list_dir(name, path)}
+def files_list(name: str, path: str = ".", request: Request = None):
+    # Compute a simple ETag based on directory mtime to enable client caching
+    try:
+        from pathlib import Path
+        base = (Path("/data/servers").resolve() / name / path).resolve()
+        # Prevent path traversal
+        root = Path("/data/servers").resolve() / name
+        if not str(base).startswith(str(root)):
+            raise HTTPException(status_code=400, detail="Invalid path")
+        st = base.stat() if base.exists() else None
+        etag = f'W/"dir-{int(st.st_mtime)}"' if st else 'W/"dir-0"'
+    except Exception:
+        etag = None
+
+    inm = request.headers.get("if-none-match") if request else None
+    if etag and inm == etag:
+        return JSONResponse(status_code=304, content=None, headers={"ETag": etag})
+
+    items = fm_list_dir(name, path)
+    headers = {"ETag": etag} if etag else {}
+    return JSONResponse(content={"items": items}, headers=headers)
 
 @app.get("/servers/{name}/file")
-def file_read(name: str, path: str):
-    return {"content": fm_read_file(name, path)}
+def file_read(name: str, path: str, request: Request = None):
+    # ETag based on file size and mtime
+    try:
+        from pathlib import Path
+        p = (Path("/data/servers").resolve() / name / path).resolve()
+        root = Path("/data/servers").resolve() / name
+        if not str(p).startswith(str(root)):
+            raise HTTPException(status_code=400, detail="Invalid path")
+        st = p.stat() if p.exists() else None
+        etag = f'W/"file-{st.st_size}-{int(st.st_mtime)}"' if st else 'W/"file-0-0"'
+    except Exception:
+        etag = None
+
+    inm = request.headers.get("if-none-match") if request else None
+    if etag and inm == etag:
+        return JSONResponse(status_code=304, content=None, headers={"ETag": etag})
+
+    content = fm_read_file(name, path)
+    headers = {"ETag": etag} if etag else {}
+    return JSONResponse(content={"content": content}, headers=headers)
 
 @app.post("/servers/{name}/file")
 def file_write(name: str, path: str, content: str = Form(...)):
@@ -555,8 +696,62 @@ def players_list(name: str):
 @app.get("/servers/{name}/configs")
 def configs_list(name: str):
     return {"configs": ["server.properties", "bukkit.yml", "spigot.yml"]}
+@app.get("/servers/{name}/config-bundle")
+def get_server_config_bundle(name: str, container_id: str | None = Query(None)):
+    """Return a bundle of server.properties (parsed) and EULA state.
+    This reduces multiple round-trips for the Config panel.
+    """
+    try:
+        # Read server.properties
+        props_text = fm_read_file(name, "server.properties")
+    except Exception:
+        props_text = ""
+    try:
+        eula_text = fm_read_file(name, "eula.txt")
+    except Exception:
+        eula_text = ""
 
-@app.get("/servers/{container_id}/java-version")
+    # Parse properties into dict
+    props_map = {}
+    try:
+        for line in (props_text or "").splitlines():
+            if not line or line.strip().startswith("#"):
+                continue
+            if "=" in line:
+                k, v = line.split("=", 1)
+                props_map[k.strip()] = v.strip()
+    except Exception:
+        pass
+
+    eula_accepted = False
+    try:
+        eula_accepted = any(
+            part.strip().lower() == "eula=true" for part in (eula_text or "").splitlines()
+        )
+    except Exception:
+        eula_accepted = False
+
+    # Java info (if container_id provided)
+    java = None
+    try:
+        if container_id:
+            dm = get_docker_manager()
+            info = dm.get_server_info(container_id)
+            java_version = info.get("java_version", "unknown")
+            java = {
+                "current_version": java_version,
+                "available_versions": ["8", "11", "17", "21"]
+            }
+    except Exception:
+        java = None
+
+    return {
+        "properties": props_map,
+        "eula_accepted": eula_accepted,
+        "java": java,
+    }
+
+@app.get("/servers/{container_id}/java-versions")
 def get_server_java_version(container_id: str):
     """Get the current Java version for a server."""
     try:
@@ -573,6 +768,7 @@ def get_server_java_version(container_id: str):
             "available_versions": ["8", "11", "17", "21"]
         }
     except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Java version info unavailable: {e}")
         raise HTTPException(status_code=404, detail=f"Java version info unavailable: {e}")
 
 @app.post("/servers/{container_id}/java-version")
@@ -782,4 +978,11 @@ def cleanup_system():
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to cleanup system: {e}")
+
+# Mount the React UI at root as the last route so it doesn't shadow API endpoints
+try:
+    app.mount("/", StaticFiles(directory="static", html=True), name="ui")
+except Exception:
+    # Static directory may not exist in some environments (e.g., dev without build)
+    pass
 

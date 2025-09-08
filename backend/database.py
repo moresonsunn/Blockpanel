@@ -136,6 +136,17 @@ def init_db():
     # Now create all tables
     Base.metadata.create_all(bind=engine)
     print("Database tables created successfully")
+
+    # Create helpful indexes to speed up queries (safe if they already exist)
+    try:
+        from sqlalchemy import text as _text
+        with engine.begin() as conn:
+            conn.execute(_text("CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs (timestamp)"))
+            conn.execute(_text("CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs (user_id)"))
+            conn.execute(_text("CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs (action)"))
+        print("Database indexes ensured for audit_logs")
+    except Exception as e:
+        print(f"Warning: could not create indexes (non-fatal): {e}")
     
     # Initialize default permissions, roles, and admin user
     db = SessionLocal()

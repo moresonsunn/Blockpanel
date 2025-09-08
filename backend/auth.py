@@ -299,7 +299,7 @@ require_system_schedule = require_permission("system.schedule")
 require_system_monitoring = require_permission("system.monitoring.view")
 require_system_audit = require_permission("system.audit.view")
 require_system_settings = require_permission("system.settings.view")
-require_system_settings = require_permission("system.settings")
+require_system_settings_edit = require_permission("system.settings.edit")
 
 def log_user_action(user: User, action: str, resource_type: Optional[str] = None,
                    resource_id: Optional[str] = None, details: Optional[dict] = None,

@@ -59,7 +59,7 @@ export default function TerminalPanel({ containerId }) {
         if (active) setRawLogs('');
       }
     }
-    interval = setInterval(pollLogs, 2000);
+    interval = setInterval(pollLogs, 4000);
     return () => { active = false; if (interval) clearInterval(interval); };
   }, [containerId]);
 

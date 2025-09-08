@@ -88,13 +88,17 @@ class FabricProvider:
             raise ValueError(f"Could not fetch Fabric installer versions: {e}")
 
     def get_latest_loader_version(self, game_version: str) -> str:
-        """Get the latest stable loader version for a game version."""
+        """Get the latest loader version for a game version, preferring stable."""
         loaders = self.get_loader_versions(game_version)
         if not loaders:
             raise ValueError(f"No Fabric loaders available for {game_version}")
         
-        latest_loader = loaders[0]
-        return latest_loader["loader"]["version"]
+        # Prefer first stable entry
+        for entry in loaders:
+            if entry.get("loader", {}).get("stable", False):
+                return entry["loader"]["version"]
+        # Fallback to the first entry
+        return loaders[0]["loader"]["version"]
 
     def get_latest_installer_version(self) -> str:
         """Get the latest stable installer version."""

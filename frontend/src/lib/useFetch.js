@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 // Simple cache for API responses
 const apiCache = new Map();
+const etagCache = new Map(); // url -> etag
 const DEFAULT_CACHE_DURATION = 30000; // 30s
 
 export function useFetch(url, deps = [], options = {}) {
@@ -32,8 +33,24 @@ export function useFetch(url, deps = [], options = {}) {
     setLoading(true);
     setError(null);
 
-    fetch(url, { signal: abortController.signal })
+    const headers = {};
+    const prevEtag = etagCache.get(url);
+    if (prevEtag) headers['If-None-Match'] = prevEtag;
+
+    fetch(url, { signal: abortController.signal, headers })
       .then(async (r) => {
+        if (r.status === 304) {
+          // Not modified; use cached data if present
+          const cached = apiCache.get(url);
+          if (cached) {
+            return cached.data;
+          }
+          // Fallback: parse anyway if server sent a body (unlikely with 304)
+          const payload = await r.json().catch(() => null);
+          return payload;
+        }
+        const et = r.headers.get('etag');
+        if (et) etagCache.set(url, et);
         const payload = await r.json().catch(() => null);
         if (!r.ok)
           throw new Error(
@@ -42,7 +59,7 @@ export function useFetch(url, deps = [], options = {}) {
         return payload;
       })
       .then((d) => {
-        if (active) {
+        if (active && d != null) {
           setData(d);
           if (cacheEnabled) apiCache.set(url, { data: d, timestamp: Date.now() });
         }

@@ -85,24 +85,35 @@ def prepare_server_files(server_type: str, version: str, dest_dir: Path, loader_
             
         elif server_type == "fabric":
 
-            jar_path = dest_dir / "server.jar"
+            # Download to the canonical launcher filename and also create server.jar alias for compatibility
+            launcher_path = dest_dir / "fabric-server-launch.jar"
             logger.info(f"Downloading Fabric server launcher from {url}")
-            stream_download(url, jar_path)
-            
+            stream_download(url, launcher_path)
 
+            # Create/refresh server.jar alias for any tooling that expects it
+            jar_path = dest_dir / "server.jar"
+            try:
+                if jar_path.exists():
+                    jar_path.unlink()
+                shutil.copy2(launcher_path, jar_path)
+                logger.info("Created server.jar alias for Fabric launcher")
+            except Exception as e:
+                logger.warning(f"Could not create server.jar alias for Fabric launcher: {e}")
+
+            # Simple run helper
             launcher_script = dest_dir / "run.sh"
             launcher_content = f"""#!/bin/bash
 cd "$(dirname "$0")"
-java -jar server.jar server
+java -jar fabric-server-launch.jar server
 """
             launcher_script.write_text(launcher_content, encoding="utf-8")
             try:
                 launcher_script.chmod(0o755)  
             except Exception as e:
                 logger.warning(f"Could not set executable permission on run.sh: {e}")
-            
 
-            jar_size = jar_path.stat().st_size
+            # Validate
+            jar_size = launcher_path.stat().st_size
             if jar_size < 1024 * 5:  
                 logger.error(f"Fabric JAR is too small ({jar_size} bytes), likely corrupted")
                 raise ValueError(f"Fabric JAR is too small ({jar_size} bytes), expected at least 5KB")

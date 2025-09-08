@@ -156,30 +156,6 @@ async def toggle_user_status(
     status_text = "activated" if user.is_active else "deactivated"
     return {"message": f"User {user.username} has been {status_text}"}
 
-@router.get("/roles")
-async def get_available_roles(
-    current_user: User = Depends(require_moderator)
-):
-    """Get list of available user roles."""
-    return {
-        "roles": [
-            {
-                "name": "user",
-                "description": "Standard user with basic permissions",
-                "level": 1
-            },
-            {
-                "name": "moderator", 
-                "description": "Can manage servers and users",
-                "level": 2
-            },
-            {
-                "name": "admin",
-                "description": "Full system access",
-                "level": 3
-            }
-        ]
-    }
 
 @router.get("/sessions")
 async def get_active_sessions(

@@ -137,6 +137,12 @@ class PermissionResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class RolesListResponse(BaseModel):
+    roles: List[RoleResponse]
+
+class PermissionsListResponse(BaseModel):
+    permissions: List[PermissionResponse]
+
 class AuditLogResponse(BaseModel):
     id: int
     user_id: Optional[int]
@@ -293,10 +299,10 @@ async def list_users(
 
 # Move static routes before dynamic /{user_id} to avoid path conflicts
 # Role and permission routes
-@router.get("/roles", response_model=List[RoleResponse])
+@router.get("/roles", response_model=RolesListResponse)
 async def get_roles(
     request: Request,
-    current_user: User = Depends(require_user_view),
+    current_user: User = Depends(require_user_manage_roles),
     db: Session = Depends(get_db)
 ):
     """Get all available roles."""
@@ -312,12 +318,12 @@ async def get_roles(
         db=db
     )
     
-    return roles
+    return {"roles": roles}
 
-@router.get("/permissions", response_model=List[PermissionResponse])
+@router.get("/permissions", response_model=PermissionsListResponse)
 async def get_permissions(
     request: Request,
-    current_user: User = Depends(require_user_view),
+    current_user: User = Depends(require_user_manage_roles),
     db: Session = Depends(get_db)
 ):
     """Get all available permissions."""
@@ -333,7 +339,7 @@ async def get_permissions(
         db=db
     )
     
-    return permissions
+    return {"permissions": permissions}
 
 # Audit logs
 @router.get("/audit-logs", response_model=AuditLogListResponse)
@@ -532,75 +538,7 @@ async def delete_user(
     
     return None
 
-# Role and permission routes
-@router.get("/roles", response_model=List[RoleResponse])
-async def get_roles(
-    request: Request,
-    current_user: User = Depends(require_user_manage_roles),
-    db: Session = Depends(get_db)
-):
-    """Get all available roles."""
-    user_service = UserService(db)
-    roles = user_service.get_roles()
-    
-    # Log the action
-    log_user_action(
-        user=current_user,
-        action="role.list",
-        resource_type="roles",
-        request=request,
-        db=db
-    )
-    
-    return roles
 
-@router.get("/permissions", response_model=List[PermissionResponse])
-async def get_permissions(
-    request: Request,
-    current_user: User = Depends(require_user_manage_roles),
-    db: Session = Depends(get_db)
-):
-    """Get all available permissions."""
-    user_service = UserService(db)
-    permissions = user_service.get_permissions()
-    
-    # Log the action
-    log_user_action(
-        user=current_user,
-        action="permission.list",
-        resource_type="permissions",
-        request=request,
-        db=db
-    )
-    
-    return permissions
-
-# Audit logs
-@router.get("/audit-logs", response_model=AuditLogListResponse)
-async def get_audit_logs(
-    request: Request,
-    user_id: Optional[int] = None,
-    action: Optional[str] = None,
-    page: int = 1, 
-    page_size: int = 50,
-    current_user: User = Depends(require_user_manage_roles),
-    db: Session = Depends(get_db)
-):
-    """Get audit logs with filtering and pagination."""
-    user_service = UserService(db)
-    result = user_service.get_audit_logs(user_id, action, page, page_size)
-    
-    # Log the action
-    log_user_action(
-        user=current_user,
-        action="audit.view",
-        resource_type="audit_logs",
-        details={"user_id": user_id, "action": action, "page": page, "page_size": page_size},
-        request=request,
-        db=db
-    )
-    
-    return result
 
 def get_client_ip(request: Request) -> str:
     """Get client IP address from request."""

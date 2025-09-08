@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FaFolder, FaUpload, FaSave, FaEdit } from 'react-icons/fa';
 
 const API = 'http://localhost:8000';
 
-export default function FilesPanelWrapper({ serverName, isBlockedFile, onEditStart, onBlockedFileError }) {
+export default function FilesPanelWrapper({ serverName, initialItems = null, isBlockedFile, onEditStart, onBlockedFileError }) {
   const [path, setPath] = useState('.');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -12,22 +12,92 @@ export default function FilesPanelWrapper({ serverName, isBlockedFile, onEditSta
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameValue, setRenameValue] = useState('');
 
-  useEffect(() => {
-    loadDir('.');
-  }, [serverName]);
+  // Simple in-memory cache for directory listings per server
+  // cacheRef.current[key] = { items, ts }
+  const cacheRef = useRef({});
+  const abortRef = useRef(null);
 
-  async function loadDir(p = path) {
-    setLoading(true);
+  function withTimeout(promise, ms, controller) {
+    return new Promise((resolve, reject) => {
+      const id = setTimeout(() => {
+        try { controller && controller.abort && controller.abort(); } catch {}
+        reject(new DOMException('Timeout', 'AbortError'));
+      }, ms);
+      promise.then((v) => { clearTimeout(id); resolve(v); }).catch((e) => { clearTimeout(id); reject(e); });
+    });
+  }
+
+  useEffect(() => {
+    // clear cache when server changes
+    cacheRef.current = {};
+    const key = `${serverName}::.`;
+    if (Array.isArray(initialItems) && initialItems.length) {
+      // hydrate immediately for instant render
+      cacheRef.current[key] = { items: initialItems, ts: Date.now(), etag: undefined };
+      setItems(initialItems);
+      setPath('.');
+      // revalidate in background
+      loadDir('.', { force: true });
+    } else {
+      loadDir('.', { force: true });
+    }
+  }, [serverName, initialItems]);
+
+  async function loadDir(p = path, { force = false } = {}) {
+    const key = `${serverName}::${p}`;
     setErr('');
-    try {
-      const r = await fetch(
-        `${API}/servers/${encodeURIComponent(serverName)}/files?path=${encodeURIComponent(p)}`
-      );
-      const d = await r.json();
-      setItems(d.items || []);
+    const cached = cacheRef.current[key];
+
+    // Use cached data if fresh and not forced
+    const now = Date.now();
+    const TTL = 15000; // 15s cache
+    if (!force && cached && now - cached.ts < TTL) {
+      setItems(cached.items || []);
       setPath(p);
+      return;
+    }
+
+    // Abort any in-flight fetch for previous path
+    try { abortRef.current?.abort(); } catch {}
+    const abortController = new AbortController();
+    abortRef.current = abortController;
+
+    const attempt = async () => {
+      const headers = {};
+      if (cached && force && cached.etag) headers['If-None-Match'] = cached.etag;
+      const r = await withTimeout(
+        fetch(`${API}/servers/${encodeURIComponent(serverName)}/files?path=${encodeURIComponent(p)}`, { signal: abortController.signal, headers }),
+        8000,
+        abortController
+      );
+      if (r.status === 304 && cached) {
+        cacheRef.current[key] = { ...cached, ts: Date.now() };
+        setItems(cached.items || []);
+        setPath(p);
+        return;
+      }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      const list = d.items || [];
+      const etag = r.headers.get('etag') || (cached ? cached.etag : undefined);
+      cacheRef.current[key] = { items: list, ts: Date.now(), etag };
+      setItems(list);
+      setPath(p);
+    };
+
+    setLoading(true);
+    try {
+      await attempt();
     } catch (e) {
-      setErr(String(e));
+      if (e?.name === 'AbortError') return;
+      // simple retry once
+      try {
+        await new Promise(res => setTimeout(res, 400));
+        await attempt();
+      } catch (e2) {
+        if (e2?.name === 'AbortError') return;
+        setErr(String(e2));
+      }
     } finally {
       setLoading(false);
     }
@@ -71,7 +141,7 @@ export default function FilesPanelWrapper({ serverName, isBlockedFile, onEditSta
       `${API}/servers/${encodeURIComponent(serverName)}/file?path=${encodeURIComponent(p)}`,
       { method: 'DELETE' }
     );
-    loadDir(path);
+    loadDir(path, { force: true });
   }
 
   async function renameCommit(originalName) {
@@ -86,7 +156,7 @@ export default function FilesPanelWrapper({ serverName, isBlockedFile, onEditSta
     });
     setRenameTarget(null);
     setRenameValue('');
-    loadDir(path);
+    loadDir(path, { force: true });
   }
   function startRename(name) {
     setRenameTarget(name);
@@ -104,7 +174,7 @@ export default function FilesPanelWrapper({ serverName, isBlockedFile, onEditSta
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: p })
     });
-    loadDir(path);
+    loadDir(path, { force: true });
   }
 
   async function unzipItem(name) {
@@ -118,7 +188,7 @@ export default function FilesPanelWrapper({ serverName, isBlockedFile, onEditSta
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: p, dest })
     });
-    loadDir(path);
+    loadDir(path, { force: true });
   }
 
   async function createFolder() {
@@ -130,7 +200,7 @@ export default function FilesPanelWrapper({ serverName, isBlockedFile, onEditSta
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: p })
     });
-    loadDir(path);
+    loadDir(path, { force: true });
   }
 
   async function upload(ev) {
@@ -145,7 +215,7 @@ export default function FilesPanelWrapper({ serverName, isBlockedFile, onEditSta
       `${API}/servers/${encodeURIComponent(serverName)}/upload-multiple`,
       { method: 'POST', body: fd }
     );
-    loadDir(path);
+    loadDir(path, { force: true });
   }
 
   const sortedItems = useMemo(() => {
@@ -155,6 +225,39 @@ export default function FilesPanelWrapper({ serverName, isBlockedFile, onEditSta
       return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     });
   }, [items]);
+
+  // Prefetch throttle map
+  const lastPrefetchRef = useRef({});
+  const inflightPrefetchRef = useRef({});
+
+  async function prefetchDir(dirPath) {
+    const key = `${serverName}::${dirPath}`;
+    const now = Date.now();
+    const last = lastPrefetchRef.current[key] || 0;
+    if (now - last < 400) return; // throttle
+    lastPrefetchRef.current[key] = now;
+
+    if (cacheRef.current[key]) return; // already cached
+    if (inflightPrefetchRef.current[key]) return; // already fetching
+
+    inflightPrefetchRef.current[key] = true;
+    try {
+      const r = await fetch(
+        `${API}/servers/${encodeURIComponent(serverName)}/files?path=${encodeURIComponent(dirPath)}`
+      );
+      if (!r.ok) return;
+      const d = await r.json();
+      cacheRef.current[key] = { items: d.items || [], ts: now };
+    } catch {}
+    finally {
+      delete inflightPrefetchRef.current[key];
+    }
+  }
+
+  const listRef = useRef(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const CONTAINER_MAX_HEIGHT = 420;
+  const ROW_H = 36;
 
   return (
     <div className="p-2 bg-black/20 rounded-lg" style={{ maxWidth: 520, minWidth: 320 }}>
@@ -179,18 +282,33 @@ export default function FilesPanelWrapper({ serverName, isBlockedFile, onEditSta
             <FaUpload /> Upload
             <input type="file" className="hidden" multiple onChange={upload} />
           </label>
+          <button onClick={() => loadDir(path, { force: true })} className="text-xs rounded bg-white/10 hover:bg-white/20 px-2 py-1">Refresh</button>
         </div>
       </div>
       {loading && <div className="text-white/70 text-xs">Loading…</div>}
-      {err && <div className="text-red-400 text-xs">{err}</div>}
+      {err && (
+        <div className="text-red-400 text-xs flex items-center gap-2">
+          <span>{err}</span>
+          <button onClick={() => loadDir(path, { force: true })} className="text-white/80 underline">Retry</button>
+        </div>
+      )}
       {blockedFileErrorLocal && <div className="text-red-400 text-xs">{blockedFileErrorLocal}</div>}
       {!loading && (
-        <div className="space-y-1">
-          {sortedItems.map((it) => (
+        (() => {
+          const containerHeight = listRef.current?.clientHeight || CONTAINER_MAX_HEIGHT;
+          const visibleCount = Math.ceil(containerHeight / ROW_H) + 10; // buffer
+          const startIndex = Math.max(0, Math.floor(scrollTop / ROW_H) - 5);
+          const endIndex = Math.min(sortedItems.length, startIndex + visibleCount);
+          const topPad = startIndex * ROW_H;
+          const bottomPad = Math.max(0, (sortedItems.length - endIndex) * ROW_H);
+          const visibleItems = sortedItems.slice(startIndex, endIndex);
+
+          const renderRow = (it) => (
             <div
               key={it.name}
               className="flex items-center justify-between bg-white/5 border border-white/10 rounded px-2 py-1"
               style={{ minHeight: 32 }}
+              onMouseEnter={() => { if (it.is_dir) prefetchDir(path === '.' ? it.name : `${path}/${it.name}`); }}
             >
               <div className="flex items-center gap-2">
                 <span className="text-yellow-400 text-base">
@@ -272,8 +390,22 @@ export default function FilesPanelWrapper({ serverName, isBlockedFile, onEditSta
                 </button>
               </div>
             </div>
-          ))}
-        </div>
+          );
+
+          return (
+            <div
+              ref={listRef}
+              style={{ maxHeight: CONTAINER_MAX_HEIGHT, overflowY: 'auto' }}
+              onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+            >
+              <div style={{ height: topPad }} />
+              <div className="space-y-1">
+                {visibleItems.map(renderRow)}
+              </div>
+              <div style={{ height: bottomPad }} />
+            </div>
+          );
+        })()
       )}
     </div>
   );

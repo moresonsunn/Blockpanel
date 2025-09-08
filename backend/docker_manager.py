@@ -119,28 +119,20 @@ def get_purpur_download_url(version: str) -> Optional[str]:
         return None
 
 def get_fabric_download_url(version: str, loader_version: Optional[str] = None) -> Optional[str]:
-    # Fabric installer: https://meta.fabricmc.net/v2/versions/loader/<mc_version>
-    # If loader_version is provided, use it to select the loader version.
+    """
+    Resolve the Fabric server launcher JAR URL using the official Fabric provider
+    (game version + loader version + latest stable installer).
+    """
     try:
-        # Prefer "stable" alias for installer to avoid hard-coding installer versions
-        installer_token = "stable"
-
-        if loader_version:
-            # Directly compose the server JAR URL; this endpoint returns a binary JAR, not JSON
-            return f"https://meta.fabricmc.net/v2/versions/loader/{version}/{loader_version}/{installer_token}/server/jar"
-        else:
-            # Get latest loader for the game version
-            lresp = requests.get(f"https://meta.fabricmc.net/v2/versions/loader/{version}", timeout=10)
-            lresp.raise_for_status()
-            loaders = lresp.json()
-            if not loaders:
-                logger.warning(f"No Fabric loader available for {version}")
-                return None
-            loader_entry = loaders[0]
-            resolved_loader_version = loader_entry["loader"]["version"]
-
-            # Compose the download URL using loader version and stable installer alias
-            return f"https://meta.fabricmc.net/v2/versions/loader/{version}/{resolved_loader_version}/{installer_token}/server/jar"
+        try:
+            from server_providers.fabric import FabricProvider as _FabricProvider
+        except Exception:
+            from backend.server_providers.fabric import FabricProvider as _FabricProvider  # type: ignore
+        provider = _FabricProvider()
+        if not loader_version:
+            loader_version = provider.get_latest_loader_version(version)
+        installer_version = provider.get_latest_installer_version()
+        return provider.get_download_url_with_loader(version, loader_version, installer_version)
     except Exception as e:
         logger.warning(f"Failed to get Fabric download url for {version} (loader {loader_version}): {e}")
         return None
@@ -273,7 +265,7 @@ class DockerManager:
 
     def list_servers(self):
         try:
-            containers = self.client.containers.list(all=True, filters={"label": MINECRAFT_LABEL})
+            containers = self.client.containers.list(all=True, filters={"label": [MINECRAFT_LABEL]})
             result = []
             for c in containers:
                 try:
@@ -281,7 +273,7 @@ class DockerManager:
                     config = attrs.get("Config", {})
                     network = attrs.get("NetworkSettings", {})
                     # Extract server type and version from labels if present
-                    labels = getattr(c, "labels", {})
+                    labels = (attrs.get("Config", {}) or {}).get("Labels", {}) or {}
                     server_type = labels.get("mc.type", None)
                     server_version = labels.get("mc.version", None)
                     # Optionally, extract loader version if present
@@ -321,6 +313,9 @@ class DockerManager:
                         "server_type": server_type,
                         "server_version": server_version,
                         "loader_version": loader_version,
+                        # Shorthand keys for UI convenience
+                        "type": server_type,
+                        "version": server_version,
                     })
                 except docker.errors.NotFound:
                     logger.warning(f"Container {c.id} not found when listing servers, skipping")
@@ -377,7 +372,7 @@ class DockerManager:
             attrs = container.attrs or {}
             config = attrs.get("Config", {})
             network = attrs.get("NetworkSettings", {})
-            labels = getattr(container, "labels", {})
+            labels = (attrs.get("Config", {}) or {}).get("Labels", {}) or {}
             
             # Get server stats if container is running
             stats = None
@@ -488,6 +483,56 @@ class DockerManager:
         # Mount the entire servers volume to /data/servers, then the container will look for /data/servers/server_name/
         return {SERVERS_VOLUME_NAME: {"bind": "/data/servers", "mode": "rw"}}
 
+    def get_used_host_ports(self, only_minecraft: bool = True) -> set:
+        """
+        Return a set of host ports currently bound by Docker containers.
+        If only_minecraft is True, only include containers labeled with our Minecraft label
+        and only the Minecraft TCP port mapping (container 25565/tcp).
+        """
+        used: set[int] = set()
+        try:
+            filters = {"label": [MINECRAFT_LABEL]} if only_minecraft else None
+            containers = self.client.containers.list(all=True, filters=filters)
+            for c in containers:
+                try:
+                    ports = (c.attrs.get("NetworkSettings", {}) or {}).get("Ports", {}) or {}
+                    for container_port, bindings in ports.items():
+                        if only_minecraft and not str(container_port).startswith(f"{MINECRAFT_PORT}/"):
+                            continue
+                        if bindings and isinstance(bindings, list):
+                            for b in bindings:
+                                hp = b.get("HostPort")
+                                if hp:
+                                    try:
+                                        used.add(int(hp))
+                                    except Exception:
+                                        pass
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return used
+
+    def pick_available_port(self, preferred: int | None = None, start: int = 25565, end: int = 25999) -> int:
+        """
+        Pick an available host port by scanning Docker port mappings.
+        Tries preferred first (if provided and not used), then scans from start..end.
+        Note: This only checks Docker-bound ports, not other host processes.
+        """
+        used = self.get_used_host_ports(only_minecraft=False)
+        if preferred and preferred not in used and 1 <= preferred <= 65535:
+            return preferred
+        # If preferred given but used, start from preferred+1
+        scan_start = max(start, (preferred + 1) if preferred else start)
+        for p in range(scan_start, end + 1):
+            if p not in used:
+                return p
+        # As a fallback, expand a bit beyond end
+        for p in range(end + 1, min(end + 1000, 65535)):
+            if p not in used:
+                return p
+        raise RuntimeError("No available host ports found in the scanned range")
+
     def _fix_fabric_server_jar(self, server_dir: Path, server_type: str, version: str, loader_version: Optional[str] = None):
         """
         For Fabric servers, ensure that the correct jar file is present and not corrupt.
@@ -589,56 +634,207 @@ class DockerManager:
             # On error, assume incompatible
             return False
 
-    def create_server(self, name, server_type, version, host_port=None, loader_version=None, min_ram="1G", max_ram="2G", installer_version=None):
+    def create_server(self, name, server_type, version, host_port=None, loader_version=None, min_ram="1G", max_ram="2G", installer_version=None, extra_labels: dict | None = None):
+        """
+        Prepare server files for the requested type/version (downloading installers or jars as needed)
+        and create a runtime container to run the server.
+        """
         self._ensure_runtime_image()
         server_dir: Path = SERVERS_ROOT / name
         server_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Try to prepare server files first
+
+        # 1) Prepare server files (download jar/installer)
         try:
-            prepare_server_files(server_type, version, server_dir, loader_version=loader_version, installer_version=installer_version)
-            
-            # For installer-based servers (forge/neoforge), don't check for server.jar yet
-            # It will be created when the installer runs inside the container
+            prepare_server_files(
+                server_type,
+                version,
+                server_dir,
+                loader_version=loader_version,
+                installer_version=installer_version,
+            )
+
+            # For installer-based servers (forge/neoforge), the installer will run in the runtime container
             if server_type.lower() in ("forge", "neoforge"):
-                logger.info(f"Server files prepared successfully for {server_type} (installer downloaded)")
+                logger.info(f"Prepared {server_type} installer for {name}")
             else:
-                # Check if server.jar was created successfully for direct-download servers
                 jar_path = server_dir / "server.jar"
                 if jar_path.exists() and jar_path.stat().st_size >= 1024 * 100:  # At least 100KB
-                    logger.info(f"Server files prepared successfully, server.jar found at {jar_path}")
+                    logger.info(f"Server jar ready at {jar_path}")
                 else:
-                    logger.warning(f"Server.jar not found or too small after prepare_server_files, attempting fix")
+                    logger.warning("server.jar missing or too small after prepare_server_files; attempting fix_server_jar")
                     fix_server_jar(server_dir, server_type, version, loader_version=loader_version)
         except Exception as e:
-            logger.warning(f"prepare_server_files failed: {e}, attempting fix_server_jar")
-            # Only run fix_server_jar for non-installer servers when there's an error
+            logger.warning(f"prepare_server_files failed: {e}; attempting fix_server_jar where applicable")
             if server_type.lower() not in ("forge", "neoforge"):
+                # Only non-installer types can be fixed with a direct jar download
                 fix_server_jar(server_dir, server_type, version, loader_version=loader_version)
             else:
-                # For installer-based servers, re-raise the exception since fix_server_jar won't help
+                # For installer-based servers, we cannot recover here
                 raise
 
-    def create_server_from_existing(self, name: str, host_port: int | None = None, min_ram: str = "1G", max_ram: str = "2G") -> dict:
+        # 2) Ensure EULA is accepted
+        try:
+            (server_dir / "eula.txt").write_text("eula=true\n", encoding="utf-8")
+        except Exception:
+            pass
+
+        # 3) Configure port binding (choose available host port if not provided)
+        selected_host_port: int | None = None
+        try:
+            if host_port is not None:
+                selected_host_port = self.pick_available_port(preferred=int(host_port), start=MINECRAFT_PORT, end=25999)
+            else:
+                selected_host_port = self.pick_available_port(start=MINECRAFT_PORT, end=25999)
+        except Exception:
+            # Fallback to docker-assigned ephemeral mapping
+            selected_host_port = None
+        port_binding = {f"{MINECRAFT_PORT}/tcp": selected_host_port}
+
+        # 4) Environment variables for runtime
+        env_vars = {
+            "SERVER_DIR_NAME": name,
+            "MIN_RAM": min_ram,
+            "MAX_RAM": max_ram,
+            "SERVER_PORT": str(MINECRAFT_PORT),
+            "SERVER_TYPE": server_type,
+            "SERVER_VERSION": version,
+        }
+        # If a jar exists now, expose it so the runtime can prefer it
+        try:
+            preferred_names = ["server.jar", "fabric-server-launch.jar"] if server_type.lower() == "fabric" else ["server.jar"]
+            for fname in preferred_names:
+                fpath = server_dir / fname
+                if fpath.exists() and fpath.stat().st_size > 0:
+                    env_vars["SERVER_JAR"] = fname
+                    break
+        except Exception:
+            pass
+
+        # 5) Labels for metadata
+        labels = {
+            MINECRAFT_LABEL: "true",
+            "mc.type": server_type,
+            "mc.version": version,
+        }
+        if loader_version is not None:
+            labels["mc.loader_version"] = str(loader_version)
+        if extra_labels:
+            try:
+                labels.update({k: str(v) for k, v in extra_labels.items()})
+            except Exception:
+                pass
+
+        # 6) Memory limits
+        def ram_to_bytes(ram_str):
+            if isinstance(ram_str, int):
+                return ram_str * 1024 * 1024  # Assume MB
+            s = str(ram_str).strip().upper()
+            if s.endswith('G'):
+                return int(s[:-1]) * 1024 * 1024 * 1024
+            elif s.endswith('M'):
+                return int(s[:-1]) * 1024 * 1024
+            else:
+                # Interpret as MB
+                return int(s) * 1024 * 1024
+
+        memory_limit = ram_to_bytes(max_ram)
+
+        # 7) Create the container
+        # 7) Create the container (retry on host port conflicts)
+        max_retries = 10
+        attempt = 0
+        last_err: Exception | None = None
+        while attempt < max_retries:
+            try:
+                container = self.client.containers.run(
+                    RUNTIME_IMAGE,
+                    name=name,
+                    labels=labels,
+                    environment=env_vars,
+                    ports=port_binding,
+                    volumes=self._get_bind_volume(server_dir),
+                    detach=True,
+                    tty=True,
+                    stdin_open=True,
+                    working_dir="/data",
+                    mem_limit=memory_limit,
+                )
+                logger.info(f"Container {container.id} created successfully for server {name}")
+                break
+            except docker.errors.APIError as e:
+                msg = str(e).lower()
+                # Retry if port is already allocated; pick next available and retry
+                if "port is already allocated" in msg or "address already in use" in msg:
+                    attempt += 1
+                    try:
+                        next_port = self.pick_available_port(
+                            preferred=(selected_host_port + 1) if selected_host_port else MINECRAFT_PORT,
+                            start=MINECRAFT_PORT,
+                            end=25999,
+                        )
+                        selected_host_port = next_port
+                        port_binding = {f"{MINECRAFT_PORT}/tcp": selected_host_port}
+                        continue
+                    except Exception as pick_err:
+                        last_err = pick_err
+                        break
+                last_err = e
+                break
+            except Exception as e:
+                last_err = e
+                break
+        if last_err is not None:
+            logger.error(f"Failed to create container for server {name}: {last_err}")
+            raise RuntimeError(f"Failed to create Docker container for server {name}: {last_err}")
+
+        # 8) Optional: check Java version compatibility
+        java_version = self._get_java_version(container)
+        if java_version is None:
+            logger.warning(
+                f"Could not determine Java version in container for server {name}. It will continue but may have compatibility issues."
+            )
+        elif not self._is_java_version_compatible(java_version, server_type, version):
+            logger.warning(
+                f"Incompatible Java version {java_version} detected for server type {server_type} {version}. The server will continue but may have issues."
+            )
+        else:
+            logger.info(f"Java version {java_version} is compatible with {server_type} {version}")
+
+        return {"id": container.id, "name": container.name, "status": container.status}
+
+    def create_server_from_existing(self, name: str, host_port: int | None = None, min_ram: str = "1G", max_ram: str = "2G", extra_env: dict | None = None) -> dict:
         """Create a container for an existing server directory under /data/servers/{name} using the runtime image.
         Does not attempt to download any files; assumes files (including server.jar or installers) already exist.
+        Optionally accepts extra_env to override runtime env (e.g., JAVA_BIN, JAVA_OPTS).
         """
         self._ensure_runtime_image()
         server_dir: Path = SERVERS_ROOT / name
         if not server_dir.exists() or not server_dir.is_dir():
             raise RuntimeError(f"Server directory {server_dir} does not exist")
 
-        port_binding = {}
-        if host_port:
-            port_binding[f"{MINECRAFT_PORT}/tcp"] = host_port
-        else:
-            port_binding[f"{MINECRAFT_PORT}/tcp"] = None
+        # Choose available host port for existing server if not provided
+        try:
+            if host_port is not None:
+                selected_host_port = self.pick_available_port(preferred=int(host_port), start=MINECRAFT_PORT, end=25999)
+            else:
+                selected_host_port = self.pick_available_port(start=MINECRAFT_PORT, end=25999)
+        except Exception:
+            selected_host_port = None
+        port_binding = {f"{MINECRAFT_PORT}/tcp": selected_host_port}
 
         env_vars = {
             "SERVER_DIR_NAME": name,
             "MIN_RAM": min_ram,
             "MAX_RAM": max_ram,
         }
+        if extra_env:
+            try:
+                for k, v in (extra_env or {}).items():
+                    if v is None:
+                        continue
+                    env_vars[str(k)] = str(v)
+            except Exception:
+                pass
         labels = {
             MINECRAFT_LABEL: "true",
             "mc.type": "custom",
@@ -662,76 +858,6 @@ class DockerManager:
             logger.error(f"Failed to create container from existing dir for {name}: {e}")
             raise RuntimeError(f"Failed to create Docker container for server {name}: {e}")
 
-        # Configure port binding
-        port_binding = {}
-        if host_port:
-            port_binding[f"{MINECRAFT_PORT}/tcp"] = host_port
-        else:
-            # Let Docker assign a random port
-            port_binding[f"{MINECRAFT_PORT}/tcp"] = None
-
-        # Configure environment variables
-        env_vars = {
-            "SERVER_DIR_NAME": name,
-            "MIN_RAM": min_ram,
-            "MAX_RAM": max_ram,
-            "SERVER_PORT": str(MINECRAFT_PORT),
-            "SERVER_TYPE": server_type,
-            "SERVER_VERSION": version
-        }
-        
-        # Add loader_version to labels if present
-        labels = {
-            MINECRAFT_LABEL: "true",
-            "mc.type": server_type,
-            "mc.version": version,
-        }
-        if loader_version is not None:
-            labels["mc.loader_version"] = loader_version
-
-        # Convert RAM strings to bytes for Docker memory limit
-        def ram_to_bytes(ram_str):
-            if isinstance(ram_str, int):
-                return ram_str * 1024 * 1024  # Assume MB
-            if ram_str.upper().endswith('G'):
-                return int(ram_str[:-1]) * 1024 * 1024 * 1024
-            elif ram_str.upper().endswith('M'):
-                return int(ram_str[:-1]) * 1024 * 1024
-            else:
-                return int(ram_str) * 1024 * 1024  # Assume MB
-        
-        # Set Docker memory limit to MAX_RAM
-        memory_limit = ram_to_bytes(max_ram)
-        
-        try:
-            container = self.client.containers.run(
-                RUNTIME_IMAGE,
-                name=name,
-                labels=labels,
-                environment=env_vars,
-                ports=port_binding,
-                volumes=self._get_bind_volume(server_dir),
-                detach=True,
-                tty=True,
-                stdin_open=True,
-                working_dir="/data",
-                mem_limit=memory_limit,
-            )
-            logger.info(f"Container {container.id} created successfully for server {name}")
-        except Exception as e:
-            logger.error(f"Failed to create container for server {name}: {e}")
-            raise RuntimeError(f"Failed to create Docker container for server {name}: {e}")
-
-        # After starting container, check Java version compatibility (optional)
-        java_version = self._get_java_version(container)
-        if java_version is None:
-            logger.warning(f"Could not determine Java version in container for server {name}. Server will continue but may have compatibility issues.")
-        elif not self._is_java_version_compatible(java_version, server_type, version):
-            logger.warning(f"Incompatible Java version {java_version} detected for server type {server_type} {version}. Server will continue but may have issues.")
-        else:
-            logger.info(f"Java version {java_version} is compatible with {server_type} {version}")
-
-        return {"id": container.id, "name": container.name, "status": container.status}
 
     def start_server(self, container_id):
         container = self.client.containers.get(container_id)
@@ -757,6 +883,49 @@ class DockerManager:
         container = self.client.containers.get(container_id)
         container.remove(force=True)
         return {"id": container_id, "deleted": True}
+
+    def recreate_server_with_env(self, container_id: str, env_overrides: dict | None = None) -> dict:
+        """Stop and remove the existing container, then recreate it from its server directory
+        with the given environment overrides.
+        """
+        try:
+            container = self.client.containers.get(container_id)
+            name = container.name
+            attrs = container.attrs or {}
+            config = attrs.get("Config", {})
+            env_list = config.get("Env", []) or []
+            env_map = {}
+            for e in env_list:
+                if "=" in e:
+                    k, v = e.split("=", 1)
+                    env_map[k] = v
+            min_ram = env_map.get("MIN_RAM", "1G")
+            max_ram = env_map.get("MAX_RAM", "2G")
+
+            # Detect host port for 25565/tcp
+            host_port = None
+            ports = (attrs.get("NetworkSettings", {}) or {}).get("Ports", {}) or {}
+            mapping = ports.get(f"{MINECRAFT_PORT}/tcp")
+            if mapping and isinstance(mapping, list) and len(mapping) > 0:
+                host_port = int(mapping[0].get("HostPort")) if mapping[0].get("HostPort") else None
+
+            # Stop and remove existing
+            try:
+                container.stop(timeout=5)
+            except Exception:
+                pass
+            try:
+                container.remove(force=True)
+            except Exception:
+                pass
+
+            # Recreate with overrides
+            extra_env = env_overrides or {}
+            return self.create_server_from_existing(name=name, host_port=host_port, min_ram=min_ram, max_ram=max_ram, extra_env=extra_env)
+        except docker.errors.NotFound:
+            raise RuntimeError(f"Container {container_id} not found")
+        except Exception as e:
+            raise RuntimeError(f"Failed to recreate server container: {e}")
 
     def get_server_logs(self, container_id, tail: int = 200):
         container = self.client.containers.get(container_id)
@@ -1054,7 +1223,7 @@ class DockerManager:
                 new_env_vars.append(f"JAVA_BIN=/usr/local/bin/java{java_version}")
             
             # Update container labels (environment variables require container restart)
-            current_labels = getattr(container, "labels", {}) or {}
+            current_labels = (container.attrs.get("Config", {}) or {}).get("Labels", {}) or {}
             current_labels["mc.java_version"] = java_version
             current_labels["mc.java_bin"] = f"/usr/local/bin/java{java_version}"
             current_labels["mc.env.JAVA_VERSION"] = java_version
