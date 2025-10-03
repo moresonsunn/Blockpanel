@@ -137,11 +137,21 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
   }
   async function del(name) {
     const p = path === '.' ? name : `${path}/${name}`;
-    await fetch(
-      `${API}/servers/${encodeURIComponent(serverName)}/file?path=${encodeURIComponent(p)}`,
-      { method: 'DELETE' }
-    );
-    loadDir(path, { force: true });
+    // Optimistic remove from current list
+    setItems(prev => prev.filter(it => it.name !== name));
+    // Bust cache for this directory to avoid stale 304
+    try { delete cacheRef.current[`${serverName}::${path}`]; } catch {}
+    try {
+      const r = await fetch(
+        `${API}/servers/${encodeURIComponent(serverName)}/file?path=${encodeURIComponent(p)}`,
+        { method: 'DELETE' }
+      );
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } catch (e) {
+      console.error('Delete failed:', e);
+    } finally {
+      loadDir(path, { force: true });
+    }
   }
 
   async function renameCommit(originalName) {
@@ -156,6 +166,7 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
     });
     setRenameTarget(null);
     setRenameValue('');
+    try { delete cacheRef.current[`${serverName}::${path}`]; } catch {}
     loadDir(path, { force: true });
   }
   function startRename(name) {
@@ -169,6 +180,7 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
 
   async function zipItem(name) {
     const p = path === '.' ? name : `${path}/${name}`;
+    try { delete cacheRef.current[`${serverName}::${path}`]; } catch {}
     await fetch(`${API}/servers/${encodeURIComponent(serverName)}/zip`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -183,6 +195,7 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
     const destInput = window.prompt('Unzip destination folder (relative to current path):', defaultDest);
     const destRel = destInput && destInput.trim() ? destInput.trim() : defaultDest;
     const dest = path === '.' ? destRel : `${path}/${destRel}`;
+    try { delete cacheRef.current[`${serverName}::${path}`]; } catch {}
     await fetch(`${API}/servers/${encodeURIComponent(serverName)}/unzip`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -216,6 +229,7 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
     const folder = window.prompt('New folder name');
     if (!folder) return;
     const p = path === '.' ? folder : `${path}/${folder}`;
+    try { delete cacheRef.current[`${serverName}::${path}`]; } catch {}
     await fetch(`${API}/servers/${encodeURIComponent(serverName)}/mkdir`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -304,6 +318,14 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
     }
     setAggregate(a => ({ ...a, inProgress: false }));
     loadDir(path, { force: true });
+    // Auto-dismiss upload tray when finished
+    setTimeout(() => {
+      const allDone = (arr) => arr.every(u => ['done','error','cancelled'].includes(u.status));
+      if (!aggregate.inProgress) {
+        setUploads(prev => allDone(prev) ? [] : prev);
+        if (allDone(uploads)) setAggregate({ totalBytes: 0, sentBytes: 0, inProgress: false, error: '' });
+      }
+    }, 800);
   }
 
   function startSingleUpload(item) {
@@ -509,6 +531,11 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
                 setAggregate(a => ({ ...a, inProgress: false, error: 'Cancelled' }));
               }}>
                 <FaBan />
+              </button>
+            )}
+            {!aggregate.inProgress && uploads.length > 0 && (
+              <button className="text-white/80 hover:text-white" title="Clear" onClick={() => { setUploads([]); setAggregate({ totalBytes: 0, sentBytes: 0, inProgress: false, error: '' }); }}>
+                <FaTimes />
               </button>
             )}
           </div>

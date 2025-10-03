@@ -470,6 +470,21 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
   const [isEditing, setIsEditing] = useState(false);
   const [blockedFileError, setBlockedFileError] = useState('');
   const stats = useServerStats(server.id);
+  const [logReset, setLogReset] = useState(0);
+
+  // Wrap power actions to bump log reset so TerminalPanel clears and refetches
+  const onStartWrapped = useCallback(async (id) => {
+    await onStart(id);
+    setLogReset(x => x + 1);
+  }, [onStart]);
+  const onStopWrapped = useCallback(async (id) => {
+    await onStop(id);
+    setLogReset(x => x + 1);
+  }, [onStop]);
+  const onRestartWrapped = useCallback(async (id) => {
+    await onRestart(id);
+    setLogReset(x => x + 1);
+  }, [onRestart]);
 
   const handleEditStart = useCallback((filePath, content) => {
     setEditPath(filePath);
@@ -556,7 +571,7 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
                   onCancel={cancelEdit}
                 />
               ) : (
-                <TerminalPanel containerId={server.id} />
+                <TerminalPanel containerId={server.id} resetToken={logReset} />
               )}
               {blockedFileError && (
                 <div className="text-red-400 text-xs mt-2">{blockedFileError}</div>
@@ -753,7 +768,7 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
           </div>
           {activeTab !== 'files' && (
             <div className="mt-8">
-              <TerminalPanel containerId={server.id} />
+              <TerminalPanel containerId={server.id} resetToken={logReset} />
             </div>
           )}
           {/* Minimal actions - only destructive action at bottom */}
@@ -3156,7 +3171,7 @@ function App() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-ink bg-hero-gradient flex">
+  <div className="min-h-screen bg-ink bg-hero-gradient flex w-full">
         <div className="min-h-screen flex items-center justify-center w-full">
           <div className="max-w-md w-full mx-4">
             <div className="rounded-xl bg-black/30 border border-white/10 p-6 space-y-4">
@@ -3220,7 +3235,7 @@ function App() {
       <div className="min-h-screen bg-ink bg-hero-gradient flex">
       {/* Sidebar */}
       {isAuthenticated && (
-        <div className={`${sidebarOpen ? 'w-64' : 'w-16'} bg-black/20 border-r border-white/10 transition-all duration-300 flex flex-col`}>
+  <div className={`${sidebarOpen ? 'w-64' : 'w-16'} bg-black/20 border-r border-white/10 transition-all duration-300 flex flex-col sticky top-0 h-screen`}>
           <div className="p-4 border-b border-white/10">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-md bg-brand-500 inline-flex items-center justify-center shadow-card">
@@ -3229,28 +3244,30 @@ function App() {
               {sidebarOpen && <div className="font-semibold">Minecraft Panel</div>}
             </div>
           </div>
-          <nav className="flex-1 p-4">
-            <div className="space-y-2">
-              {sidebarItems.map(item => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setCurrentPage(item.id);
-                    setSelectedServer(null); // Clear server selection when changing pages
-                  }}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
-                    currentPage === item.id
-                      ? 'bg-brand-500 text-white'
-                      : 'text-white/70 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  <item.icon className={`${sidebarOpen ? 'text-lg' : 'text-xl'}`} />
-                  {sidebarOpen && <span>{item.label}</span>}
-                </button>
-              ))}
+            <div className="flex-1 overflow-y-auto">
+              <nav className="p-4">
+                    <div className="space-y-2">
+                      {sidebarItems.map(item => (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            setCurrentPage(item.id);
+                            setSelectedServer(null); // Clear server selection when changing pages
+                          }}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                            currentPage === item.id
+                              ? 'bg-brand-500 text-white'
+                              : 'text-white/70 hover:text-white hover:bg-white/10'
+                          }`}
+                        >
+                          <item.icon className={`${sidebarOpen ? 'text-lg' : 'text-xl'}`} />
+                          {sidebarOpen && <span>{item.label}</span>}
+                        </button>
+                      ))}
+                    </div>
+              </nav>
             </div>
-          </nav>
-          <div className="p-4 border-t border-white/10">
+          <div className="p-4 border-t border-white/10 bg-black/30 backdrop-blur supports-[backdrop-filter]:bg-black/20">
             <div
               className="flex items-center gap-3 mb-3 cursor-pointer hover:bg-white/10 rounded-lg p-2"
               onClick={() => setCurrentPage('settings')}
@@ -3271,13 +3288,7 @@ function App() {
                 </>
               )}
             </div>
-            <button
-              onClick={() => setCurrentPage('settings')}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors mb-2"
-            >
-              <FaCog />
-              {sidebarOpen && <span>Settings</span>}
-            </button>
+            {/* Removed duplicate Settings button under the user block; user block remains the entry to Settings */}
             <button
               onClick={handleLogout}
               className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors"

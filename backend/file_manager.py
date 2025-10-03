@@ -7,6 +7,7 @@ from config import SERVERS_ROOT
 import zipfile
 import re
 from typing import Optional
+import shutil
 
 # Optional Pillow import (installed via requirements). Import lazily in function to avoid module load cost.
 
@@ -111,14 +112,27 @@ def write_file(name: str, rel: str, content: str) -> None:
 def delete_path(name: str, rel: str) -> None:
     base = _server_path(name)
     target = _safe_join(base, rel)
-    if target.is_dir():
-        for p in target.rglob("*"):
-            if p.is_file():
-                p.unlink()
-        target.rmdir()
-    elif target.exists():
-        target.unlink()
-    _invalidate_cache(name)
+
+    def _handle_remove_readonly(func, path, exc):
+        # On Windows, files can be read-only; try to chmod and retry
+        try:
+            os.chmod(path, 0o666)
+            func(path)
+        except Exception:
+            pass
+
+    try:
+        if target.is_dir():
+            # Robust recursive removal
+            shutil.rmtree(target, onerror=_handle_remove_readonly)
+        elif target.exists():
+            try:
+                target.unlink()
+            except PermissionError:
+                _handle_remove_readonly(os.unlink, str(target), None)
+        # else: nothing to do
+    finally:
+        _invalidate_cache(name)
 
 
 def upload_file(name: str, rel_dir: str, up: UploadFile) -> None:

@@ -8,6 +8,7 @@ import server_providers  # noqa: F401 - ensure providers register
 from server_providers.providers import get_provider_names, get_provider
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse
+import os
 from file_manager import (
     list_dir as fm_list_dir,
     read_file as fm_read_file,
@@ -543,8 +544,20 @@ def files_list(name: str, request: Request, path: str = "."):
         root = SERVERS_ROOT.resolve() / name
         if not str(base).startswith(str(root)):
             raise HTTPException(status_code=400, detail="Invalid path")
-        st = base.stat() if base.exists() else None
-        etag = f'W/"dir-{int(st.st_mtime)}"' if st else 'W/"dir-0"'
+        if base.exists() and base.is_dir():
+            # Combine mtime with entry count for better change detection
+            try:
+                with os.scandir(base) as it:
+                    count = sum(1 for _ in it)
+            except Exception:
+                count = 0
+            st = base.stat()
+            etag = f'W/"dir-{count}-{int(st.st_mtime)}"'
+        elif base.exists():
+            st = base.stat()
+            etag = f'W/"dirfile-{st.st_size}-{int(st.st_mtime)}"'
+        else:
+            etag = 'W/"dir-0"'
     except Exception:
         etag = None
 
@@ -566,8 +579,11 @@ def file_read(name: str, request: Request, path: str):
         root = SERVERS_ROOT.resolve() / name
         if not str(p).startswith(str(root)):
             raise HTTPException(status_code=400, detail="Invalid path")
-        st = p.stat() if p.exists() else None
-        etag = f'W/"file-{st.st_size}-{int(st.st_mtime)}"' if st else 'W/"file-0-0"'
+        if p.exists() and p.is_file():
+            st = p.stat()
+            etag = f'W/"file-{st.st_size}-{int(st.st_mtime)}"'
+        else:
+            etag = 'W/"file-0-0"'
     except Exception:
         etag = None
 

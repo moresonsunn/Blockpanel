@@ -4,7 +4,7 @@ import { API } from '../lib/api';
 import { loadMuteConfig, saveMuteConfig, defaultMuteRegexes, defaultMutePatterns } from '../lib/consoleFilters';
 import { ansiToHtml } from '../lib/ansiToHtml';
 
-export default function TerminalPanel({ containerId }) {
+export default function TerminalPanel({ containerId, resetToken = 0 }) {
   const [cmd, setCmd] = useState('');
   const [rawLogs, setRawLogs] = useState('');
   const [showSettings, setShowSettings] = useState(false);
@@ -31,7 +31,7 @@ export default function TerminalPanel({ containerId }) {
     saveMuteConfig(containerId, { enabled: muteEnabled, patterns });
   }, [containerId, muteEnabled, patternsText]);
 
-  // Initial fetch
+  // Initial fetch and fetch on reset (start/stop/restart)
   useEffect(() => {
     if (!containerId) return;
     let active = true;
@@ -45,7 +45,7 @@ export default function TerminalPanel({ containerId }) {
         if (active) setRawLogs('');
       });
     return () => { active = false; };
-  }, [containerId]);
+  }, [containerId, resetToken]);
 
   // Polling
   useEffect(() => {
