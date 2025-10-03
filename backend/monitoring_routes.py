@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, cast
 from datetime import datetime, timedelta
 
 from database import get_db
 from models import User, ServerPerformance
-from auth import require_auth, require_admin, require_moderator
+from auth import require_auth, require_admin, require_moderator, get_user_permissions, verify_token, get_user_by_username
 from docker_manager import DockerManager
 from fastapi.responses import StreamingResponse
 import asyncio
@@ -121,14 +121,14 @@ async def get_server_metrics(
     
     return [
         ServerMetrics(
-            server_name=metric.server_name,
-            timestamp=metric.timestamp,
-            tps=metric.tps,
-            cpu_usage=metric.cpu_usage,
-            memory_usage=metric.memory_usage,
-            memory_total=metric.memory_total,
-            player_count=metric.player_count or 0,
-            metrics=metric.metrics
+            server_name=cast(str, metric.server_name),
+            timestamp=cast(datetime, metric.timestamp),
+            tps=cast(Optional[str], metric.tps),
+            cpu_usage=cast(Optional[str], metric.cpu_usage),
+            memory_usage=cast(Optional[str], metric.memory_usage),
+            memory_total=cast(Optional[str], metric.memory_total),
+            player_count=int(getattr(metric, "player_count", 0) or 0),
+            metrics=cast(Optional[Dict[str, Any]], getattr(metric, "metrics", None))
         )
         for metric in metrics
     ]
@@ -401,11 +401,54 @@ async def get_monitoring_alerts(
         }
 
 @router.get("/events")
-async def stream_events(request: Request, container_id: str | None = None):
+async def stream_events(
+    request: Request,
+    container_id: str | None = None,
+    token: str | None = Query(None, description="Auth token for SSE when headers aren't supported"),
+    db: Session = Depends(get_db)
+):
     """Server-Sent Events stream for real-time resources and alerts.
-    If container_id is provided, streams that server's resources; otherwise streams system health summary.
-    Note: Authentication is not enforced here for simplicity; add token validation if needed.
+    Requires authentication. Accepts `Authorization: Bearer` header or `token` query parameter
+    (useful for browsers' EventSource which cannot set headers).
+    If `container_id` is provided, streams that server's resources; otherwise streams system health summary.
     """
+    # Extract token from Authorization header if present
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+
+    # Validate token -> resolve user
+    user: User | None = None
+    if token:
+        try:
+            payload = verify_token(token)
+        except Exception:
+            payload = None
+        if payload and isinstance(payload, dict):
+            username = payload.get("sub")
+            if username:
+                try:
+                    user = get_user_by_username(db, username)
+                except Exception:
+                    user = None
+        if user is None:
+            try:
+                # Fallback: treat token as session token
+                from user_service import UserService  # local import to avoid circular
+                user_service = UserService(db)
+                user = user_service.get_user_by_session_token(token)
+            except Exception:
+                user = None
+
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    # Permission check
+    perms = get_user_permissions(user, db)
+    role_val = str(getattr(user, "role", "") or "")
+    if not (role_val == "admin" or "*" in perms or "system.monitoring.view" in perms):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied: system.monitoring.view required")
+
     dm = get_docker_manager()
 
     async def event_generator():

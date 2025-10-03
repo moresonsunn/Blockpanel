@@ -141,6 +141,12 @@ def init_db():
     try:
         from sqlalchemy import text as _text
         with engine.begin() as conn:
+            # Drop legacy curated templates table if it still exists
+            try:
+                conn.execute(_text("DROP TABLE IF EXISTS server_templates"))
+                print("Dropped legacy table: server_templates (if existed)")
+            except Exception as _e:
+                print(f"Warning: could not drop legacy server_templates table: {_e}")
             conn.execute(_text("CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs (timestamp)"))
             conn.execute(_text("CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs (user_id)"))
             conn.execute(_text("CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs (action)"))

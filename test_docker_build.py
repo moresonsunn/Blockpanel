@@ -30,27 +30,29 @@ def run_command(command, description):
 def test_java_versions():
     """Test that all Java versions are available in the container"""
     java_tests = [
-        ("java8 -version", "Java 8"),
-        ("java11 -version", "Java 11"),
-        ("java17 -version", "Java 17"),
-        ("java21 -version", "Java 21"),
+        ("/usr/local/bin/java8 -version", "Java 8"),
+        ("/usr/local/bin/java11 -version", "Java 11"),
+        ("/usr/local/bin/java17 -version", "Java 17"),
+        ("/usr/local/bin/java21 -version", "Java 21"),
     ]
     
     print("\n=== Testing Java Versions in Container ===")
     
-    for command, description in java_tests:
+    for cmd, description in java_tests:
         print(f"\n--- Testing {description} ---")
         result = subprocess.run(
-            f"docker run --rm mc-runtime:latest {command}",
+            f"docker run --rm --entrypoint /bin/sh mc-runtime:latest -lc \"{cmd} 2>&1\"",
             shell=True, capture_output=True, text=True
         )
         
         if result.returncode == 0:
             print(f"✅ {description} works")
-            print("Output:", result.stdout.strip())
+            output = result.stdout.strip() or result.stderr.strip()
+            if output:
+                print("Output:", output)
         else:
             print(f"❌ {description} failed")
-            print("Error:", result.stderr.strip())
+            print("Error:", result.stderr.strip() or result.stdout.strip())
 
 def test_java_paths():
     """Test that Java binaries exist at expected paths"""
@@ -67,23 +69,23 @@ def test_java_paths():
     for command, description in path_tests:
         print(f"\n--- Testing {description} ---")
         result = subprocess.run(
-            f"docker run --rm mc-runtime:latest {command}",
+            f"docker run --rm --entrypoint /bin/sh mc-runtime:latest -lc \"{command} 2>&1\"",
             shell=True, capture_output=True, text=True
         )
         
         if result.returncode == 0:
             print(f"✅ {description} exists")
-            print("Output:", result.stdout.strip())
+            print("Output:", result.stdout.strip() or result.stderr.strip())
         else:
             print(f"❌ {description} missing")
-            print("Error:", result.stderr.strip())
+            print("Error:", result.stderr.strip() or result.stdout.strip())
 
 def main():
     print("🚀 Testing Docker Build and Java Versions")
     
     # Step 1: Build the Docker image
     if not run_command(
-        "docker build -t mc-runtime:latest -f docker/runtime.Dockerfile docker",
+        "docker build -t mc-runtime:latest -f docker/runtime.Dockerfile .",
         "Building Docker Image"
     ):
         print("❌ Docker build failed. Stopping tests.")
@@ -97,7 +99,7 @@ def main():
     
     # Step 4: Test basic container functionality
     if run_command(
-        "docker run --rm mc-runtime:latest pwd",
+        "docker run --rm --entrypoint /bin/sh mc-runtime:latest -lc \"pwd\"",
         "Testing Basic Container Functionality"
     ):
         print("\n✅ All tests completed successfully!")

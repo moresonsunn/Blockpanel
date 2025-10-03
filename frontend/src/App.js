@@ -66,7 +66,7 @@ import {
   FaStepForward,
   FaFastBackward,
   FaFastForward,
-  FaTable,
+  // FaTable, // removed with Permission Matrix
   FaTimes,
   FaUserSlash,
   FaUserCheck,
@@ -87,11 +87,12 @@ const API = 'http://localhost:8000';
 const GlobalDataContext = createContext();
 
 // Global data store that preloads everything
-function GlobalDataProvider({ children }) {
+export function GlobalDataProvider({ children }) {
   // All application data - preloaded and always available
   const [globalData, setGlobalData] = useState({
     servers: [],
     serverStats: {},
+    serverInfoById: {},
     dashboardData: null,
     systemHealth: null,
     alerts: [],
@@ -114,9 +115,10 @@ function GlobalDataProvider({ children }) {
 
   // Aggressive preloading function - loads EVERYTHING immediately (run once on mount)
   const preloadAllData = useCallback(async () => {
+    const isAuth = !!getStoredToken();
     const endpoints = [
-      { key: 'servers', url: `${API}/servers` },
-      { key: 'serverTypes', url: `${API}/server-types` }
+      { key: 'serverTypes', url: `${API}/server-types` },
+      ...(isAuth ? [{ key: 'servers', url: `${API}/servers` }] : [])
     ];
 
     // Create abort controllers for all requests
@@ -163,6 +165,8 @@ function GlobalDataProvider({ children }) {
 
     // Schedule deferred background preloads once
     const t = setTimeout(() => {
+      const isAuthNow = !!getStoredToken();
+      if (!isAuthNow) return;
       refreshDataInBackground('dashboardData', `${API}/monitoring/dashboard-data`);
       refreshDataInBackground('systemHealth', `${API}/monitoring/system-health`);
       refreshDataInBackground('alerts', `${API}/monitoring/alerts`, (d) => d.alerts || []);
@@ -173,6 +177,24 @@ function GlobalDataProvider({ children }) {
     refreshIntervals.current.deferredPreloads = t;
 
     setGlobalData(current => ({ ...current, ...updates, isInitialized: true }));
+  }, []);
+
+  // Helper: refresh servers list on demand
+  const refreshServersNow = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/servers`, { headers: authHeaders() });
+      if (!r.ok) return;
+      const list = await r.json();
+      setGlobalData(cur => ({ ...cur, servers: Array.isArray(list) ? list : [] }));
+    } catch {}
+  }, []);
+
+  // Helper: optimistic update server status locally without reload
+  const updateServerStatus = useCallback((id, status) => {
+    setGlobalData(cur => ({
+      ...cur,
+      servers: (cur.servers || []).map(s => s.id === id ? { ...s, status } : s),
+    }));
   }, []);
 
   // Background refresh function - updates data silently
@@ -209,25 +231,24 @@ function GlobalDataProvider({ children }) {
       refreshDataInBackground('alerts', `${API}/monitoring/alerts`, (data) => data.alerts || []);
     }, 60000);
 
-    // Server stats refresh with reduced frequency
+    // Server stats refresh using bulk endpoint for performance
     refreshIntervals.current.serverStats = setInterval(async () => {
       try {
         if (typeof window !== 'undefined' && window.HEAVY_PANEL_ACTIVE) return;
-        const servers = Array.isArray(serversRef.current) ? serversRef.current : [];
-        if (!servers.length) return;
-        const results = await Promise.allSettled(
-          servers.map(s => fetch(`${API}/servers/${s.id}/resources`, { headers: authHeaders() }).then(r => r.ok ? r.json() : null))
-        );
+        const r = await fetch(`${API}/servers/stats?ttl=2`, { headers: authHeaders() });
+        if (!r.ok) return;
+        const data = await r.json(); // { [id]: stats }
         setGlobalData(current => {
-          const next = { ...(current.serverStats || {}) };
-          servers.forEach((s, idx) => {
-            const res = results[idx];
-            if (res.status === 'fulfilled' && res.value) next[s.id] = res.value;
-          });
-          return { ...current, serverStats: next };
+          const merged = { ...(current.serverStats || {}) };
+          if (data && typeof data === 'object') {
+            Object.entries(data).forEach(([id, s]) => {
+              merged[id] = { ...(merged[id] || {}), ...(s || {}), players: merged[id]?.players };
+            });
+          }
+          return { ...current, serverStats: merged };
         });
       } catch {}
-    }, 12000);
+    }, 6000);
 
     return () => {
       // Cleanup intervals and abort controllers
@@ -237,22 +258,60 @@ function GlobalDataProvider({ children }) {
     };
   }, []);
 
-  // Update server stats in the background
+  // Preload server info (type/version + dir snapshots) for all servers after initial load
+  useEffect(() => {
+    const servers = serversRef.current || [];
+    if (!servers.length) return;
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.allSettled(
+        servers.map(async (s) => {
+          try {
+            const r = await fetch(`${API}/servers/${s.id}/info`, { headers: authHeaders() });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const d = await r.json();
+            return [s.id, d];
+          } catch {
+            return [s.id, null];
+          }
+        })
+      );
+      if (cancelled) return;
+      const byId = {};
+      entries.forEach(res => { if (res.status === 'fulfilled') { const [id, info] = res.value; if (info) byId[id] = info; } });
+      if (Object.keys(byId).length) {
+        setGlobalData(cur => ({ ...cur, serverInfoById: { ...(cur.serverInfoById || {}), ...byId } }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [globalData.servers.length]);
+
+  // Initial bulk fetch of server stats once servers are available
   useEffect(() => {
     if (globalData.servers.length > 0 && globalData.isInitialized) {
-      globalData.servers.forEach(server => {
-        if (!globalData.serverStats[server.id]) {
-          refreshDataInBackground('serverStats', `${API}/servers/${server.id}/resources`, (data) => ({
-            ...globalData.serverStats,
-            [server.id]: data
+      (async () => {
+        try {
+          const r = await fetch(`${API}/servers/stats?ttl=0`, { headers: authHeaders() });
+          if (!r.ok) return;
+          const data = await r.json();
+          setGlobalData(current => ({
+            ...current,
+            serverStats: { ...(current.serverStats || {}), ...(data || {}) }
           }));
-        }
-      });
+        } catch {}
+      })();
     }
-  }, [globalData.servers, globalData.isInitialized, refreshDataInBackground]);
+  }, [globalData.servers, globalData.isInitialized]);
 
   return (
-    <GlobalDataContext.Provider value={globalData}>
+    <GlobalDataContext.Provider value={{
+      ...globalData,
+      __setGlobalData: setGlobalData,
+      __refreshServers: refreshServersNow,
+      __updateServerStatus: updateServerStatus,
+      __refreshBG: refreshDataInBackground,
+      __preloadAll: preloadAllData,
+    }}>
       {children}
     </GlobalDataContext.Provider>
   );
@@ -343,7 +402,9 @@ function useServerStats(serverId) {
 
     // Try to establish SSE stream; fallback to polling if it fails
     try {
-      es = new EventSource(`${API}/monitoring/events?container_id=${encodeURIComponent(serverId)}`);
+      const token = getStoredToken();
+      const sseUrl = `${API}/monitoring/events?container_id=${encodeURIComponent(serverId)}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+      es = new EventSource(sseUrl);
       es.onmessage = (ev) => {
         if (!active) return;
         try {
@@ -401,6 +462,7 @@ const SERVER_TYPES_WITH_LOADER = ['fabric', 'forge', 'neoforge'];
 // SchedulePanel moved to components
 // PlayersPanel moved to components
 function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestart }) {
+  const globalData = useGlobalData();
   const [activeTab, setActiveTab] = useState('overview');
   const [filesEditing, setFilesEditing] = useState(false);
   const [editPath, setEditPath] = useState('');
@@ -416,10 +478,13 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
     setFilesEditing(true);
   }, []);
 
-  const { data: typeVersionData } = useFetch(
-    server?.id ? `${API}/servers/${server.id}/info` : null,
+  // Prefer preloaded server info for instant render; fallback to fetch if missing
+  const preloadedInfo = globalData.serverInfoById?.[server.id] || null;
+  const { data: fetchedInfo } = useFetch(
+    !preloadedInfo && server?.id ? `${API}/servers/${server.id}/info` : null,
     [server?.id]
   );
+  const typeVersionData = preloadedInfo || fetchedInfo || null;
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: FaServer },
@@ -648,12 +713,20 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
                   <FaPlay className="w-3 h-3" /> Start
                 </button>
               ) : (
-                <button
-                  onClick={() => onStop(server.id)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-yellow-600 hover:bg-yellow-500 px-3 py-1.5 text-sm font-medium transition-colors"
-                >
-                  <FaStop className="w-3 h-3" /> Stop
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => onStop(server.id)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-yellow-600 hover:bg-yellow-500 px-3 py-1.5 text-sm font-medium transition-colors"
+                  >
+                    <FaStop className="w-3 h-3" /> Stop
+                  </button>
+                  <button
+                    onClick={() => onRestart(server.id)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-1.5 text-sm font-medium transition-colors"
+                  >
+                    <FaSync className="w-3 h-3" /> Restart
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -843,8 +916,6 @@ function AdvancedUserManagementPageImpl() {
   // State management
   const [activeTab, setActiveTab] = useState('users');
   const [showCreateUser, setShowCreateUser] = useState(false);
-  const [showPermissionMatrix, setShowPermissionMatrix] = useState(false);
-  const [matrixRoleName, setMatrixRoleName] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedRole, setSelectedRole] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -861,107 +932,58 @@ function AdvancedUserManagementPageImpl() {
     confirmPassword: '',
     role: 'user', 
     fullName: '',
-    mustChangePassword: true
+    mustChangePassword: true,
+    autoPassword: true
   });
   
   
   // Function to refresh user data
   const loadUsers = async () => {
     try {
-      // Trigger refresh of global data
-      window.location.reload();
+      // Refresh global users, roles and audit logs without full reload
+      const refresher = globalData.__refreshBG;
+      if (refresher) {
+        refresher('users', `${API}/users`, (d) => d.users || []);
+        refresher('roles', `${API}/users/roles`, (d) => d.roles || []);
+        refresher('auditLogs', `${API}/users/audit-logs?page=1&page_size=50`, (d) => d.logs || []);
+      }
     } catch (error) {
       console.error('Failed to refresh users data:', error);
     }
   };
   
-  // Define comprehensive permission categories inspired by Crafty Controller
-  const permissionCategories = {
-    server_control: {
-      name: 'Server Control',
-      icon: FaServer,
-      color: '#dc2626',
-      permissions: [
-        'server.view', 'server.create', 'server.start', 'server.stop', 
-        'server.restart', 'server.kill', 'server.delete', 'server.clone'
-      ]
-    },
-    server_console: {
-      name: 'Console & Commands',
-      icon: FaTerminal,
-      color: '#059669',
-      permissions: [
-        'server.console.view', 'server.console.send', 'server.console.history'
-      ]
-    },
-    server_config: {
-      name: 'Configuration',
-      icon: FaCog,
-      color: '#0ea5e9',
-      permissions: [
-        'server.config.view', 'server.config.edit', 'server.properties.edit', 'server.startup.edit'
-      ]
-    },
-    server_files: {
-      name: 'File Management',
-      icon: FaFolder,
-      color: '#7c3aed',
-      permissions: [
-        'server.files.view', 'server.files.download', 'server.files.upload',
-        'server.files.edit', 'server.files.delete', 'server.files.create', 'server.files.compress'
-      ]
-    },
-    server_players: {
-      name: 'Player Management',
-      icon: FaUsers,
-      color: '#ea580c',
-      permissions: [
-        'server.players.view', 'server.players.kick', 'server.players.ban',
-        'server.players.whitelist', 'server.players.op', 'server.players.chat'
-      ]
-    },
-    server_backup: {
-      name: 'Backup Management',
-      icon: FaDatabase,
-      color: '#10b981',
-      permissions: [
-        'server.backup.view', 'server.backup.create', 'server.backup.restore',
-        'server.backup.delete', 'server.backup.download', 'server.backup.schedule'
-      ]
-    },
-    user_management: {
-      name: 'User Management',
-      icon: FaUserCog,
-      color: '#f59e0b',
-      permissions: [
-        'user.view', 'user.create', 'user.edit', 'user.delete',
-        'user.password.reset', 'user.sessions.view', 'user.sessions.revoke'
-      ]
-    },
-    role_management: {
-      name: 'Role & Permissions',
-      icon: FaShieldAlt,
-      color: '#dc2626',
-      permissions: [
-        'role.view', 'role.create', 'role.edit', 'role.delete', 'role.assign'
-      ]
-    },
-    system_admin: {
-      name: 'System Administration',
-      icon: FaTools,
-      color: '#991b1b',
-      permissions: [
-        'system.monitoring.view', 'system.logs.view', 'system.audit.view',
-        'system.settings.view', 'system.settings.edit', 'system.maintenance', 'system.updates'
-      ]
+  // Permissions UI removed per request; roles remain view-only.
+
+  function generatePassword(len = 16) {
+    const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lower = 'abcdefghijklmnopqrstuvwxyz';
+    const digits = '0123456789';
+    const all = upper + lower + digits;
+    let out = '';
+    // Ensure at least one of each
+    out += upper[Math.floor(Math.random() * upper.length)];
+    out += lower[Math.floor(Math.random() * lower.length)];
+    out += digits[Math.floor(Math.random() * digits.length)];
+    for (let i = 3; i < len; i++) {
+      out += all[Math.floor(Math.random() * all.length)];
     }
-  };
+    return out.split('').sort(() => Math.random() - 0.5).join('');
+  }
 
   async function createUser() {
     try {
-      if (newUser.password !== newUser.confirmPassword) {
-        setError('Passwords do not match');
-        return;
+      let tempPassword = newUser.password;
+      if (newUser.autoPassword) {
+        tempPassword = generatePassword(16);
+      } else {
+        if (!newUser.password) {
+          setError('Password is required or enable auto-generate');
+          return;
+        }
+        if (newUser.password !== newUser.confirmPassword) {
+          setError('Passwords do not match');
+          return;
+        }
       }
       
       await fetch(`${API}/users`, {
@@ -970,7 +992,7 @@ function AdvancedUserManagementPageImpl() {
         body: JSON.stringify({
           username: newUser.username,
           email: newUser.email,
-          password: newUser.password,
+          password: tempPassword,
           role: newUser.role,
           full_name: newUser.fullName,
           must_change_password: newUser.mustChangePassword
@@ -979,9 +1001,9 @@ function AdvancedUserManagementPageImpl() {
       setShowCreateUser(false);
       setNewUser({ 
         username: '', email: '', password: '', confirmPassword: '',
-        role: 'user', fullName: '', mustChangePassword: true
+        role: 'user', fullName: '', mustChangePassword: true, autoPassword: true
       });
-      setSuccess('User created successfully');
+      setSuccess(`User created successfully. Temporary password: ${tempPassword}`);
       loadUsers();
     } catch (e) {
       setError('Failed to create user: ' + e.message);
@@ -1052,12 +1074,6 @@ function AdvancedUserManagementPageImpl() {
           <p className="text-white/70 mt-2">Comprehensive user, role, and permission management system</p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => { setMatrixRoleName(null); setShowPermissionMatrix(true); }}
-            className="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg flex items-center gap-2"
-          >
-            <FaTable /> Permission Matrix
-          </button>
           <button
             onClick={() => setShowCreateUser(true)}
             className="bg-brand-500 hover:bg-brand-600 px-4 py-2 rounded-lg flex items-center gap-2"
@@ -1143,7 +1159,6 @@ function AdvancedUserManagementPageImpl() {
       {activeTab === 'roles' && (
         <RolesTab 
           roles={safeRoles}
-          permissionCategories={permissionCategories}
           setSelectedRole={setSelectedRole}
         />
       )}
@@ -1152,7 +1167,6 @@ function AdvancedUserManagementPageImpl() {
         <RoleDetailsModal 
           role={selectedRole}
           onClose={() => setSelectedRole(null)}
-          onEditPermissions={() => { const name = selectedRole?.name; setSelectedRole(null); setMatrixRoleName(name || null); setShowPermissionMatrix(true); }}
         />
       )}
       
@@ -1171,13 +1185,7 @@ function AdvancedUserManagementPageImpl() {
       />
       
       
-      {/* Permission Matrix Modal */}
-      <PermissionMatrixModal 
-        show={showPermissionMatrix}
-        onClose={() => { setShowPermissionMatrix(false); setMatrixRoleName(null); }}
-        roles={safeRoles}
-        selectedRoleName={matrixRoleName}
-      />
+      {/* Permission Matrix removed per request */}
     </div>
   );
 }
@@ -1191,8 +1199,12 @@ function MonitoringPageImpl() {
   // Function to refresh monitoring data
   const refreshMonitoringData = async () => {
     try {
-      // Trigger refresh of global data
-      window.location.reload();
+      const refresher = globalData.__refreshBG;
+      if (refresher) {
+        refresher('systemHealth', `${API}/monitoring/system-health`);
+        refresher('dashboardData', `${API}/monitoring/dashboard-data`);
+        refresher('alerts', `${API}/monitoring/alerts`, (d) => d.alerts || []);
+      }
     } catch (error) {
       console.error('Failed to refresh monitoring data:', error);
     }
@@ -1272,9 +1284,7 @@ function MonitoringPageImpl() {
             <FaUsers className="text-3xl text-blue-500" />
           </div>
         </div>
-      </div>
-
-      )}
+  </div>
 
       {/* Alerts - Always show section */}
       <div className="bg-white/5 border border-white/10 rounded-lg p-6">
@@ -1401,10 +1411,15 @@ function SettingsPageImpl() {
     alert_on_high_cpu: true,
     alert_on_high_memory: true
   });
+  // Sessions state
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsError, setSessionsError] = useState('');
 
   useEffect(() => {
     loadSettings();
     loadIntegrations();
+    loadSessions();
   }, []);
 
   async function loadSettings() {
@@ -1451,6 +1466,34 @@ function SettingsPageImpl() {
       alert('CurseForge API key saved.');
     } catch (e) {
       alert('Failed to save key: ' + (e?.message || e));
+    }
+  }
+
+  async function loadSessions() {
+    try {
+      setSessionsLoading(true);
+      setSessionsError('');
+      const r = await fetch(`${API}/auth/sessions`);
+      if (!r.ok) throw new Error(`Failed to load sessions (HTTP ${r.status})`);
+      const data = await r.json();
+      setSessions(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setSessionsError(e.message || 'Failed to load sessions');
+    } finally {
+      setSessionsLoading(false);
+    }
+  }
+
+  async function revokeSession(id) {
+    try {
+      const r = await fetch(`${API}/auth/sessions/${id}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const payload = await r.json().catch(() => ({}));
+        throw new Error(payload.detail || `Failed to revoke session (HTTP ${r.status})`);
+      }
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+    } catch (e) {
+      alert(e.message || 'Failed to revoke session');
     }
   }
 
@@ -1632,6 +1675,63 @@ function SettingsPageImpl() {
           </div>
         </div>
       </div>
+
+      {/* Active Sessions */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold flex items-center gap-2"><FaShieldAlt className="text-brand-500" /> Active Sessions</h3>
+          <button
+            onClick={loadSessions}
+            className="bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded border border-white/10 text-white/80 text-sm"
+          >
+            Refresh
+          </button>
+        </div>
+        {sessionsLoading && <div className="text-white/60">Loading sessions...</div>}
+        {sessionsError && <div className="text-red-300 text-sm mb-2">{sessionsError}</div>}
+        {!sessionsLoading && !sessionsError && (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-white/70">
+                  <th className="px-3 py-2">IP Address</th>
+                  <th className="px-3 py-2">User Agent</th>
+                  <th className="px-3 py-2">Created</th>
+                  <th className="px-3 py-2">Expires</th>
+                  <th className="px-3 py-2">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {sessions.length === 0 && (
+                  <tr>
+                    <td className="px-3 py-3 text-white/60" colSpan={5}>No active sessions</td>
+                  </tr>
+                )}
+                {sessions.map((s) => {
+                  const created = s.created_at ? new Date(s.created_at) : null;
+                  const expires = s.expires_at ? new Date(s.expires_at) : null;
+                  return (
+                    <tr key={s.id} className="text-white/80">
+                      <td className="px-3 py-2">{s.ip_address || '—'}</td>
+                      <td className="px-3 py-2 max-w-[32rem] truncate" title={s.user_agent || ''}>{s.user_agent || '—'}</td>
+                      <td className="px-3 py-2">{created ? created.toLocaleString() : '—'}</td>
+                      <td className="px-3 py-2">{expires ? expires.toLocaleString() : '—'}</td>
+                      <td className="px-3 py-2">
+                        <button
+                          onClick={() => revokeSession(s.id)}
+                          className="px-2 py-1 rounded bg-red-600/80 hover:bg-red-600 text-white text-xs border border-white/10"
+                        >
+                          Revoke
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1650,14 +1750,27 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
 
   // No loading states needed - data is always available!
 
-  // Featured Modpacks (catalog)
+  // Featured Modpacks (search)
   const [featured, setFeatured] = useState([]);
   const [featuredError, setFeaturedError] = useState('');
+
+  // Lightweight install modal state (replaces removed Templates page flow)
+  const [installOpen, setInstallOpen] = useState(false);
+  const [installPack, setInstallPack] = useState(null);
+  const [installProvider, setInstallProvider] = useState('modrinth');
+  const [installVersions, setInstallVersions] = useState([]);
+  const [installVersionId, setInstallVersionId] = useState('');
+  const [installEvents, setInstallEvents] = useState([]);
+  const [installWorking, setInstallWorking] = useState(false);
+  const [serverName, setServerName] = useState('mp-' + Math.random().toString(36).slice(2,6));
+  const [hostPort, setHostPort] = useState('');
+  const [minRam, setMinRam] = useState('2048M');
+  const [maxRam, setMaxRam] = useState('4096M');
   useEffect(() => {
     let cancelled = false;
     async function loadFeatured(){
       try {
-        const r = await fetch(`${API}/catalog/search?provider=modrinth&limit=6`);
+  const r = await fetch(`${API}/catalog/search?provider=all&page_size=6`);
         const d = await r.json();
         if (!cancelled) setFeatured(Array.isArray(d?.results) ? d.results : []);
       } catch(e){ if (!cancelled) setFeaturedError(String(e.message||e)); }
@@ -1665,6 +1778,74 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
     loadFeatured();
     return () => { cancelled = true; };
   }, []);
+
+  async function openInstallFromFeatured(pack) {
+    setInstallPack(pack);
+    setInstallOpen(true);
+    setInstallEvents([]);
+    setInstallWorking(false);
+    try {
+      const srcProvider = pack.provider || 'modrinth';
+      setInstallProvider(srcProvider);
+      const packId = encodeURIComponent(pack.id || pack.slug || '');
+      const r = await fetch(`${API}/catalog/${srcProvider}/packs/${packId}/versions`, { headers: authHeaders() });
+      const d = await r.json().catch(() => ({}));
+      const vers = Array.isArray(d?.versions) ? d.versions : [];
+      setInstallVersions(vers);
+      setInstallVersionId(vers[0]?.id || '');
+    } catch {
+      setInstallVersions([]);
+      setInstallVersionId('');
+    }
+  }
+
+  async function submitInstall() {
+    if (!installPack) return;
+    if (!serverName || !String(serverName).trim()) {
+      setInstallEvents((prev) => [...prev, { type: 'error', message: 'Server name is required' }]);
+      return;
+    }
+    setInstallWorking(true);
+    setInstallEvents([{ type: 'progress', message: 'Submitting install task...' }]);
+    try {
+      const body = {
+        provider: installProvider,
+        pack_id: String(installPack.id || installPack.slug || ''),
+        version_id: installVersionId ? String(installVersionId) : null,
+        name: String(serverName).trim(),
+        host_port: hostPort ? Number(hostPort) : null,
+        min_ram: minRam,
+        max_ram: maxRam,
+      };
+      const r = await fetch(`${API}/modpacks/install`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(body)
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+      const taskId = d?.task_id;
+      if (!taskId) throw new Error('No task id');
+      const es = new EventSource(`${API}/modpacks/install/events/${taskId}`);
+      es.onmessage = (ev) => {
+        try {
+          const evd = JSON.parse(ev.data);
+          setInstallEvents((prev) => {
+            const next = [...prev, evd];
+            return next.length > 500 ? next.slice(-500) : next;
+          });
+          if (evd.type === 'done' || evd.type === 'error') {
+            es.close();
+            setInstallWorking(false);
+          }
+        } catch {}
+      };
+      es.onerror = () => { try { es.close(); } catch {} setInstallWorking(false); };
+    } catch (e) {
+      setInstallEvents((prev) => [...prev, { type: 'error', message: String(e.message || e) }]);
+      setInstallWorking(false);
+    }
+  }
 
   // Calculate real-time metrics - INSTANT calculation from preloaded data
   const { totalServers, runningServers, totalMemoryMB, avgCpuPercent, criticalAlerts, warningAlerts } = useMemo(() => {
@@ -1770,7 +1951,7 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
                 </div>
                 <div className="text-sm text-gray-400 line-clamp-2 min-h-[38px]">{p.description}</div>
                 <div className="mt-3">
-                  <button onClick={()=> onNavigate && onNavigate('templates')} className="text-sm text-blue-400 hover:text-blue-300">Install</button>
+                  <button onClick={()=> openInstallFromFeatured(p)} className="text-sm text-blue-400 hover:text-blue-300">Install</button>
                 </div>
               </div>
             ))}
@@ -1779,6 +1960,75 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
             )}
           </div>
         </div>
+
+        {/* Install Wizard Modal */}
+        {installOpen && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+            <div className="bg-ink border border-white/10 rounded-lg p-6 w-full max-w-2xl">
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-lg font-semibold">Install Modpack{installPack?.name ? `: ${installPack.name}` : ''}</div>
+                <button onClick={() => { setInstallOpen(false); setInstallPack(null); }} className="text-white/60 hover:text-white">Close</button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                <div>
+                  <label className="block text-xs text-white/60 mb-1">Version</label>
+                  <select className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white" value={installVersionId} onChange={e=>setInstallVersionId(e.target.value)} style={{ backgroundColor: '#1f2937' }}>
+                    {installVersions.map(v => <option key={v.id} value={v.id} style={{ backgroundColor: '#1f2937' }}>{v.name || v.version_number}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-white/60 mb-1">Server Name</label>
+                  <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={serverName} onChange={e=>setServerName(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs text-white/60 mb-1">Host Port (optional)</label>
+                  <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={hostPort} onChange={e=>setHostPort(e.target.value)} placeholder="25565" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-white/60 mb-1">Min RAM</label>
+                    <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={minRam} onChange={e=>setMinRam(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-white/60 mb-1">Max RAM</label>
+                    <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={maxRam} onChange={e=>setMaxRam(e.target.value)} />
+                  </div>
+                </div>
+                <div className="md:col-span-2 flex items-center gap-2 mt-2">
+                  <button disabled={installWorking} onClick={submitInstall} className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded">{installWorking ? 'Installing…' : 'Start Install'}</button>
+                  <div className="text-sm text-white/70">{installProvider}</div>
+                </div>
+              </div>
+              <div className="bg-white/5 border border-white/10 rounded p-3 h-40 overflow-auto text-sm">
+                {installEvents.length === 0 ? (
+                  <div className="text-white/50">No events yet…</div>
+                ) : (
+                  <ul className="space-y-1">
+                    {installEvents.map((ev, i) => {
+                      let text = '';
+                      if (typeof ev?.message === 'string') {
+                        text = ev.message;
+                      } else if (ev?.message) {
+                        try { text = JSON.stringify(ev.message); } catch { text = String(ev.message); }
+                      } else if (ev?.step) {
+                        const pct = typeof ev.progress === 'number' ? ` (${ev.progress}%)` : '';
+                        text = `${ev.step}${pct}`;
+                      } else {
+                        try { text = JSON.stringify(ev); } catch { text = String(ev); }
+                      }
+                      return (
+                        <li key={i} className="flex items-start gap-2">
+                          <span className="w-2 h-2 rounded-full mt-2" style={{ background: ev.type === 'error' ? '#f87171' : ev.type === 'done' ? '#34d399' : '#a78bfa' }}></span>
+                          <span>{text}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Clean Server List */}
         <div className="space-y-6">
@@ -2176,6 +2426,7 @@ function PluginManagerPage() {
   );
 }
 
+// Templates & Modpacks Page (curated templates removed)
 function TemplatesPage() {
   const [serverName, setServerName] = useState('mp-' + Math.random().toString(36).slice(2,6));
   const [url, setUrl] = useState('');
@@ -2186,18 +2437,9 @@ function TemplatesPage() {
   const [msg, setMsg] = useState('');
   const [zipFile, setZipFile] = useState(null);
 
-  // Curated templates (local)
-  const [templates, setTemplates] = useState([]);
-  const [templateCategories, setTemplateCategories] = useState([]);
-  const [templatesLoading, setTemplatesLoading] = useState(true);
-  const [templatesError, setTemplatesError] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [searchTermTpl, setSearchTermTpl] = useState('');
-  const [popularOnly, setPopularOnly] = useState(false);
-
   // Catalog (remote providers)
   const [providers, setProviders] = useState([{ id: 'modrinth', name: 'Modrinth' }]);
-  const [provider, setProvider] = useState('modrinth');
+  const [provider, setProvider] = useState('all');
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogLoader, setCatalogLoader] = useState(''); // forge|fabric|neoforge
   const [catalogMC, setCatalogMC] = useState('');
@@ -2210,6 +2452,7 @@ function TemplatesPage() {
   // Install modal state
   const [installOpen, setInstallOpen] = useState(false);
   const [installPack, setInstallPack] = useState(null);
+  const [installProvider, setInstallProvider] = useState('modrinth');
   const [installVersions, setInstallVersions] = useState([]);
   const [installVersionId, setInstallVersionId] = useState('');
   const [installEvents, setInstallEvents] = useState([]);
@@ -2217,23 +2460,6 @@ function TemplatesPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setCatalogPage(1);
-    async function loadTemplates() {
-      setTemplatesLoading(true);
-      setTemplatesError('');
-      try {
-        const r = await fetch(`${API}/templates`);
-        const d = await r.json();
-        if (!cancelled) {
-          setTemplates(Array.isArray(d?.templates) ? d.templates : []);
-          setTemplateCategories(Array.isArray(d?.categories) ? d.categories : []);
-        }
-      } catch (e) {
-        if (!cancelled) setTemplatesError(String(e.message || e));
-      } finally {
-        if (!cancelled) setTemplatesLoading(false);
-      }
-    }
     async function loadProviders() {
       try {
         const r = await fetch(`${API}/catalog/providers`);
@@ -2241,7 +2467,6 @@ function TemplatesPage() {
         if (!cancelled && Array.isArray(d?.providers)) setProviders(d.providers);
       } catch {}
     }
-    loadTemplates();
     loadProviders();
     return () => { cancelled = true; };
   }, []);
@@ -2279,7 +2504,9 @@ function TemplatesPage() {
     setInstallEvents([]);
     setInstallWorking(false);
     try {
-      const r = await fetch(`${API}/catalog/${provider}/packs/${encodeURIComponent(pack.id || pack.slug)}/versions`);
+      const srcProvider = provider === 'all' ? (pack.provider || 'modrinth') : provider;
+      setInstallProvider(srcProvider);
+      const r = await fetch(`${API}/catalog/${srcProvider}/packs/${encodeURIComponent(pack.id || pack.slug)}/versions`, { headers: authHeaders() });
       const d = await r.json();
       const vers = Array.isArray(d?.versions) ? d.versions : [];
       setInstallVersions(vers);
@@ -2292,20 +2519,29 @@ function TemplatesPage() {
 
   async function submitInstall() {
     if (!installPack) return;
+    if (!serverName || !String(serverName).trim()) {
+      setInstallEvents((prev) => [...prev, { type: 'error', message: 'Server name is required' }]);
+      return;
+    }
     setInstallWorking(true);
     setInstallEvents([{ type: 'progress', message: 'Submitting install task...' }]);
     try {
       const body = {
-        provider,
-        pack_id: installPack.id || installPack.slug,
-        version_id: installVersionId || null,
-        name: serverName,
+        provider: (provider === 'all' ? (installPack?.provider || 'modrinth') : provider),
+        pack_id: String(installPack.id || installPack.slug || ''),
+        version_id: installVersionId ? String(installVersionId) : null,
+        name: String(serverName).trim(),
         host_port: hostPort ? Number(hostPort) : null,
         min_ram: minRam,
         max_ram: maxRam,
       };
-      const r = await fetch(`${API}/modpacks/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const d = await r.json();
+      const r = await fetch(`${API}/modpacks/install`, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json', ...authHeaders() }, 
+        body: JSON.stringify(body) 
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
       const taskId = d?.task_id;
       if (!taskId) throw new Error('No task id');
       const es = new EventSource(`${API}/modpacks/install/events/${taskId}`);
@@ -2343,35 +2579,12 @@ function TemplatesPage() {
       };
       const r = await fetch(`${API}/modpacks/import`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(body)
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
       setMsg('Server pack imported and container started. Go to Servers to see it.');
-    } catch (e) {
-      setMsg(`Error: ${e.message}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function createFromTemplate(tplId) {
-    setBusy(true);
-    setMsg('');
-    try {
-      const r = await fetch(`${API}/servers/from-template`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          template_id: tplId, 
-          name: serverName, 
-          host_port: hostPort ? Number(hostPort) : null 
-        })
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-      setMsg('Server created from template. Go to Servers to see it.');
     } catch (e) {
       setMsg(`Error: ${e.message}`);
     } finally {
@@ -2385,11 +2598,11 @@ function TemplatesPage() {
         <h1 className="text-3xl font-bold flex items-center gap-3">
           <FaLayerGroup className="text-brand-500" /> Templates & Modpacks
         </h1>
-        <p className="text-white/70 mt-2">Create from curated templates or import modpack server packs</p>
+        <p className="text-white/70 mt-2">Import modpack server packs or search and install from providers</p>
       </div>
 
       <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4">Import Server Pack (CurseForge or direct URL)</h3>
+        <h3 className="text-lg font-semibold mb-4">Import Server Pack (URL)</h3>
         <form onSubmit={importPack} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm text-white/70 mb-1">Server Name</label>
@@ -2468,95 +2681,14 @@ function TemplatesPage() {
         </div>
       </div>
 
+      {/* Search for Modpack Name: Modpacks from providers */}
       <div className="bg-white/5 border border-white/10 rounded-lg p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Curated Templates</h3>
-          {templatesLoading && <div className="text-sm text-white/60">Loading…</div>}
-        </div>
-        <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <input 
-              className="rounded bg-white/5 border border-white/10 px-3 py-2 text-white placeholder-white/50"
-              placeholder="Search templates..."
-              value={searchTermTpl}
-              onChange={(e) => setSearchTermTpl(e.target.value)}
-              style={{ minWidth: 220 }}
-            />
-            <select 
-              className="rounded bg-white/10 border border-white/20 px-3 py-2 text-white"
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              style={{ backgroundColor: '#1f2937' }}
-            >
-              <option value="all" style={{ backgroundColor: '#1f2937' }}>All Categories</option>
-              {templateCategories.map(cat => (
-                <option key={cat.id} value={cat.id} style={{ backgroundColor: '#1f2937' }}>
-                  {cat.icon} {cat.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <label className="inline-flex items-center gap-2 text-sm text-white/70">
-            <input type="checkbox" checked={popularOnly} onChange={(e) => setPopularOnly(e.target.checked)} />
-            Popular only
-          </label>
-        </div>
-        {templatesError && (
-          <div className="text-sm text-red-400 mb-3">{templatesError}</div>
-        )}
-        {(() => {
-          const filtered = (templates || [])
-            .filter(t => selectedCategory === 'all' || t.category === selectedCategory)
-            .filter(t => !popularOnly || t.popular)
-            .filter(t => {
-              const q = searchTermTpl.trim().toLowerCase();
-              if (!q) return true;
-              return (
-                t.name?.toLowerCase().includes(q) ||
-                t.description?.toLowerCase().includes(q) ||
-                t.type?.toLowerCase().includes(q) ||
-                (Array.isArray(t.tags) && t.tags.some(tag => String(tag).toLowerCase().includes(q)))
-              );
-            });
-          return (!templatesLoading && filtered.length === 0) ? (
-            <div className="text-white/60 text-center py-6">No templates match your filters</div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filtered.map((tpl) => (
-                <div key={tpl.id} className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="text-2xl">{tpl.icon || '🎮'}</div>
-                    <div>
-                      <div className="font-semibold">{tpl.name}</div>
-                      <div className="text-xs text-white/60">{tpl.type} • {tpl.version}</div>
-                    </div>
-                  </div>
-                  <div className="text-sm text-white/70 flex-1">{tpl.description}</div>
-                  <div className="text-xs text-white/50 mt-2">RAM {tpl.min_ram}–{tpl.max_ram}</div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <button 
-                      onClick={() => createFromTemplate(tpl.id)}
-                      disabled={busy}
-                      className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-3 py-1.5 rounded text-sm"
-                    >
-                      {busy ? 'Working…' : 'Create from Template'}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          );
-        })()}
-      </div>
-
-      {/* Catalog: Modpacks from providers */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Catalog</h3>
+          <h3 className="text-lg font-semibold">Search for Modpack Name</h3>
           <div className="flex items-center gap-2 text-sm text-white/70">
-            <button onClick={() => { if (catalogPage > 1) { setCatalogPage(p => p - 1); setTimeout(searchCatalog, 0); } }} disabled={catalogPage<=1} className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded disabled:opacity-50">Prev</button>
+            <button onClick={() => { if (!catalogLoading && catalogPage > 1) { setCatalogPage(p => p - 1); setTimeout(() => { if (!catalogLoading) searchCatalog(); }, 0); } }} disabled={catalogLoading || catalogPage<=1} className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded disabled:opacity-50">Prev</button>
             <span>Page {catalogPage}</span>
-            <button onClick={() => { setCatalogPage(p => p + 1); setTimeout(searchCatalog, 0); }} className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded">Next</button>
+            <button onClick={() => { if (!catalogLoading) { setCatalogPage(p => p + 1); setTimeout(() => { if (!catalogLoading) searchCatalog(); }, 0); } }} disabled={catalogLoading} className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded disabled:opacity-50">Next</button>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
@@ -2567,7 +2699,7 @@ function TemplatesPage() {
               </option>
             ))}
           </select>
-          <input className="rounded bg-white/5 border border-white/10 px-3 py-2 text-white placeholder-white/50" placeholder="Search catalog..." value={catalogQuery} onChange={e=>setCatalogQuery(e.target.value)} />
+          <input className="rounded bg-white/5 border border-white/10 px-3 py-2 text-white placeholder-white/50" placeholder="Type modpack name (e.g. Beyond Cosmo)" value={catalogQuery} onChange={e=>setCatalogQuery(e.target.value)} />
           <input className="rounded bg-white/5 border border-white/10 px-3 py-2 text-white placeholder-white/50" placeholder="MC Version (e.g. 1.20.4)" value={catalogMC} onChange={e=>setCatalogMC(e.target.value)} />
           <select className="rounded bg-white/10 border border-white/20 px-3 py-2 text-white" value={catalogLoader} onChange={e=>setCatalogLoader(e.target.value)} style={{ backgroundColor: '#1f2937' }}>
             <option value="" style={{ backgroundColor: '#1f2937' }}>Any Loader</option>
@@ -2647,12 +2779,25 @@ function TemplatesPage() {
                 <div className="text-white/50">No events yet…</div>
               ) : (
                 <ul className="space-y-1">
-                  {installEvents.map((ev, i) => (
-                    <li key={i} className="flex items-start gap-2">
-                      <span className="w-2 h-2 rounded-full mt-2" style={{ background: ev.type === 'error' ? '#f87171' : ev.type === 'done' ? '#34d399' : '#a78bfa' }}></span>
-                      <span>{ev.message || ev.step}</span>
-                    </li>
-                  ))}
+                  {installEvents.map((ev, i) => {
+                    let text = '';
+                    if (typeof ev?.message === 'string') {
+                      text = ev.message;
+                    } else if (ev?.message) {
+                      try { text = JSON.stringify(ev.message); } catch { text = String(ev.message); }
+                    } else if (ev?.step) {
+                      const pct = typeof ev.progress === 'number' ? ` (${ev.progress}%)` : '';
+                      text = `${ev.step}${pct}`;
+                    } else {
+                      try { text = JSON.stringify(ev); } catch { text = String(ev); }
+                    }
+                    return (
+                      <li key={i} className="flex items-start gap-2">
+                        <span className="w-2 h-2 rounded-full mt-2" style={{ background: ev.type === 'error' ? '#f87171' : ev.type === 'done' ? '#34d399' : '#a78bfa' }}></span>
+                        <span>{text}</span>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
@@ -2744,7 +2889,10 @@ function App() {
     }
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    try {
+      await fetch(`${API}/auth/logout`, { method: 'POST' });
+    } catch (_) {}
     clearStoredToken();
     setAuthToken('');
     // Reload to clear any in-memory state
@@ -2865,6 +3013,9 @@ function App() {
     [serversData]
   );
 
+  // Global data context (use once at top-level; reuse inside callbacks)
+  const gd = useGlobalData();
+
   // Create server handler, using loader_version as in backend/app.py - optimized with useCallback
   const createServer = useCallback(async function createServer(e) {
     e.preventDefault();
@@ -2883,26 +3034,37 @@ function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    window.location.reload();
-  }, [name, selectedType, version, loaderVersion, installerVersion, hostPort, minRam, maxRam]);
+    // Refresh the servers list without leaving the page
+    const r = await fetch(`${API}/servers`);
+    if (r.ok) {
+      const updated = await r.json();
+      // Update global store if available (no hook calls here)
+      if (gd && gd.__setGlobalData) {
+        gd.__setGlobalData(cur => ({ ...cur, servers: Array.isArray(updated) ? updated : [] }));
+      }
+    }
+  }, [name, selectedType, version, loaderVersion, installerVersion, hostPort, minRam, maxRam, gd]);
 
   // Start server handler - optimized
   const start = useCallback(async function start(id) {
     await fetch(`${API}/servers/${id}/power`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signal: 'start' }) });
-    window.location.reload();
-  }, []);
+    gd.__updateServerStatus && gd.__updateServerStatus(id, 'running');
+    gd.__refreshServers && gd.__refreshServers();
+  }, [gd]);
   
   // Stop server handler - optimized
   const stop = useCallback(async function stop(id) {
     await fetch(`${API}/servers/${id}/power`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signal: 'stop' }) });
-    window.location.reload();
-  }, []);
+    gd.__updateServerStatus && gd.__updateServerStatus(id, 'stopped');
+    gd.__refreshServers && gd.__refreshServers();
+  }, [gd]);
   
   // Delete server handler - optimized
   const del = useCallback(async function del(id) {
     await fetch(`${API}/servers/${id}`, { method: 'DELETE' });
-    window.location.reload();
-  }, []);
+    if (selectedServer === id) setSelectedServer(null);
+    gd.__refreshServers && gd.__refreshServers();
+  }, [gd, selectedServer]);
 
   // Restart server handler - optimized
   const restart = useCallback(async function restart(id) {
@@ -2912,17 +3074,18 @@ function App() {
       const response = await fetch(`${API}/servers`);
       if (response.ok) {
         const updatedServers = await response.json();
-        setServersData(updatedServers);
+        if (gd && gd.__setGlobalData) {
+          gd.__setGlobalData(cur => ({ ...cur, servers: Array.isArray(updatedServers) ? updatedServers : [] }));
+        }
       }
     } catch (e) {
       console.error('Error restarting server:', e);
     }
-  }, []);
+  }, [gd]);
 
-  // Find selected server object
-  const selectedServerObj =
-    selectedServer &&
-    servers.find((s) => s.id === selectedServer);
+  // Find selected server object (prefer global servers so status reflects instantly)
+  const serverListForDetails = (gd?.servers && gd.servers.length) ? gd.servers : servers;
+  const selectedServerObj = selectedServer && serverListForDetails.find((s) => s.id === selectedServer);
 
   // Navigation with advanced user management like Crafty Controller
   const sidebarItems = [
@@ -3054,7 +3217,6 @@ function App() {
   }
 
   return (
-    <GlobalDataProvider>
       <div className="min-h-screen bg-ink bg-hero-gradient flex">
       {/* Sidebar */}
       {isAuthenticated && (
@@ -3089,7 +3251,12 @@ function App() {
             </div>
           </nav>
           <div className="p-4 border-t border-white/10">
-            <div className="flex items-center gap-3 mb-3">
+            <div
+              className="flex items-center gap-3 mb-3 cursor-pointer hover:bg-white/10 rounded-lg p-2"
+              onClick={() => setCurrentPage('settings')}
+              role="button"
+              tabIndex={0}
+            >
               {currentUser && (
                 <>
                   <div className="w-8 h-8 bg-brand-500 rounded-full flex items-center justify-center">
@@ -3104,6 +3271,13 @@ function App() {
                 </>
               )}
             </div>
+            <button
+              onClick={() => setCurrentPage('settings')}
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors mb-2"
+            >
+              <FaCog />
+              {sidebarOpen && <span>Settings</span>}
+            </button>
             <button
               onClick={handleLogout}
               className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors"
@@ -3147,7 +3321,6 @@ function App() {
         </main>
       </div>
       </div>
-    </GlobalDataProvider>
   );
 }
 
@@ -3485,29 +3658,44 @@ function CreateUserModal({ show, onClose, newUser, setNewUser, roles, onSubmit }
             />
           </div>
           
-          <div>
-            <label className="block text-sm font-medium text-white/70 mb-2">Password *</label>
+          <div className="flex items-center gap-2">
             <input
-              type="password"
-              value={newUser.password}
-              onChange={(e) => setNewUser({...newUser, password: e.target.value})}
-              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white focus:ring-2 focus:ring-brand-500"
-              placeholder="Enter password"
-              required
+              id="autoPassword"
+              type="checkbox"
+              checked={!!newUser.autoPassword}
+              onChange={(e) => setNewUser({ ...newUser, autoPassword: e.target.checked })}
+              className="w-4 h-4 text-brand-500 bg-white/10 border-white/20 rounded focus:ring-brand-500"
             />
+            <label htmlFor="autoPassword" className="text-sm text-white/70">Generate a secure temporary password</label>
           </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-white/70 mb-2">Confirm Password *</label>
-            <input
-              type="password"
-              value={newUser.confirmPassword}
-              onChange={(e) => setNewUser({...newUser, confirmPassword: e.target.value})}
-              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white focus:ring-2 focus:ring-brand-500"
-              placeholder="Confirm password"
-              required
-            />
-          </div>
+
+          {!newUser.autoPassword && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">Password *</label>
+                <input
+                  type="password"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser({...newUser, password: e.target.value})}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white focus:ring-2 focus:ring-brand-500"
+                  placeholder="Enter password"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">Confirm Password *</label>
+                <input
+                  type="password"
+                  value={newUser.confirmPassword}
+                  onChange={(e) => setNewUser({...newUser, confirmPassword: e.target.value})}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white focus:ring-2 focus:ring-brand-500"
+                  placeholder="Confirm password"
+                  required
+                />
+              </div>
+            </>
+          )}
           
           <div>
             <label className="block text-sm font-medium text-white/70 mb-2">Role</label>
@@ -3558,7 +3746,7 @@ function CreateUserModal({ show, onClose, newUser, setNewUser, roles, onSubmit }
 }
 
 // Role Details Modal
-function RoleDetailsModal({ role, onClose, onEditPermissions }) {
+function RoleDetailsModal({ role, onClose }) {
   const [permissions, setPermissions] = React.useState([]);
   React.useEffect(() => {
     let cancelled = false;
@@ -3621,231 +3809,9 @@ function RoleDetailsModal({ role, onClose, onEditPermissions }) {
 
         <div className="flex justify-end gap-3 mt-6">
           <button onClick={onClose} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded text-white">Close</button>
-          <button onClick={onEditPermissions} className="px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded text-white">Edit Permissions</button>
         </div>
       </div>
     </div>
   );
 }
-
-// Permission Matrix Modal - edit permissions per role
-function PermissionMatrixModal({ show, onClose, roles, selectedRoleName = null }) {
-  const [permissions, setPermissions] = React.useState([]); // [{name, description, category}]
-  const [rolePerms, setRolePerms] = React.useState({}); // { roleName: Set([...]) }
-  const [changedRoles, setChangedRoles] = React.useState({}); // { roleName: true }
-  const [saving, setSaving] = React.useState(false);
-  const [error, setError] = React.useState('');
-  const [success, setSuccess] = React.useState('');
-
-  // Build initial state when opened
-  React.useEffect(() => {
-    if (!show) return;
-    let cancelled = false;
-
-    async function load() {
-      try {
-        setError('');
-        setSuccess('');
-        // Fetch permissions from API
-        const resp = await fetch(`${API}/users/permissions`, { headers: authHeaders() });
-        if (!resp.ok) throw new Error('Failed to load permissions');
-        const data = await resp.json();
-        const perms = data.permissions || [];
-        if (cancelled) return;
-        setPermissions(perms);
-
-        // Initialize role permissions map
-        const initial = {};
-        (roles || []).forEach(r => {
-          initial[r.name] = new Set(r.permissions || []);
-        });
-        setRolePerms(initial);
-        setChangedRoles({});
-      } catch (e) {
-        if (!cancelled) setError(e.message || String(e));
-      }
-    }
-
-    load();
-    return () => { cancelled = true; };
-  }, [show]);
-
-  const [query, setQuery] = React.useState('');
-
-  const permsByCategory = React.useMemo(() => {
-    const grouped = {};
-    const filtered = permissions.filter(p => {
-      if (!query) return true;
-      const q = query.toLowerCase();
-      return p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q);
-    });
-    filtered.forEach(p => {
-      if (!grouped[p.category]) grouped[p.category] = [];
-      grouped[p.category].push(p);
-    });
-    // sort permissions within category for stable UI
-    Object.keys(grouped).forEach(cat => {
-      grouped[cat].sort((a, b) => a.name.localeCompare(b.name));
-    });
-    return grouped;
-  }, [permissions, query]);
-
-  function toggle(roleName, permName) {
-    setRolePerms(prev => {
-      const next = { ...prev };
-      const set = new Set(next[roleName] || []);
-      if (set.has(permName)) set.delete(permName); else set.add(permName);
-      next[roleName] = set;
-      return next;
-    });
-    setChangedRoles(prev => ({ ...prev, [roleName]: true }));
-  }
-
-  async function saveChanges() {
-    try {
-      setSaving(true);
-      setError('');
-      setSuccess('');
-      const names = Object.keys(changedRoles).filter(n => changedRoles[n]);
-      for (const name of names) {
-        const permsList = Array.from(rolePerms[name] || []);
-        const resp = await fetch(`${API}/users/roles/${encodeURIComponent(name)}`, {
-          method: 'PATCH',
-          headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ permissions: permsList })
-        });
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          throw new Error(err.detail || `Failed to update role ${name}`);
-        }
-      }
-      setSuccess('Permissions updated successfully');
-      setChangedRoles({});
-    } catch (e) {
-      setError(e.message || String(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (!show) return null;
-
-  const roleList = Array.isArray(roles) ? roles : [];
-  const visibleRoles = selectedRoleName ? roleList.filter(r => r.name === selectedRoleName) : roleList;
-
-
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-      <div className="bg-gray-900 border border-white/10 rounded-lg p-6 w-full max-w-6xl max-h-[90vh] overflow-y-auto shadow-2xl">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Permission Matrix</h3>
-          <div className="flex items-center gap-2">
-            {error && <span className="text-sm text-red-300">{error}</span>}
-            {success && <span className="text-sm text-green-300">{success}</span>}
-          </div>
-        </div>
-
-        <div className="overflow-x-auto bg-gray-800/60 rounded-md border border-white/10">
-          <div className="flex items-center justify-between px-3 py-2 bg-gray-800/80 border-b border-white/10">
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search permissions..." className="w-72 px-3 py-1.5 bg-gray-900 border border-white/10 rounded text-white placeholder-white/40 text-sm" />
-            {selectedRoleName && (
-              <div className="text-white/70 text-sm">Editing role: <span className="font-semibold text-white">{selectedRoleName}</span></div>
-            )}
-          </div>
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-900/80 sticky top-0">
-              <tr>
-                <th className="text-left px-3 py-2 text-white/80">Permission</th>
-                {visibleRoles.map(r => (
-                  <th key={r.name} className="px-3 py-2 text-white/80 text-left">
-                    <div className="flex items-center gap-2">
-                      <span>{r.name}</span>
-                      {r.is_system && (
-                        <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">system</span>
-                      )}
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {Object.entries(permsByCategory).map(([cat, perms]) => (
-                <React.Fragment key={cat}>
-                  <tr>
-                    <td colSpan={1 + visibleRoles.length} className="bg-gray-900/70 text-white/80 px-3 py-1 mt-2 font-medium">
-                      <div className="flex items-center justify-between">
-                        <span>{cat.replace(/_/g, ' ')}</span>
-                        <div className="flex items-center gap-2">
-                          {visibleRoles.map(r => (
-                            <div key={r.name} className="flex items-center gap-1">
-                              <button
-                                className="px-2 py-0.5 text-xs bg-white/10 hover:bg-white/20 rounded"
-                                onClick={() => {
-                                  const next = new Set(rolePerms[r.name] || []);
-                                  perms.forEach(p => next.add(p.name));
-                                  setRolePerms(prev => ({ ...prev, [r.name]: next }));
-                                  setChangedRoles(prev => ({ ...prev, [r.name]: true }));
-                                }}
-                              >
-                                Select all ({r.name})
-                              </button>
-                              <button
-                                className="px-2 py-0.5 text-xs bg-white/10 hover:bg-white/20 rounded"
-                                onClick={() => {
-                                  const next = new Set(rolePerms[r.name] || []);
-                                  perms.forEach(p => next.delete(p.name));
-                                  setRolePerms(prev => ({ ...prev, [r.name]: next }));
-                                  setChangedRoles(prev => ({ ...prev, [r.name]: true }));
-                                }}
-                              >
-                                Clear ({r.name})
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                  {perms.map(p => (
-                    <tr key={p.name} className="border-b border-white/5">
-                      <td className="px-3 py-2">
-                        <div className="flex flex-col">
-                          <span className="text-white">{p.name}</span>
-                          {p.description && <span className="text-xs text-white/60">{p.description}</span>}
-                        </div>
-                      </td>
-                      {visibleRoles.map(r => {
-                        const has = (rolePerms[r.name] || new Set()).has(p.name);
-                        return (
-                          <td key={r.name} className="px-3 py-2">
-                            <input
-                              type="checkbox"
-                              className="w-4 h-4 text-brand-500 bg-white/10 border-white/20 rounded"
-                              checked={!!has}
-                              onChange={() => toggle(r.name, p.name)}
-                              disabled={currentUser?.role !== 'admin'}
-                              title={currentUser?.role !== 'admin' ? 'You need admin to edit roles' : ''}
-                            />
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="flex justify-end gap-3 mt-4">
-          <button onClick={onClose} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded text-white">Close</button>
-          <button onClick={saveChanges} disabled={saving || Object.keys(changedRoles).length === 0} className={`px-4 py-2 rounded text-white ${saving ? 'bg-brand-500/50' : 'bg-brand-500 hover:bg-brand-600'}`}>
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default App;

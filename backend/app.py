@@ -1,5 +1,8 @@
-from fastapi import FastAPI, HTTPException, UploadFile, Form, Body, Query, Depends, Request
+from fastapi import FastAPI, HTTPException, UploadFile, Form, Body, Query, Depends, Request, File
+from fastapi.responses import FileResponse
+from pathlib import Path
 from pydantic import BaseModel
+from typing import Optional
 from docker_manager import DockerManager
 import server_providers  # noqa: F401 - ensure providers register
 from server_providers.providers import get_provider_names, get_provider
@@ -25,22 +28,23 @@ import logging
 
 # New imports for enhanced features
 from database import init_db
-from auth_routes import router as auth_router
-from scheduler_routes import router as scheduler_router
-from player_routes import router as player_router
-from template_routes import router as template_router
-from world_routes import router as world_router
-from plugin_routes import router as plugin_router
-from api.user_routes import router as user_router
-from monitoring_routes import router as monitoring_router
-from health_routes import router as health_router
-from modpack_routes import router as modpack_router
-from catalog_routes import router as catalog_router
-from integrations_routes import router as integrations_router
+from routers import (
+    auth_router,
+    scheduler_router,
+    player_router,
+    world_router,
+    plugin_router,
+    user_router,
+    monitoring_router,
+    health_router,
+    modpack_router,
+    catalog_router,
+    integrations_router,
+)
 from auth import require_auth, get_current_user, require_admin, require_moderator
 from scheduler import get_scheduler
 from models import User
-from server_templates import get_template_manager
+from config import SERVERS_ROOT
 
 def get_forge_loader_versions(mc_version: str) -> list[str]:
     url = f"https://files.minecraftforge.net/net/minecraftforge/forge/index_{mc_version}.html"
@@ -97,7 +101,6 @@ except Exception:
 app.include_router(auth_router)
 app.include_router(scheduler_router)
 app.include_router(player_router)
-app.include_router(template_router)
 app.include_router(world_router)
 app.include_router(plugin_router)
 app.include_router(user_router)
@@ -246,7 +249,8 @@ def list_loader_versions(
             loader_site_url = f"https://neoforged.net/"
         else:
             provider = get_provider(server_type)
-            loader_versions = provider.list_loader_versions(version)
+            # Use getattr to avoid issues if provider doesn't implement list_loader_versions
+            loader_versions = getattr(provider, "list_loader_versions", lambda v: [])(version)
 
         payload = {
             "type": server_type,
@@ -315,7 +319,7 @@ def suggest_port(
         raise HTTPException(status_code=503, detail=str(e))
 
 @app.post("/servers")
-def create_server(req: ServerCreateRequest, current_user: User = Depends(require_moderator)):
+def create_server(req: ServerCreateRequest, current_user: User = Depends(require_auth)):
     try:
         # Convert RAM values to proper format
         def format_ram(ram_value):
@@ -430,7 +434,7 @@ def delete_server(container_id: str, current_user: User = Depends(require_modera
 @app.post("/servers/{name}/mkdir")
 def mkdir_path(name: str, req: MkdirRequest, current_user: User = Depends(require_moderator)):
     try:
-        base = Path("/data/servers").resolve() / name
+        base = SERVERS_ROOT.resolve() / name
         target = (base / req.path).resolve()
         if not str(target).startswith(str(base)):
             raise HTTPException(status_code=400, detail="Invalid path")
@@ -466,8 +470,17 @@ def get_server_stats(container_id: str):
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Stats unavailable: {e}")
 
+@app.get("/servers/stats")
+def get_bulk_stats(ttl: int = Query(3, ge=0, le=60), current_user: User = Depends(require_auth)):
+    """Return stats for all servers in one response (cached briefly)."""
+    try:
+        dm = get_docker_manager()
+        return dm.get_bulk_server_stats(ttl_seconds=ttl)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Stats unavailable: {e}")
+
 @app.get("/servers/{container_id}/info")
-def get_server_info(container_id: str, request: Request = None):
+def get_server_info(container_id: str, request: Request):
     try:
         info = get_docker_manager().get_server_info(container_id)
         # Attach top-level directory snapshot and common subdirs for instant files panel
@@ -495,7 +508,7 @@ def get_server_info(container_id: str, request: Request = None):
         try:
             from pathlib import Path
             import hashlib
-            base = (Path("/data/servers").resolve() / (info.get("name") or "")).resolve()
+            base = (SERVERS_ROOT.resolve() / (info.get("name") or "")).resolve()
             st = base.stat() if base.exists() else None
             sig = f"{info.get('java_version','')}-{int(st.st_mtime) if st else 0}"
             etag = 'W/"info-' + hashlib.md5(sig.encode()).hexdigest() + '"'
@@ -505,7 +518,8 @@ def get_server_info(container_id: str, request: Request = None):
         inm = request.headers.get("if-none-match") if request else None
         headers = {"ETag": etag} if etag else {}
         if etag and inm == etag:
-            return JSONResponse(status_code=304, content=None, headers=headers)
+            from starlette.responses import Response
+            return Response(status_code=304, headers=headers)
         return JSONResponse(content=info, headers=headers)
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Server info unavailable: {e}")
@@ -517,77 +531,16 @@ def get_server_console(container_id: str, tail: int = 100):
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Console unavailable: {e}")
 
-# Server Templates Endpoints
-@app.get("/templates")
-def list_templates(category: str = Query(None), popular: bool = Query(False)):
-    """
-    List all available server templates, optionally filtered by category or popularity
-    """
-    try:
-        manager = get_template_manager()
-        return {
-            "templates": manager.list_templates(category=category, popular_only=popular),
-            "categories": manager.get_categories()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/templates/{template_id}")
-def get_template(template_id: str):
-    """
-    Get a specific template by ID
-    """
-    try:
-        manager = get_template_manager()
-        template = manager.get_template(template_id)
-        if not template:
-            raise HTTPException(status_code=404, detail="Template not found")
-        return template.to_dict()
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/servers/from-template")
-def create_server_from_template(
-    template_id: str = Body(..., embed=True),
-    name: str = Body(..., embed=True),
-    host_port: int = Body(None, embed=True),
-    current_user: User = Depends(require_moderator)
-):
-    """
-    Create a server from a template
-    """
-    try:
-        manager = get_template_manager()
-        template = manager.get_template(template_id)
-        if not template:
-            raise HTTPException(status_code=404, detail="Template not found")
-        
-        # Create server using template configuration
-        return get_docker_manager().create_server(
-            name=name,
-            server_type=template.type,
-            version=template.version,
-            host_port=host_port,
-            loader_version=template.loader_version,
-            min_ram=template.min_ram,
-            max_ram=template.max_ram,
-            installer_version=template.installer_version
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Failed to create server: {e}")
+#
 
 @app.get("/servers/{name}/files")
-def files_list(name: str, path: str = ".", request: Request = None):
+def files_list(name: str, request: Request, path: str = "."):
     # Compute a simple ETag based on directory mtime to enable client caching
     try:
         from pathlib import Path
-        base = (Path("/data/servers").resolve() / name / path).resolve()
+        base = (SERVERS_ROOT.resolve() / name / path).resolve()
         # Prevent path traversal
-        root = Path("/data/servers").resolve() / name
+        root = SERVERS_ROOT.resolve() / name
         if not str(base).startswith(str(root)):
             raise HTTPException(status_code=400, detail="Invalid path")
         st = base.stat() if base.exists() else None
@@ -597,19 +550,20 @@ def files_list(name: str, path: str = ".", request: Request = None):
 
     inm = request.headers.get("if-none-match") if request else None
     if etag and inm == etag:
-        return JSONResponse(status_code=304, content=None, headers={"ETag": etag})
+        from starlette.responses import Response
+        return Response(status_code=304, headers={"ETag": etag})
 
     items = fm_list_dir(name, path)
     headers = {"ETag": etag} if etag else {}
     return JSONResponse(content={"items": items}, headers=headers)
 
 @app.get("/servers/{name}/file")
-def file_read(name: str, path: str, request: Request = None):
+def file_read(name: str, request: Request, path: str):
     # ETag based on file size and mtime
     try:
         from pathlib import Path
-        p = (Path("/data/servers").resolve() / name / path).resolve()
-        root = Path("/data/servers").resolve() / name
+        p = (SERVERS_ROOT.resolve() / name / path).resolve()
+        root = SERVERS_ROOT.resolve() / name
         if not str(p).startswith(str(root)):
             raise HTTPException(status_code=400, detail="Invalid path")
         st = p.stat() if p.exists() else None
@@ -619,7 +573,8 @@ def file_read(name: str, path: str, request: Request = None):
 
     inm = request.headers.get("if-none-match") if request else None
     if etag and inm == etag:
-        return JSONResponse(status_code=304, content=None, headers={"ETag": etag})
+        from starlette.responses import Response
+        return Response(status_code=304, headers={"ETag": etag})
 
     content = fm_read_file(name, path)
     headers = {"ETag": etag} if etag else {}
@@ -635,11 +590,67 @@ def file_delete(name: str, path: str):
     fm_delete_path(name, path)
     return {"ok": True}
 
+@app.get("/servers/{name}/download")
+def file_or_folder_download(name: str, path: str = Query(".")):
+    """
+    Download a single file directly, or if a directory is requested, return a zipped archive on the fly.
+    """
+    from pathlib import Path
+    base = (SERVERS_ROOT / name).resolve()
+    target = (base / path).resolve()
+    if not str(target).startswith(str(base)):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Path not found")
+
+    if target.is_file():
+        return FileResponse(str(target), filename=target.name)
+    # It's a directory: create a temporary zip and send it
+    import tempfile, shutil
+    tmpdir = Path(tempfile.mkdtemp(prefix="dl_zip_"))
+    archive_base = tmpdir / (Path(path).name or "folder")
+    # shutil.make_archive adds extension automatically
+    archive_path = shutil.make_archive(str(archive_base), 'zip', root_dir=str(target))
+    fname = f"{(Path(path).name or 'folder')}.zip"
+    return FileResponse(archive_path, filename=fname)
+
 @app.post("/servers/{name}/upload")
-async def file_upload(name: str, path: str = ".", file: UploadFile | None = None, current_user: User = Depends(require_moderator)):
+async def file_upload(
+    name: str,
+    path: str = Query("."),
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_auth),
+):
     if not file:
         raise HTTPException(status_code=400, detail="No file provided")
-    fm_upload_file(name, path, file)
+    # Stream upload to disk asynchronously to improve throughput and reduce memory
+    from file_manager import get_upload_dest, sanitize_filename
+    from pathlib import Path
+    dest = get_upload_dest(name, path, file.filename or "uploaded")
+    try:
+        with dest.open("wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+    finally:
+        try:
+            await file.close()
+        except Exception:
+            pass
+    # Post-process potential server icon uploads
+    try:
+        from file_manager import maybe_process_server_icon
+        maybe_process_server_icon(name, dest, file.filename or dest.name)
+    except Exception:
+        pass
+    # Invalidate caches for this server after upload
+    try:
+        from file_manager import _invalidate_cache
+        _invalidate_cache(name)
+    except Exception:
+        pass
     return {"ok": True}
 
 class RenameRequest(BaseModel):
@@ -652,7 +663,12 @@ def file_rename(name: str, req: RenameRequest, current_user: User = Depends(requ
     return {"ok": True}
 
 @app.post("/servers/{name}/upload-multiple")
-async def files_upload(name: str, path: str = ".", files: list[UploadFile] | None = None, current_user: User = Depends(require_moderator)):
+async def files_upload(
+    name: str,
+    path: str = Form("."),
+    files: list[UploadFile] = File(...),
+    current_user: User = Depends(require_auth),
+):
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
     count = fm_upload_files(name, path, files)

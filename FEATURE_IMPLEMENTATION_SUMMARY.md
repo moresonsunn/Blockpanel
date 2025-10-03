@@ -73,14 +73,7 @@ This document summarizes all the advanced features that have been implemented to
 - **Configuration inheritance** and customization
 
 **New Endpoints:**
-- `GET /templates/` - List all templates
-- `POST /templates/` - Create template
-- `GET /templates/{id}` - Get specific template
-- `PUT /templates/{id}` - Update template
-- `DELETE /templates/{id}` - Delete template
-- `POST /templates/{id}/create-server` - Create server from template
-- `GET /templates/popular/` - Get popular templates
-- `POST /templates/import` - Import template from server
+Note: The legacy Templates feature has been removed from both backend and frontend. All `/templates/*` endpoints have been retired.
 
 **Popular Templates Included:**
 - Vanilla Latest (1.21 + Java 21)
@@ -237,7 +230,7 @@ POST /players/my-server/ban
 ### **5. Server Templates**
 ```bash
 # Create from popular template
-POST /templates/1/create-server
+Deprecated: templates-related endpoints have been removed.
 {
   "server_name": "my-paper-server",
   "host_port": 25566

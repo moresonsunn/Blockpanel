@@ -3,9 +3,9 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Any, Dict, List, Optional
 import time
 
-from modpack_providers.modrinth import ModrinthProvider
-from modpack_providers.curseforge import CurseForgeProvider
-from integrations_store import get_integration_key
+from ..modpack_providers.modrinth import ModrinthProvider
+from ..modpack_providers.curseforge import CurseForgeProvider
+from ..integrations_store import get_integration_key
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -247,4 +247,3 @@ async def get_pack_versions(provider: str, pack_id: str, limit: int = 50):
         return {"versions": versions}
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
-

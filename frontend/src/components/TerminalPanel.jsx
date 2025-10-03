@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FaTerminal, FaFilter, FaPlus, FaTimes } from 'react-icons/fa';
 import { API } from '../lib/api';
 import { loadMuteConfig, saveMuteConfig, defaultMuteRegexes, defaultMutePatterns } from '../lib/consoleFilters';
+import { ansiToHtml } from '../lib/ansiToHtml';
 
 export default function TerminalPanel({ containerId }) {
   const [cmd, setCmd] = useState('');
@@ -9,6 +10,7 @@ export default function TerminalPanel({ containerId }) {
   const [showSettings, setShowSettings] = useState(false);
   const [muteEnabled, setMuteEnabled] = useState(true);
   const [patternsText, setPatternsText] = useState(defaultMutePatterns.join('\n'));
+  const [showColors, setShowColors] = useState(true);
   const scrollRef = useRef(null);
 
   // Load persisted config per server (container)
@@ -89,6 +91,11 @@ export default function TerminalPanel({ containerId }) {
     return kept.join('\n');
   }, [rawLogs, muteEnabled, compiledRegexes]);
 
+  const renderedHtml = useMemo(() => {
+    const text = filteredLogs || '';
+    return showColors ? ansiToHtml(text) : ansiToHtml(text.replace(/\x1b\[[0-9;]*m/g, ''));
+  }, [filteredLogs, showColors]);
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -110,6 +117,14 @@ export default function TerminalPanel({ containerId }) {
       <div className="flex items-center justify-between">
         <div className="text-base text-white/70 mb-2">Server Console & Logs (live)</div>
         <div className="flex items-center gap-2">
+          <label className="inline-flex items-center gap-2 text-sm text-white/70">
+            <input
+              type="checkbox"
+              checked={showColors}
+              onChange={(e) => setShowColors(e.target.checked)}
+            />
+            Show colors
+          </label>
           <label className="inline-flex items-center gap-2 text-sm text-white/70">
             <input
               type="checkbox"
@@ -142,11 +157,10 @@ export default function TerminalPanel({ containerId }) {
 
       <div
         ref={scrollRef}
-        className="text-sm text-white/70 whitespace-pre-wrap bg-black/30 p-4 rounded max-h-[800px] min-h-[500px] overflow-auto font-mono"
-        style={{ fontSize: '1.15rem', lineHeight: '1.5', height: 500 }}
-      >
-        {filteredLogs || <span className="text-white/40">No output yet.</span>}
-      </div>
+        className="text-xs text-white/70 whitespace-pre-wrap bg-black/30 p-4 rounded max-h-[800px] min-h-[500px] overflow-auto font-mono"
+        style={{ fontSize: '0.75rem', lineHeight: '1.25', height: 500 }}
+        dangerouslySetInnerHTML={{ __html: renderedHtml || '<span class="text-white/40">No output yet.</span>' }}
+      />
 
       <div className="flex gap-3 mt-2">
         <input

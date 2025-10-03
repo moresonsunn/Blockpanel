@@ -3,8 +3,10 @@ FROM node:20-alpine AS ui
 WORKDIR /ui
 
 # Install dependencies first for better caching
-COPY frontend/package.json ./
-RUN npm install --silent
+ENV NODE_ENV=production
+COPY frontend/package*.json ./
+# Prefer npm ci when lockfile is present; fall back to npm install
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev --silent; else npm install --omit=dev --silent; fi
 
 # Copy frontend source
 COPY frontend ./

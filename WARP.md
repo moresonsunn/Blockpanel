@@ -103,7 +103,6 @@ This is a **multi-container Minecraft server management platform** built with:
 /auth/*        - Authentication (login, user management)
 /players/*     - Player management (whitelist, ban, kick, OP)
 /schedule/*    - Task scheduling (automated backups, restarts)
-/templates/*   - Server templates for quick deployment
 /servers/*     - Core server management endpoints
 /worlds/*      - World management (upload, download, backup)
 /plugins/*     - Plugin management (upload, delete, reload)

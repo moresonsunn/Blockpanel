@@ -101,24 +101,8 @@ class ScheduledTask(Base):
     created_by = Column(Integer, ForeignKey("users.id"))
     created_by_user = relationship("User", back_populates="scheduled_tasks")
 
-class ServerTemplate(Base):
-    __tablename__ = "server_templates"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    description = Column(Text, nullable=True)
-    server_type = Column(String, nullable=False)
-    minecraft_version = Column(String, nullable=False)
-    loader_version = Column(String, nullable=True)
-    min_ram = Column(String, default="1024M")
-    max_ram = Column(String, default="2048M")
-    java_version = Column(String, default="21")
-    
-    # JSON field for additional configuration
-    config = Column(JSON, nullable=True)
-    
-    created_at = Column(DateTime, default=datetime.utcnow)
-    created_by = Column(Integer, ForeignKey("users.id"))
+## Legacy note: ServerTemplate model removed as curated templates feature was dropped.
+## Existing databases will be cleaned up by init_db() dropping the legacy table if present.
 
 class BackupTask(Base):
     __tablename__ = "backup_tasks"

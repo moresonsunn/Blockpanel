@@ -145,7 +145,7 @@ def test_docker_build():
     
     try:
         result = subprocess.run(
-            "docker build -t mc-runtime:test -f docker/runtime.Dockerfile docker",
+            "docker build -t mc-runtime:test -f docker/runtime.Dockerfile .",
             shell=True, capture_output=True, text=True
         )
         

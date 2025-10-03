@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List
 from pathlib import Path
@@ -51,13 +51,13 @@ async def list_plugins(
 @router.post("/{server_name}/upload")
 async def upload_plugin(
     server_name: str,
-    file: UploadFile | None = None,
-    current_user: User = Depends(require_moderator),
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_auth),
 ):
     """Upload a plugin JAR into the plugins directory."""
-    if file is None:
+    if file is None or not getattr(file, "filename", None):
         raise HTTPException(status_code=400, detail="No file provided")
-    if not file.filename.lower().endswith(".jar"):
+    if not (file.filename and file.filename.lower().endswith(".jar")):
         raise HTTPException(status_code=400, detail="Only .jar files are allowed")
     # Reuse file manager to handle safe write
     fm_upload_file(server_name, "plugins", file)

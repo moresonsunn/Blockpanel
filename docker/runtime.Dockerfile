@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y \
     bash \
     wget \
     curl \
+    unzip \
     ca-certificates \
     fontconfig \
     libfreetype6 \
@@ -35,6 +36,7 @@ ENV JAVA_BIN=/usr/local/bin/java21
 
 WORKDIR /data
 EXPOSE 25565
+# The build context is the repo root, and the script is in the docker/ folder
 COPY docker/runtime-entrypoint.sh /usr/local/bin/runtime-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/runtime-entrypoint.sh && chmod +x /usr/local/bin/runtime-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/runtime-entrypoint.sh"]

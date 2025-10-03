@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { FaUpload } from 'react-icons/fa';
-import { API } from '../../lib/api';
+import { API, getStoredToken } from '../../lib/api';
 
 export default function PluginsPanel({ serverName }) {
   const [plugins, setPlugins] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [uploadPct, setUploadPct] = useState(0);
+  const [uploading, setUploading] = useState(false);
 
   async function refresh() {
     setLoading(true); setError('');
@@ -21,10 +23,24 @@ export default function PluginsPanel({ serverName }) {
   async function upload(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
-    const fd = new FormData();
-    fd.append('file', file);
-    await fetch(`${API}/plugins/${encodeURIComponent(serverName)}/upload`, { method: 'POST', body: fd });
-    await refresh();
+    setUploading(true); setUploadPct(0);
+    try {
+      const token = getStoredToken();
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API}/plugins/${encodeURIComponent(serverName)}/upload`, true);
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable) setUploadPct(Math.round((ev.loaded/ev.total)*100));
+      };
+      xhr.onload = async () => { await refresh(); };
+      xhr.onerror = () => setError('Upload failed');
+      const fd = new FormData();
+      fd.append('file', file);
+      xhr.send(fd);
+    } finally {
+      // Allow a short delay so the UI can show 100%
+      setTimeout(() => { setUploading(false); setUploadPct(0); }, 400);
+    }
   }
 
   async function reloadPlugins() { await fetch(`${API}/plugins/${encodeURIComponent(serverName)}/reload`, { method: 'POST' }); }
@@ -46,6 +62,12 @@ export default function PluginsPanel({ serverName }) {
           <button onClick={reloadPlugins} className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5">Reload</button>
         </div>
       </div>
+      {uploading && (
+        <div className="mb-2">
+          <div className="text-xs text-white/70">Uploading… {uploadPct}%</div>
+          <div className="w-full h-1.5 bg-white/10 rounded overflow-hidden"><div className="h-full bg-brand-500" style={{ width: `${uploadPct}%` }} /></div>
+        </div>
+      )}
       {loading ? (
         <div className="text-white/60 text-sm">Loading…</div>
       ) : error ? (

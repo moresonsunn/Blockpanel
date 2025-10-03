@@ -239,6 +239,8 @@ def fix_server_jar(server_dir: Path, server_type: str, version: str, loader_vers
 class DockerManager:
     def __init__(self):
         self.client = self._init_client()
+        # Simple in-memory caches
+        self._stats_cache: dict[str, tuple[float, dict]] = {}
 
     def _init_client(self) -> docker.DockerClient:
         docker_host = os.environ.get("DOCKER_HOST")
@@ -802,7 +804,7 @@ class DockerManager:
 
         return {"id": container.id, "name": container.name, "status": container.status}
 
-    def create_server_from_existing(self, name: str, host_port: int | None = None, min_ram: str = "1G", max_ram: str = "2G", extra_env: dict | None = None) -> dict:
+    def create_server_from_existing(self, name: str, host_port: int | None = None, min_ram: str = "1G", max_ram: str = "2G", extra_env: dict | None = None, extra_labels: dict | None = None) -> dict:
         """Create a container for an existing server directory under /data/servers/{name} using the runtime image.
         Does not attempt to download any files; assumes files (including server.jar or installers) already exist.
         Optionally accepts extra_env to override runtime env (e.g., JAVA_BIN, JAVA_OPTS).
@@ -840,6 +842,13 @@ class DockerManager:
             "mc.type": "custom",
         }
         try:
+            for k, v in (extra_labels or {}).items():
+                if v is None:
+                    continue
+                labels[str(k)] = str(v)
+        except Exception:
+            pass
+        try:
             container = self.client.containers.run(
                 RUNTIME_IMAGE,
                 name=name,
@@ -860,19 +869,74 @@ class DockerManager:
 
 
     def start_server(self, container_id):
+        """Start the container and attempt a lightweight readiness check.
+        Does not block for long; callers can poll logs/status if needed.
+        """
         container = self.client.containers.get(container_id)
-        container.start()
+        try:
+            container.start()
+            # Briefly wait and refresh status
+            time.sleep(0.5)
+            container.reload()
+        except Exception as e:
+            logger.error(f"Failed to start container {container_id}: {e}")
         return {"id": container.id, "status": container.status}
 
-    def stop_server(self, container_id):
+    def stop_server(self, container_id, timeout: int = 60, force: bool = False):
+        """Gracefully stop the Minecraft server inside the container.
+        Attempts in order: RCON -> attach_socket -> stdin, then Docker stop/kill as fallback.
+        """
         container = self.client.containers.get(container_id)
-        container.stop()
-        return {"id": container.id, "status": container.status}
+        try:
+            container.reload()
+        except Exception:
+            pass
 
-    def restart_server(self, container_id):
-        container = self.client.containers.get(container_id)
-        container.restart()
-        return {"id": container.id, "status": container.status}
+        if getattr(container, "status", "unknown") != "running":
+            return {"id": container.id, "status": container.status, "method": "noop"}
+
+        method_used = None
+        try:
+            result = self.send_command(container_id, "stop")
+            method_used = result.get("method") if isinstance(result, dict) else None
+        except Exception as e:
+            logger.warning(f"Failed to send graceful stop to {container_id}: {e}")
+
+        # Wait for graceful shutdown
+        deadline = time.time() + max(1, int(timeout))
+        while time.time() < deadline:
+            try:
+                container.reload()
+                if container.status != "running":
+                    return {"id": container.id, "status": container.status, "method": method_used or "graceful"}
+            except Exception:
+                # If reload fails, assume it may be stopping; keep waiting a bit
+                pass
+            time.sleep(1)
+
+        # Fallback to Docker stop/kill
+        try:
+            if force:
+                container.kill()
+            else:
+                container.stop(timeout=10)
+        except Exception as e:
+            logger.error(f"Docker stop/kill failed for {container_id}: {e}")
+
+        try:
+            container.reload()
+        except Exception:
+            pass
+        return {"id": container.id, "status": container.status, "method": method_used or ("kill" if force else "docker-stop")}
+
+    def restart_server(self, container_id, stop_timeout: int = 60):
+        """Restart the server using a graceful stop then start."""
+        try:
+            self.stop_server(container_id, timeout=stop_timeout, force=False)
+        except Exception as e:
+            logger.warning(f"Graceful stop failed during restart for {container_id}: {e}")
+        # Start again
+        return self.start_server(container_id)
 
     def kill_server(self, container_id):
         container = self.client.containers.get(container_id)
@@ -1045,32 +1109,36 @@ class DockerManager:
                     "network_rx_mb": 0.0,
                     "network_tx_mb": 0.0,
                 }
-
-            # Get two samples to calculate CPU %
-            stats1 = container.stats(stream=False)
-            time.sleep(1.0)  # Use a full second for more accurate CPU calculation
-            stats2 = container.stats(stream=False)
-
-            # CPU calculation (see Docker API docs for details)
-            cpu_delta = stats2["cpu_stats"]["cpu_usage"]["total_usage"] - stats1["cpu_stats"]["cpu_usage"]["total_usage"]
-            system_delta = stats2["cpu_stats"].get("system_cpu_usage", 0) - stats1["cpu_stats"].get("system_cpu_usage", 0)
-            cpu_count = stats2["cpu_stats"]["online_cpus"] if "online_cpus" in stats2["cpu_stats"] else len(stats2["cpu_stats"]["cpu_usage"].get("percpu_usage", [])) or 1
+            # Single-sample CPU calculation using precpu_stats to avoid delay
+            stats_now = container.stats(stream=False)
+            cpu_stats = stats_now.get("cpu_stats", {}) or {}
+            precpu_stats = stats_now.get("precpu_stats", {}) or {}
+            cpu_usage_now = ((cpu_stats.get("cpu_usage", {}) or {}).get("total_usage", 0))
+            cpu_usage_prev = ((precpu_stats.get("cpu_usage", {}) or {}).get("total_usage", 0))
+            system_now = cpu_stats.get("system_cpu_usage", 0)
+            system_prev = precpu_stats.get("system_cpu_usage", 0)
+            cpu_delta = cpu_usage_now - cpu_usage_prev
+            system_delta = system_now - system_prev
+            online_cpus = cpu_stats.get("online_cpus")
+            if online_cpus is None:
+                per_cpu = (cpu_stats.get("cpu_usage", {}) or {}).get("percpu_usage", [])
+                online_cpus = len(per_cpu) or 1
             cpu_percent = 0.0
             if system_delta > 0 and cpu_delta > 0:
-                cpu_percent = (cpu_delta / system_delta) * cpu_count * 100.0
+                cpu_percent = (cpu_delta / system_delta) * online_cpus * 100.0
 
             # RAM calculation
-            mem_usage = stats2["memory_stats"].get("usage", 0)
+            mem_usage = stats_now["memory_stats"].get("usage", 0)
             # Remove cache from memory usage if present (for more accurate "used" memory)
-            if "stats" in stats2["memory_stats"] and "cache" in stats2["memory_stats"]["stats"]:
-                mem_usage -= stats2["memory_stats"]["stats"]["cache"]
-            mem_limit = stats2["memory_stats"].get("limit", 1)
+            if "stats" in stats_now["memory_stats"] and "cache" in stats_now["memory_stats"]["stats"]:
+                mem_usage -= stats_now["memory_stats"]["stats"]["cache"]
+            mem_limit = stats_now["memory_stats"].get("limit", 1)
             mem_percent = (mem_usage / mem_limit) * 100.0 if mem_limit else 0.0
             mem_usage_mb = mem_usage / (1024 * 1024)
             mem_limit_mb = mem_limit / (1024 * 1024)
 
             # Network calculation
-            net_stats = stats2.get("networks", {})
+            net_stats = stats_now.get("networks", {})
             rx_bytes = sum(net.get("rx_bytes", 0) for net in net_stats.values())
             tx_bytes = sum(net.get("tx_bytes", 0) for net in net_stats.values())
             rx_mb = rx_bytes / (1024 * 1024)
@@ -1109,6 +1177,31 @@ class DockerManager:
                 "network_rx_mb": 0.0,
                 "network_tx_mb": 0.0,
             }
+
+    def get_server_stats_cached(self, container_id: str, ttl_seconds: int = 3) -> dict:
+        """Return cached stats if fresh; otherwise fetch and cache."""
+        now = time.time()
+        cached = self._stats_cache.get(container_id)
+        if cached:
+            ts, data = cached
+            if now - ts <= ttl_seconds:
+                return data
+        data = self.get_server_stats(container_id)
+        self._stats_cache[container_id] = (now, data)
+        return data
+
+    def get_bulk_server_stats(self, ttl_seconds: int = 3) -> dict:
+        """Return stats for all labeled servers in one call, using cache for speed."""
+        stats: dict[str, dict] = {}
+        try:
+            servers = self.list_servers()
+            for s in servers:
+                cid = s.get("id")
+                if cid:
+                    stats[cid] = self.get_server_stats_cached(cid, ttl_seconds)
+        except Exception as e:
+            logger.warning(f"Bulk stats failed: {e}")
+        return stats
 
     def get_player_info(self, container_id: str) -> dict:
         """

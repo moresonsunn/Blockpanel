@@ -180,22 +180,22 @@ def test_database_models():
         sys.path.append('backend')
         import models
         import database
-        
-        # Check if key models exist
-        required_models = ['User', 'ScheduledTask', 'ServerTemplate', 'ServerPerformance']
+
+        # Check if key models exist (ServerTemplate removed with curated templates)
+        required_models = ['User', 'ScheduledTask', 'ServerPerformance']
         found_models = []
-        
+
         for model_name in required_models:
             if hasattr(models, model_name):
                 found_models.append(model_name)
                 print(f"✅ Model {model_name} exists")
             else:
                 print(f"❌ Model {model_name} missing")
-        
+
         success = len(found_models) == len(required_models)
         print(f"\nModel Results: {len(found_models)}/{len(required_models)} models found")
         return success
-        
+
     except Exception as e:
         print(f"❌ Error testing models: {e}")
         return False

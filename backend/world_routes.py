@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, Query, File
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
@@ -82,13 +82,15 @@ async def download_world(
 @router.post("/{server_name}/upload")
 async def upload_world(
     server_name: str,
-    file: UploadFile | None = None,
+    file: UploadFile = File(...),
     world_name: str = Query("world"),
-    current_user: User = Depends(require_moderator),
+    current_user: User = Depends(require_auth),
 ):
-    if file is None:
+    if file is None or not getattr(file, "filename", None):
         raise HTTPException(status_code=400, detail="No file provided")
-    if not (file.filename.lower().endswith('.zip') or file.filename.lower().endswith('.tar') or file.filename.lower().endswith('.tar.gz')):
+    fname = file.filename or "upload.zip"
+    low = fname.lower()
+    if not (low.endswith('.zip') or low.endswith('.tar') or low.endswith('.tar.gz')):
         raise HTTPException(status_code=400, detail="Only .zip/.tar(.gz) archives are allowed")
     # Ensure safe world name
     import re
@@ -103,7 +105,7 @@ async def upload_world(
 
     # Save upload to temp and extract
     tmpdir = Path(tempfile.mkdtemp(prefix="worldup_"))
-    tmpfile = tmpdir / file.filename
+    tmpfile = tmpdir / fname
     with tmpfile.open('wb') as f:
         f.write(file.file.read())
 

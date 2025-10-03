@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { FaUpload } from 'react-icons/fa';
-import { API } from '../../lib/api';
+import { API, getStoredToken } from '../../lib/api';
 
 export default function WorldsPanel({ serverName }) {
   const [worlds, setWorlds] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
 
   async function refresh() {
     setLoading(true); setError('');
@@ -21,13 +22,19 @@ export default function WorldsPanel({ serverName }) {
   async function upload(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
-    setUploading(true);
+    setUploading(true); setUploadPct(0);
     try {
+      const token = getStoredToken();
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API}/worlds/${encodeURIComponent(serverName)}/upload?world_name=world`, true);
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) setUploadPct(Math.round((ev.loaded/ev.total)*100)); };
+      xhr.onload = async () => { await refresh(); };
+      xhr.onerror = () => setError('Upload failed');
       const fd = new FormData();
       fd.append('file', file);
-      await fetch(`${API}/worlds/${encodeURIComponent(serverName)}/upload?world_name=world`, { method: 'POST', body: fd });
-      await refresh();
-    } finally { setUploading(false); }
+      xhr.send(fd);
+    } finally { setTimeout(() => { setUploading(false); setUploadPct(0); }, 400); }
   }
 
   function download(worldName) {
@@ -67,7 +74,12 @@ export default function WorldsPanel({ serverName }) {
           {!worlds.length && <div className="text-white/50 text-sm">No worlds detected.</div>}
         </div>
       )}
-      {uploading && <div className="text-white/60 text-sm mt-2">Uploading…</div>}
+      {uploading && (
+        <div className="mt-2">
+          <div className="text-xs text-white/70">Uploading… {uploadPct}%</div>
+          <div className="w-full h-1.5 bg-white/10 rounded overflow-hidden"><div className="h-full bg-brand-500" style={{ width: `${uploadPct}%` }} /></div>
+        </div>
+      )}
     </div>
   );
 }
