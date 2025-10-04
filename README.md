@@ -1,5 +1,10 @@
 # BlockPanel (Minecraft Server Manager)
 
+![GitLab CI](https://gitlab.com/kyzen4/blockpanel/badges/main/pipeline.svg)
+![GitHub CI](https://github.com/moresonsunn/minecraft-server/actions/workflows/ci.yml/badge.svg)
+![Docker Pulls](https://img.shields.io/docker/pulls/moresonsun/blockpanel)
+![Architecture](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-blue)
+
 BlockPanel is a modern web-based controller to create, manage, monitor, and automate multiple Minecraft servers using Docker containers. Inspired by Crafty but focused on:
 - Fast, preload-first UI (React + Tailwind)
 - Multi-provider support (Vanilla, Paper, Purpur, Fabric, Forge, NeoForge)
@@ -12,6 +17,10 @@ BlockPanel is a modern web-based controller to create, manage, monitor, and auto
 Docker images (multi-arch: linux/amd64 + linux/arm64) are automatically published:
 - Controller UI/API: `moresonsun/blockpanel:latest`
 - Runtime (Java server runner base): `moresonsun/blockpanel-runtime:latest`
+
+GitLab Container Registry (when pipeline runs with `GITLAB_PUSH=true`):
+- Controller: `registry.gitlab.com/kyzen4/blockpanel/blockpanel:latest`
+- Runtime: `registry.gitlab.com/kyzen4/blockpanel/blockpanel-runtime:latest`
 
 Release tags (when pushing annotated git tags like `v0.1.0`) will also publish versioned images once available.
 
@@ -60,6 +69,11 @@ cd minecraft-server
 docker pull moresonsun/blockpanel:latest
 docker pull moresonsun/blockpanel-runtime:latest
 ```
+  Or from GitLab registry (if enabled & pushed):
+```
+docker pull registry.gitlab.com/kyzen4/blockpanel/blockpanel:latest
+docker pull registry.gitlab.com/kyzen4/blockpanel/blockpanel-runtime:latest
+```
 3. (Optional) Adjust `docker-compose.yml` to use `moresonsun/blockpanel` & `moresonsun/blockpanel-runtime` if not already.
 4. Launch:
 ```
@@ -101,6 +115,26 @@ Push an annotated git tag starting with `v` (e.g. `v0.1.0`) to trigger version-t
 ```
 git tag -a v0.1.0 -m "v0.1.0"
 git push --tags
+```
+
+## GitLab Mirror / Dual-Registry Workflow
+
+Push to GitHub (primary) and mirror to GitLab (or add GitLab as a second remote) to leverage both registries:
+```
+git remote add gitlab https://gitlab.com/kyzen4/blockpanel.git
+git push gitlab main
+```
+Set GitLab CI/CD variables:
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN`
+- (optional) `GITLAB_PUSH=true` to publish images to `registry.gitlab.com/kyzen4/blockpanel/*`.
+
+Run a tagged release on either platform (`vX.Y.Z`) to produce versioned images in both registries.
+
+Pulling by version:
+```
+docker pull moresonsun/blockpanel:v0.1.1
+docker pull registry.gitlab.com/kyzen4/blockpanel/blockpanel:v0.1.1
 ```
 
 ## Roadmap (Excerpt)
