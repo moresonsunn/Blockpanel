@@ -5,6 +5,7 @@ Tests all major components and functionality
 """
 
 import subprocess
+import shutil
 import sys
 import time
 import json
@@ -109,20 +110,29 @@ def test_configuration_files():
     return success_count == len(files_to_test)
 
 def test_docker_configuration():
-    """Test Docker configuration"""
+    """Test Docker configuration (supports both legacy docker-compose and v2 plugin 'docker compose')."""
     print("\n=== Testing Docker Configuration ===")
-    
-    tests = [
-        ("docker --version", "Docker availability"),
-        ("docker-compose --version", "Docker Compose availability"),
-        ("docker-compose config", "Docker Compose configuration validity")
-    ]
-    
+
+    compose_legacy = shutil.which("docker-compose") is not None
+    if compose_legacy:
+        tests = [
+            ("docker --version", "Docker availability"),
+            ("docker-compose --version", "Docker Compose availability"),
+            ("docker-compose config", "Docker Compose configuration validity")
+        ]
+    else:
+        # Use plugin syntax
+        tests = [
+            ("docker --version", "Docker availability"),
+            ("docker compose version", "Docker Compose plugin availability"),
+            ("docker compose config", "Docker Compose configuration validity")
+        ]
+
     success_count = 0
     for command, description in tests:
         if run_command(command, description):
             success_count += 1
-    
+
     return success_count == len(tests)
 
 def test_backend_syntax():
