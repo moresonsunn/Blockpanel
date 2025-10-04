@@ -1,26 +1,22 @@
 services:
-  # Build-only service to ensure the Minecraft runtime image exists
-  runtime:
-    build:
-      context: .
-      dockerfile: docker/runtime.Dockerfile
-    image: mc-runtime:latest
-    container_name: mc-runtime-image
-    command: ["sh", "-c", "exit 0"]
+  # Pre-pull runtime image (optional warm cache). Controller spawns per-server containers using this image.
+  runtime_prewarm:
+    image: moresonsun/blockpanel-runtime:latest
+    container_name: blockpanel-runtime-prewarm
+    command: ["true"]
     restart: "no"
 
   controller:
-    build:
-      context: .
-      dockerfile: docker/controller.Dockerfile
-    image: mc-controller:latest
-    container_name: mc-controller
+    image: moresonsun/blockpanel:latest
+    container_name: blockpanel
     ports:
       - "8000:8000"
     volumes:
       - mc_servers_data:/data/servers
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      - APP_NAME=BlockPanel
+      - APP_VERSION=v0.1.1
       - SERVERS_CONTAINER_ROOT=/data/servers
       - SERVERS_VOLUME_NAME=minecraft-controller_mc_servers_data
       - DOCKER_HOST=unix:///var/run/docker.sock
@@ -28,7 +24,7 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres123@db:5432/minecraft_controller
     restart: unless-stopped
     depends_on:
-      - runtime
+      - runtime_prewarm
       - db
 
   db:
