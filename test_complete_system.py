@@ -40,38 +40,43 @@ def run_command(command, description, cwd=None):
         return False
 
 def test_python_imports():
-    """Test that all Python modules can be imported"""
+    """Test that backend Python modules import successfully using normal module resolution.
+
+    Previous approach loaded files via spec_from_file_location which broke intra-module imports
+    (e.g., docker_manager -> config, auth -> database). We now prepend the backend directory to
+    sys.path and import modules in a dependency-friendly order.
+    """
     print("\n=== Testing Python Module Imports ===")
-    
+
+    backend_dir = Path("backend").resolve()
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
+
+    # Order matters: load foundational modules first.
     backend_modules = [
-        "app",
-        "auth",
-        "auth_routes", 
+        "config",
         "database",
-        "docker_manager",
         "models",
+        "docker_manager",
+        "auth",
+        "auth_routes",
         "scheduler",
         "user_routes",
         "monitoring_routes",
         "health_routes",
-        "ai_error_fixer"
+        "ai_error_fixer",
+        "app",  # app last since it pulls in many of the above
     ]
-    
+
     success_count = 0
     for module_name in backend_modules:
         try:
-            module_path = Path("backend") / f"{module_name}.py"
-            if module_path.exists():
-                spec = importlib.util.spec_from_file_location(module_name, module_path)
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                print(f"✅ {module_name}")
-                success_count += 1
-            else:
-                print(f"❌ {module_name} - file not found")
+            importlib.import_module(module_name)
+            print(f"✅ {module_name}")
+            success_count += 1
         except Exception as e:
-            print(f"❌ {module_name} - import error: {str(e)[:100]}")
-    
+            print(f"❌ {module_name} - import error: {str(e)[:120]}")
+
     print(f"\nImport Results: {success_count}/{len(backend_modules)} modules imported successfully")
     return success_count == len(backend_modules)
 

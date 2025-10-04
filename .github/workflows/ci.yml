@@ -4,6 +4,7 @@ name: CI/CD Pipeline
 permissions:
   contents: write
   security-events: write
+  actions: read
 
 on:
   push:
