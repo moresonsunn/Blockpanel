@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense, useCallback, createContext, useContext } from 'react';
+import { APP_NAME, applyDocumentBranding } from './branding';
 import {
   FaServer,
   FaPlay,
@@ -82,6 +83,11 @@ import EditingPanel from './components/server-details/EditingPanel';
 import { useFetch } from './lib/useFetch';
 
 const API = 'http://localhost:8000';
+
+// Ensure document title reflects branding
+if (typeof window !== 'undefined') {
+  try { applyDocumentBranding(); } catch {}
+}
 
 // Global Data Store Context for instant access to all data
 const GlobalDataContext = createContext();
@@ -3179,7 +3185,7 @@ function App() {
                 <div className="w-16 h-16 bg-brand-500 rounded-full flex items-center justify-center mx-auto mb-4">
                   <FaServer className="text-2xl text-white" />
                 </div>
-                <h1 className="text-2xl font-bold text-white">Minecraft Panel</h1>
+                <h1 className="text-2xl font-bold text-white">{APP_NAME}</h1>
                 <p className="text-white/70 mt-2">Please sign in to continue</p>
               </div>
               
@@ -3241,7 +3247,7 @@ function App() {
               <div className="w-8 h-8 rounded-md bg-brand-500 inline-flex items-center justify-center shadow-card">
                 <FaServer className="text-white" />
               </div>
-              {sidebarOpen && <div className="font-semibold">Minecraft Panel</div>}
+              {sidebarOpen && <div className="font-semibold">{APP_NAME}</div>}
             </div>
           </div>
             <div className="flex-1 overflow-y-auto">

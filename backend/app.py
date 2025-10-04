@@ -45,7 +45,7 @@ from routers import (
 from auth import require_auth, get_current_user, require_admin, require_moderator
 from scheduler import get_scheduler
 from models import User
-from config import SERVERS_ROOT
+from config import SERVERS_ROOT, APP_NAME
 
 def get_forge_loader_versions(mc_version: str) -> list[str]:
     url = f"https://files.minecraftforge.net/net/minecraftforge/forge/index_{mc_version}.html"
@@ -198,6 +198,12 @@ class ServerCreateRequest(BaseModel):
 @app.get("/health")
 def healthz():
     return {"status": "ok"}
+
+@app.get("/branding")
+def branding_info():
+    """Simple endpoint to expose runtime branding (app name, version placeholder)."""
+    version = os.environ.get("APP_VERSION", "0.1.0")
+    return {"name": APP_NAME, "version": version}
 
 @app.get("/server-types")
 def list_server_types():
