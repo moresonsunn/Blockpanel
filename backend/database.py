@@ -5,10 +5,13 @@ from datetime import datetime
 import os
 
 # Database URL - support both SQLite and PostgreSQL
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./minecraft_controller.db")
+# Honor an explicitly provided DATABASE_URL always. Provide sensible defaults otherwise.
+DATABASE_URL = os.getenv("DATABASE_URL") or "sqlite:///./minecraft_controller.db"
 
-# For PostgreSQL in Docker, use this URL:
-if os.getenv("USE_POSTGRES", "false").lower() == "true":
+# If USE_POSTGRES=true but user already supplied DATABASE_URL, do NOT override it.
+# Previous behavior overwrote a correctly scoped host (e.g., localhost in CI runner) with 'db',
+# causing test failures because the service container is exposed via localhost:5432 not 'db'.
+if os.getenv("USE_POSTGRES", "false").lower() == "true" and not os.getenv("DATABASE_URL"):
     DATABASE_URL = "postgresql://postgres:postgres123@db:5432/minecraft_controller"
 
 # Create engine with optimized connection pool settings

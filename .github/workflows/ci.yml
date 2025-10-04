@@ -1,5 +1,10 @@
 name: CI/CD Pipeline
 
+# Required for uploading Trivy SARIF (security-events) and creating releases (contents)
+permissions:
+  contents: write
+  security-events: write
+
 on:
   push:
     branches: [ main, develop ]
