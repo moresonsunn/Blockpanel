@@ -1,0 +1,57 @@
+{
+  "id": "blockpanel",
+  "title": "BlockPanel",
+  "version": "v0.2.0",
+  "description": "Manage multiple Minecraft servers (Vanilla, Fabric, Forge, NeoForge, etc.) with a web UI.",
+  "tagline": "Minecraft server controller",
+  "author": "BlockPanel Team",
+  "website": "https://github.com/moresonsunn/minecraft-server",
+  "source": "https://github.com/moresonsunn/minecraft-server",
+  "icon": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/frontend/public/favicon.ico",
+  "thumbnail": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/frontend/public/favicon.ico",
+  "category": "Game Servers",
+  "restart": "unless-stopped",
+  "port_map": "8000",
+  "arch": ["amd64", "arm64"],
+  "title_zh": "BlockPanel",
+  "env": [
+    {"name": "APP_NAME", "value": "BlockPanel"},
+    {"name": "APP_VERSION", "value": "v0.2.0"},
+    {"name": "USE_POSTGRES", "value": "true"},
+    {"name": "DATABASE_URL", "value": "postgresql://postgres:postgres123@db:5432/minecraft_controller"},
+    {"name": "SERVERS_CONTAINER_ROOT", "value": "/data/servers"},
+    {"name": "SERVERS_VOLUME_NAME", "value": "blockpanel_mc_servers_data"},
+    {"name": "DOCKER_HOST", "value": "unix:///var/run/docker.sock"}
+  ],
+  "services": [
+    {
+      "name": "blockpanel",
+      "image": "moresonsun/blockpanel:v0.2.0",
+      "container_name": "blockpanel",
+      "ports": ["8000:8000"],
+      "volumes": [
+        {"container": "/data/servers", "host": "blockpanel_servers"},
+        {"container": "/var/run/docker.sock", "host": "/var/run/docker.sock"}
+      ],
+      "depends_on": ["blockpanel-db"],
+      "restart": "unless-stopped"
+    },
+    {
+      "name": "blockpanel-db",
+      "image": "postgres:15-alpine",
+      "environment": [
+        {"name": "POSTGRES_DB", "value": "minecraft_controller"},
+        {"name": "POSTGRES_USER", "value": "postgres"},
+        {"name": "POSTGRES_PASSWORD", "value": "postgres123"}
+      ],
+      "volumes": [
+        {"container": "/var/lib/postgresql/data", "host": "blockpanel_dbdata"}
+      ],
+      "restart": "unless-stopped"
+    }
+  ],
+  "tips": {
+    "before_install": "Requires Docker socket mount for spawning Minecraft server containers.",
+    "after_install": "Visit http://<host>:8000 (login admin/admin123 then change password)."
+  }
+}
