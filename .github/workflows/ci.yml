@@ -184,11 +184,3 @@ jobs:
         echo "  ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel:latest"
         echo "  ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel-runtime:latest"
         echo "Implement infra-specific rollout here (e.g., ssh to host and run docker compose pull && up -d)."
-
-  install-gh-cli:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Install GitHub CLI
-      run: winget install GitHub.cli
-    - name: Authenticate to GitHub CLI
-      run: gh auth login
