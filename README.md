@@ -1,8 +1,8 @@
 # BlockPanel (Minecraft Server Manager)
 
 ![GitLab CI](https://gitlab.com/kyzen4/blockpanel/badges/main/pipeline.svg)
-![GitHub CI](https://github.com/moresonsunn/minecraft-server/actions/workflows/ci.yml/badge.svg)
-![Docker Pulls](https://img.shields.io/docker/pulls/moresonsun/blockpanel)
+![GitHub CI](https://github.com/blockypanel/Blockpanel/actions/workflows/ci.yml/badge.svg)
+![Docker Pulls](https://img.shields.io/docker/pulls/blockypanel/blockpanel)
 ![Architecture](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-blue)
 
 BlockPanel is a modern web-based controller to create, manage, monitor, and automate multiple Minecraft servers using Docker containers. Inspired by Crafty but focused on:
@@ -15,8 +15,8 @@ BlockPanel is a modern web-based controller to create, manage, monitor, and auto
 - REST API + future extensibility
 
 Docker images (multi-arch: linux/amd64 + linux/arm64) are automatically published:
-- Controller UI/API: `moresonsun/blockpanel:latest`
-- Runtime (Java server runner base): `moresonsun/blockpanel-runtime:latest`
+- Controller UI/API: `blockypanel/blockpanel:latest`
+- Runtime (Java server runner base): `blockypanel/blockpanel-runtime:latest`
 
 GitLab Container Registry (when pipeline runs with `GITLAB_PUSH=true`):
 - Controller: `registry.gitlab.com/kyzen4/blockpanel/blockpanel:latest`
@@ -61,20 +61,20 @@ minecraft-server/
 
 1. Clone repo (optional if just using images):
 ```
-git clone https://github.com/moresonsunn/minecraft-server.git
-cd minecraft-server
+git clone https://github.com/blockypanel/Blockpanel.git
+cd Blockpanel
 ```
 2. Pull images:
 ```
-docker pull moresonsun/blockpanel:latest
-docker pull moresonsun/blockpanel-runtime:latest
+docker pull blockypanel/blockpanel:latest
+docker pull blockypanel/blockpanel-runtime:latest
 ```
   Or from GitLab registry (if enabled & pushed):
 ```
 docker pull registry.gitlab.com/kyzen4/blockpanel/blockpanel:latest
 docker pull registry.gitlab.com/kyzen4/blockpanel/blockpanel-runtime:latest
 ```
-3. (Optional) Adjust `docker-compose.yml` to use `moresonsun/blockpanel` & `moresonsun/blockpanel-runtime` if not already.
+3. (Optional) Adjust `docker-compose.yml` to use `blockypanel/blockpanel` & `blockypanel/blockpanel-runtime` if not already.
 4. Launch:
 ```
 docker compose up -d
@@ -107,7 +107,7 @@ docker build -t blockpanel:dev -f docker/controller.Dockerfile .
 The CI workflow uses `docker/setup-buildx-action` and `docker/build-push-action` to publish `linux/amd64, linux/arm64` manifests. Local multi-arch emulate build example:
 ```
 docker buildx create --name bp --use
-docker buildx build -f docker/runtime.Dockerfile -t moresonsun/blockpanel-runtime:test --platform linux/amd64,linux/arm64 --push .
+docker buildx build -f docker/runtime.Dockerfile -t blockypanel/blockpanel-runtime:test --platform linux/amd64,linux/arm64 --push .
 ```
 
 ## Releasing
@@ -133,9 +133,20 @@ Run a tagged release on either platform (`vX.Y.Z`) to produce versioned images i
 
 Pulling by version:
 ```
-docker pull moresonsun/blockpanel:v0.1.1
+docker pull blockypanel/blockpanel:v0.1.1
 docker pull registry.gitlab.com/kyzen4/blockpanel/blockpanel:v0.1.1
 ```
+
+## Migration Notice (Repository & Image Renaming)
+
+The project repository moved to `blockypanel/Blockpanel` and Docker images were renamed from the `moresonsun/*` namespace to `blockypanel/*`.
+
+Old image names still work only until deprecation (if tags remain); update any scripts:
+```
+sed -i 's/moresonsun\/blockpanel/blockypanel\/blockpanel/g' docker-compose.yml
+sed -i 's/moresonsun\/blockpanel-runtime/blockypanel\/blockpanel-runtime/g' docker-compose.yml
+```
+If using the installation script, pull a fresh copy (it now points to the new repo and image names).
 
 ## Roadmap (Excerpt)
 - Websocket or SSE live logs (reduce polling)

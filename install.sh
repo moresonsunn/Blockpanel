@@ -3,8 +3,8 @@ set -euo pipefail
 
 # BlockPanel quick installer (Linux/macOS) - pulls a specified or latest version and launches via docker compose.
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/install.sh | bash -s -- -v v0.1.1
+#   curl -fsSL https://raw.githubusercontent.com/blockypanel/Blockpanel/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/blockypanel/Blockpanel/main/install.sh | bash -s -- -v v0.1.1
 # Options:
 #   -v|--version <tag>   Use a specific released tag (defaults to latest)
 #   -d|--dir <path>      Target directory (default: ./blockpanel)
@@ -19,7 +19,7 @@ NO_START="false"
 EDGE="false"
 DRY="false"
 SKIP_CHOWN="false"
-GITHUB_REPO="moresonsunn/minecraft-server"
+GITHUB_REPO="blockypanel/Blockpanel"
 RAW_BASE="https://raw.githubusercontent.com/${GITHUB_REPO}"
 BRANCH="main"
 
@@ -63,8 +63,8 @@ run curl -fsSL "$COMPOSE_URL" -o docker-compose.yml
 if [[ "$EDGE" == "false" && -n "$VERSION" ]]; then
   echo "Pinning images to $VERSION"
   # Replace :latest with :$VERSION for controller and runtime images
-  run sed -i.bak "s#moresonsun/blockpanel:latest#moresonsun/blockpanel:${VERSION}#" docker-compose.yml
-  run sed -i.bak "s#moresonsun/blockpanel-runtime:latest#moresonsun/blockpanel-runtime:${VERSION}#" docker-compose.yml
+  run sed -i.bak "s#blockypanel/blockpanel:latest#blockypanel/blockpanel:${VERSION}#" docker-compose.yml
+  run sed -i.bak "s#blockypanel/blockpanel-runtime:latest#blockypanel/blockpanel-runtime:${VERSION}#" docker-compose.yml
   # Replace APP_VERSION env if present
   run sed -i.bak "s#APP_VERSION=v[^\n]*#APP_VERSION=${VERSION}#" docker-compose.yml || true
 fi

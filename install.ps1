@@ -2,8 +2,8 @@
 .SYNOPSIS
   BlockPanel quick installer for Windows PowerShell.
   Example (PowerShell 5+):
-    irm https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/install.ps1 | iex
-    irm https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/install.ps1 | iex -v v0.1.1
+  irm https://raw.githubusercontent.com/blockypanel/Blockpanel/main/install.ps1 | iex
+  irm https://raw.githubusercontent.com/blockypanel/Blockpanel/main/install.ps1 | iex -v v0.1.1
 .PARAMETER Version
   Optional tag (e.g. v0.1.1). If omitted uses latest GitHub release; fallback to :latest edge.
 .PARAMETER Path
@@ -25,7 +25,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$repo = 'moresonsunn/minecraft-server'
+$repo = 'blockypanel/Blockpanel'
 $branch = 'main'
 $rawBase = "https://raw.githubusercontent.com/$repo/$branch"
 
@@ -53,10 +53,10 @@ Invoke-Step 'Download docker-compose.yml' { Invoke-WebRequest -Uri $composeUrl -
 if (-not $Edge -and $Version) {
   Write-Host "Pinning images to $Version" -ForegroundColor Green
   Invoke-Step 'Replace controller image tag' {
-    (Get-Content docker-compose.yml) -replace 'moresonsun/blockpanel:latest', "moresonsun/blockpanel:$Version" | Set-Content docker-compose.yml
+    (Get-Content docker-compose.yml) -replace 'blockypanel/blockpanel:latest', "blockypanel/blockpanel:$Version" | Set-Content docker-compose.yml
   }
   Invoke-Step 'Replace runtime image tag' {
-    (Get-Content docker-compose.yml) -replace 'moresonsun/blockpanel-runtime:latest', "moresonsun/blockpanel-runtime:$Version" | Set-Content docker-compose.yml
+    (Get-Content docker-compose.yml) -replace 'blockypanel/blockpanel-runtime:latest', "blockypanel/blockpanel-runtime:$Version" | Set-Content docker-compose.yml
   }
   Invoke-Step 'Replace APP_VERSION env' {
     (Get-Content docker-compose.yml) -replace 'APP_VERSION=v[0-9A-Za-z\.\-]+', "APP_VERSION=$Version" | Set-Content docker-compose.yml
