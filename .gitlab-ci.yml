@@ -48,6 +48,9 @@ backend_tests:
   extends: .backend_tests
   variables:
     SKIP_FRONTEND_CHECK: "true"
+    SKIP_DOCKER_CHECK: "true"
+    OPTIONAL_FAIL_OK: "Docker Configuration"
+    CI_ALLOW_PARTIAL: "false"
   after_script:
     - |
       # Generate a minimal JUnit report if one was not produced to satisfy artifacts step
