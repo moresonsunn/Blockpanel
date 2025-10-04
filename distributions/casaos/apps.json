@@ -1,0 +1,10 @@
+[
+  {
+    "id": "blockpanel",
+    "title": "BlockPanel",
+    "description": "Manage multiple Minecraft servers with a web UI.",
+    "version": "v0.2.1",
+    "icon": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/frontend/public/favicon.ico",
+    "index": "app.json"
+  }
+]
