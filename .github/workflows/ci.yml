@@ -184,3 +184,25 @@ jobs:
         echo "  ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel:latest"
         echo "  ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel-runtime:latest"
         echo "Implement infra-specific rollout here (e.g., ssh to host and run docker compose pull && up -d)."
+
+  release-assets:
+    name: Publish Release Assets
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [docker-build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate checksums
+        run: |
+          sha256sum docker-compose.yml > checksums.txt
+          echo "Version: ${GITHUB_REF##*/}" >> checksums.txt
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            docker-compose.yml
+            install.sh
+            install.ps1
+            checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
