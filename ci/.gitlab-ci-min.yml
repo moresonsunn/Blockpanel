@@ -1,0 +1,7 @@
+stages:
+  - test
+
+backend_tests:
+  image: alpine:3.20
+  script:
+    - echo "minimal"
