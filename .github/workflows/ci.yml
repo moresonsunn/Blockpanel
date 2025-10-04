@@ -107,6 +107,13 @@ jobs:
           fi
         echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
         echo "date_tag=${DATE_TAG}" >> $GITHUB_OUTPUT
+        # Canonical app version we will bake into images (tag when release, else short SHA)
+        if [[ -n "${VERSION_TAG}" ]]; then
+          APP_VERSION="${VERSION_TAG}"
+        else
+          APP_VERSION="${SHORT_SHA}"
+        fi
+        echo "app_version=${APP_VERSION}" >> $GITHUB_OUTPUT
     
     - name: Build & Push runtime image (multi-arch)
       uses: docker/build-push-action@v5
@@ -120,6 +127,9 @@ jobs:
           ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel-runtime:${{ steps.meta.outputs.short_sha }}
           ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel-runtime:${{ steps.meta.outputs.date_tag }}
             ${{ steps.meta.outputs.is_release == 'true' && format('{0}/blockpanel-runtime:{1}', secrets.DOCKERHUB_USERNAME, steps.meta.outputs.version_tag) || '' }}
+        build-args: |
+          APP_VERSION=${{ steps.meta.outputs.app_version }}
+          GIT_COMMIT=${{ github.sha }}
         cache-from: type=gha,scope=runtime
         cache-to: type=gha,scope=runtime,mode=max
 
@@ -135,6 +145,9 @@ jobs:
           ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel:${{ steps.meta.outputs.short_sha }}
           ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel:${{ steps.meta.outputs.date_tag }}
             ${{ steps.meta.outputs.is_release == 'true' && format('{0}/blockpanel:{1}', secrets.DOCKERHUB_USERNAME, steps.meta.outputs.version_tag) || '' }}
+        build-args: |
+          APP_VERSION=${{ steps.meta.outputs.app_version }}
+          GIT_COMMIT=${{ github.sha }}
         cache-from: type=gha,scope=controller
         cache-to: type=gha,scope=controller,mode=max
 

@@ -1,4 +1,14 @@
 FROM openjdk:21-jdk-slim
+# Build metadata (populated via build args in CI)
+ARG APP_VERSION=dev
+ARG GIT_COMMIT=unknown
+
+LABEL org.opencontainers.image.title="BlockPanel Runtime" \
+    org.opencontainers.image.description="BlockPanel runtime container providing multiple Java versions for Minecraft servers" \
+    org.opencontainers.image.version=$APP_VERSION \
+    org.opencontainers.image.revision=$GIT_COMMIT \
+    org.opencontainers.image.source="https://github.com/moresonsun/Minecraft-Controller" \
+    org.opencontainers.image.licenses="MIT"
 
 # Install tools and available Java versions
 RUN apt-get update && apt-get install -y \
@@ -15,6 +25,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 ENV JAVA_TOOL_OPTIONS="-Djava.awt.headless=true -Dsun.java2d.noddraw=true -Djava.net.preferIPv4Stack=true"
+ENV APP_VERSION=$APP_VERSION \
+    GIT_COMMIT=$GIT_COMMIT \
+    JAVA_TOOL_OPTIONS="-Djava.awt.headless=true -Dsun.java2d.noddraw=true -Djava.net.preferIPv4Stack=true"
 
 # Download and install Java 8 (Eclipse Temurin)
 RUN wget -qO- https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u392-b08/OpenJDK8U-jdk_x64_linux_hotspot_8u392b08.tar.gz | tar -xz -C /opt/ && \

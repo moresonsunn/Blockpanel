@@ -201,8 +201,8 @@ def healthz():
 
 @app.get("/branding")
 def branding_info():
-    """Simple endpoint to expose runtime branding (app name, version placeholder)."""
-    version = os.environ.get("APP_VERSION", "0.1.0")
+    """Expose runtime branding (name + version). Falls back to commit hash when no version set."""
+    version = os.environ.get("APP_VERSION") or os.environ.get("GIT_COMMIT") or "dev"
     return {"name": APP_NAME, "version": version}
 
 @app.get("/server-types")

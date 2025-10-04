@@ -17,6 +17,18 @@ RUN npm run build
 # --- Backend image ---
 FROM python:3.11-slim AS api
 WORKDIR /app
+# --- Build metadata injection ---
+# Accept build-time args (in CI we pass tag or short SHA + commit hash)
+ARG APP_VERSION=dev
+ARG GIT_COMMIT=unknown
+
+# OCI standard labels for better provenance in registries
+LABEL org.opencontainers.image.title="BlockPanel Controller" \
+    org.opencontainers.image.description="BlockPanel (Minecraft server controller) - backend API + bundled static frontend" \
+    org.opencontainers.image.version=$APP_VERSION \
+    org.opencontainers.image.revision=$GIT_COMMIT \
+    org.opencontainers.image.source="https://github.com/moresonsun/Minecraft-Controller" \
+    org.opencontainers.image.licenses="MIT"
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -40,6 +52,9 @@ COPY --from=ui /ui/build ./static
 RUN mkdir -p /data/servers
 
 ENV PORT=8000
+ENV APP_VERSION=$APP_VERSION \
+    GIT_COMMIT=$GIT_COMMIT \
+    PORT=8000
 EXPOSE 8000
 
 # Use Python module syntax for better reliability
