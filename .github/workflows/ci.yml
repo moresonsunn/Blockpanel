@@ -139,13 +139,18 @@ jobs:
           fi
         fi
         echo "push_images=${SHOULD_PUSH}" >> $GITHUB_OUTPUT
-        # Optional release tag outputs (avoid blank tag entries)
-        if [[ "${VERSION_TAG}" != "" ]]; then
-          echo "runtime_release_tag=${{ secrets.DOCKERHUB_USERNAME }}/blockpanel-runtime:${VERSION_TAG}" >> $GITHUB_OUTPUT
-          echo "controller_release_tag=${{ secrets.DOCKERHUB_USERNAME }}/blockpanel:${VERSION_TAG}" >> $GITHUB_OUTPUT
+        # Image prefix always non-empty (fallback to 'local' to avoid leading slash tags)
+        if [[ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]]; then
+          IMAGE_PREFIX="${{ secrets.DOCKERHUB_USERNAME }}"
         else
-          echo "runtime_release_tag=" >> $GITHUB_OUTPUT
-          echo "controller_release_tag=" >> $GITHUB_OUTPUT
+          IMAGE_PREFIX="local"
+        fi
+        echo "image_prefix=${IMAGE_PREFIX}" >> $GITHUB_OUTPUT
+        # Release tag markers (only meaningful if pushing & release & not local)
+        if [[ "${SHOULD_PUSH}" == "true" && "${IMAGE_PREFIX}" != "local" && -n "${VERSION_TAG}" ]]; then
+          echo "include_release_tag=true" >> $GITHUB_OUTPUT
+        else
+          echo "include_release_tag=false" >> $GITHUB_OUTPUT
         fi
     
     - name: Build runtime image (multi-arch)
@@ -155,10 +160,11 @@ jobs:
         file: docker/runtime.Dockerfile
         platforms: linux/amd64,linux/arm64
         push: ${{ steps.meta.outputs.push_images == 'true' }}
-        tags: >-
-          ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel-runtime:latest,
-          ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel-runtime:${{ steps.meta.outputs.short_sha }},
-          ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel-runtime:${{ steps.meta.outputs.date_tag }}${{ steps.meta.outputs.runtime_release_tag != '' && format(',{0}', steps.meta.outputs.runtime_release_tag) || '' }}
+        tags: |
+          ${{ steps.meta.outputs.image_prefix }}/blockpanel-runtime:latest
+          ${{ steps.meta.outputs.image_prefix }}/blockpanel-runtime:${{ steps.meta.outputs.short_sha }}
+          ${{ steps.meta.outputs.image_prefix }}/blockpanel-runtime:${{ steps.meta.outputs.date_tag }}
+          ${{ steps.meta.outputs.include_release_tag == 'true' && format('{0}/blockpanel-runtime:{1}', steps.meta.outputs.image_prefix, steps.meta.outputs.version_tag) || '' }}
         build-args: |
           APP_VERSION=${{ steps.meta.outputs.app_version }}
           GIT_COMMIT=${{ github.sha }}
@@ -172,10 +178,11 @@ jobs:
         file: docker/controller.Dockerfile
         platforms: linux/amd64,linux/arm64
         push: ${{ steps.meta.outputs.push_images == 'true' }}
-        tags: >-
-          ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel:latest,
-          ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel:${{ steps.meta.outputs.short_sha }},
-          ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel:${{ steps.meta.outputs.date_tag }}${{ steps.meta.outputs.controller_release_tag != '' && format(',{0}', steps.meta.outputs.controller_release_tag) || '' }}
+        tags: |
+          ${{ steps.meta.outputs.image_prefix }}/blockpanel:latest
+          ${{ steps.meta.outputs.image_prefix }}/blockpanel:${{ steps.meta.outputs.short_sha }}
+          ${{ steps.meta.outputs.image_prefix }}/blockpanel:${{ steps.meta.outputs.date_tag }}
+          ${{ steps.meta.outputs.include_release_tag == 'true' && format('{0}/blockpanel:{1}', steps.meta.outputs.image_prefix, steps.meta.outputs.version_tag) || '' }}
         build-args: |
           APP_VERSION=${{ steps.meta.outputs.app_version }}
           GIT_COMMIT=${{ github.sha }}
