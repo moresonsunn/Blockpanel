@@ -54,7 +54,15 @@ frontend_tests:
   stage: test
   image: node:20-alpine
   before_script:
-    - cd frontend && npm ci
+    - |
+      cd frontend
+      if [ -f package-lock.json ]; then
+        echo "Using npm ci (lockfile present)"
+        npm ci
+      else
+        echo "No package-lock.json found – using npm install"
+        npm install --no-audit --no-fund
+      fi
   script:
     - npm run build
   artifacts:
@@ -79,7 +87,14 @@ build_images:
     DOCKER_CLI_EXPERIMENTAL: "enabled"
   before_script:
     - apk add --no-cache bash curl git
-    - echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+    - |
+      if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+        echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+        DOCKER_PUSH_OK=1
+      else
+        echo "Docker Hub credentials not set – skipping image build & push (will still allow release job)."
+        DOCKER_PUSH_OK=0
+      fi
     - |
       if [ "${GITLAB_PUSH}" = "true" ]; then
         echo "Logging into GitLab Container Registry ${CI_REGISTRY}"
@@ -92,6 +107,10 @@ build_images:
     - docker buildx inspect --bootstrap
   script:
     - |
+      if [ "$DOCKER_PUSH_OK" -ne 1 ]; then
+        echo "Skipping multi-arch image build because credentials are missing."
+        exit 0
+      fi
       SHORT_SHA=${CI_COMMIT_SHORT_SHA}
       DATE_TAG=$(date -u +%Y%m%d)
       VERSION_TAG=""; IS_RELEASE="false"
