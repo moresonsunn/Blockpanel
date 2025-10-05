@@ -21,7 +21,6 @@ from file_manager import (
     unzip_path as fm_unzip_path,
 )
 from backup_manager import list_backups as bk_list, create_backup as bk_create, restore_backup as bk_restore
-from ai_error_fixer import start_ai_monitoring, stop_ai_monitoring, get_ai_status, manual_fix, upload_to_docker
 import requests
 from bs4 import BeautifulSoup
 import threading
@@ -131,32 +130,6 @@ async def startup_event():
         scheduler.start()
         logging.info("Task scheduler started")
         
-        # Check if AI auto-startup is enabled
-        import json
-        from pathlib import Path
-        
-        config_path = Path("ai_config.json")
-        if config_path.exists():
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-                auto_startup = config.get("ai_error_fixer", {}).get("auto_startup", True)
-        else:
-            auto_startup = True  # Default to enabled if config doesn't exist
-        
-        if not auto_startup:
-            logging.info("AI error monitoring auto-startup is disabled")
-            return
-        
-        # Start AI monitoring in a background thread to avoid blocking startup
-        def start_ai_background():
-            try:
-                start_ai_monitoring()
-            except Exception as e:
-                logging.error(f"Failed to start AI monitoring: {e}")
-        
-        ai_thread = threading.Thread(target=start_ai_background, daemon=True)
-        ai_thread.start()
-        logging.info("AI error monitoring started in background")
     except Exception as e:
         logging.error(f"Error during startup: {e}")
 
@@ -169,9 +142,6 @@ async def shutdown_event():
         scheduler.stop()
         logging.info("Task scheduler stopped")
         
-        # Stop AI monitoring
-        stop_ai_monitoring()
-        logging.info("AI error monitoring stopped")
     except Exception as e:
         logging.error(f"Error during shutdown: {e}")
 
@@ -180,89 +150,7 @@ _docker_manager: DockerManager | None = None
 def get_docker_manager() -> DockerManager:
     global _docker_manager
     if _docker_manager is None:
-        _docker_manager = DockerManager()
-    return _docker_manager
-
-class ServerCreateRequest(BaseModel):
-    name: str
-    type: str
-    version: str
-    loader_version: str | None = None  # Allow specifying loader version
-    installer_version: str | None = None  # Fabric installer version
-    host_port: int | None = None
-    min_ram: int | str = 1024  # Minimum RAM (MB as int, or string like "1G")
-    max_ram: int | str = 2048  # Maximum RAM (MB as int, or string like "2G")
-
-# Root now serves the UI via StaticFiles mount
-
-@app.get("/health")
-def healthz():
-    return {"status": "ok"}
-
-@app.get("/branding")
-def branding_info():
-    """Expose runtime branding (name + version). Falls back to commit hash when no version set."""
-    version = os.environ.get("APP_VERSION") or os.environ.get("GIT_COMMIT") or "dev"
-    return {"name": APP_NAME, "version": version}
-
-@app.get("/server-types")
-def list_server_types():
-    """
-    Returns a list of available server types.
-    """
-    return {"types": get_provider_names()}
-
-@app.get("/server-types/{server_type}/versions")
-def list_versions(server_type: str):
-    try:
-        provider = get_provider(server_type)
-        return {"type": server_type, "versions": provider.list_versions()}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.get("/server-types/{server_type}/loader-versions")
-def list_loader_versions(
-    server_type: str,
-    version: str = Query(..., description="Minecraft version to get loader versions for"),
-):
-    """
-    Returns loader versions for a given server type and Minecraft version.
-    For Fabric, also returns installer versions and site URL.
-    """
-    try:
-        server_type_l = server_type.lower()
-        loader_site_url = None
-        extra = {}
-        if server_type_l == "fabric":
-            # Fabric: loader and installer come from Fabric Meta
-            try:
-                from server_providers.fabric import FabricProvider as _FP
-            except Exception:
-                from backend.server_providers.fabric import FabricProvider as _FP  # type: ignore
-            fp = _FP()
-            loader_versions = fp.list_loader_versions(version)
-            installers = fp.get_installer_versions()
-            latest_installer = fp.get_latest_installer_version()
-            loader_site_url = f"https://meta.fabricmc.net/v2/versions/loader/{version}/"
-            extra = {
-                "installer_versions": [i.get("version") for i in installers],
-                "latest_installer_version": latest_installer,
-            }
-        elif server_type_l == "forge":
-            loader_versions = get_forge_loader_versions(version)
-            loader_site_url = f"https://files.minecraftforge.net/net/minecraftforge/forge/index_{version}.html"
-        elif server_type_l == "neoforge":
-            loader_versions = get_neoforge_loader_versions()  # or pass the version if needed
-            loader_site_url = f"https://neoforged.net/"
-        else:
-            provider = get_provider(server_type)
-            # Use getattr to avoid issues if provider doesn't implement list_loader_versions
-            loader_versions = getattr(provider, "list_loader_versions", lambda v: [])(version)
-
-        payload = {
-            "type": server_type,
-            "version": version,
-            "loader_versions": loader_versions,
+        ## AI Error Fixer feature has been removed.
             "loader_site_url": loader_site_url,
         }
         payload.update(extra)
@@ -863,159 +751,7 @@ def get_available_java_versions(container_id: str):
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Java versions info unavailable: {e}")
 
-# AI Error Fixer Endpoints
-@app.post("/ai/start")
-def start_ai_error_monitoring():
-    """Start the AI error monitoring system."""
-    try:
-        start_ai_monitoring()
-        return {"success": True, "message": "AI error monitoring started"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to start AI monitoring: {e}")
-
-@app.post("/ai/stop")
-def stop_ai_error_monitoring():
-    """Stop the AI error monitoring system."""
-    try:
-        stop_ai_monitoring()
-        return {"success": True, "message": "AI error monitoring stopped"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to stop AI monitoring: {e}")
-
-@app.get("/ai/status")
-def get_ai_error_fixer_status():
-    """Get the current status of the AI error fixer."""
-    try:
-        status = get_ai_status()
-        # Add auto-startup configuration info
-        import json
-        from pathlib import Path
-        
-        config_path = Path("ai_config.json")
-        if config_path.exists():
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-                auto_startup = config.get("ai_error_fixer", {}).get("auto_startup", True)
-        else:
-            auto_startup = True
-        
-        status["auto_startup_enabled"] = auto_startup
-        return status
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get AI status: {e}")
-
-@app.post("/ai/fix")
-def trigger_manual_fix(error_type: str = Body(..., embed=True), container_id: str = Body(None, embed=True)):
-    """Manually trigger a fix for a specific error type."""
-    try:
-        return manual_fix(error_type, container_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to trigger manual fix: {e}")
-
-@app.post("/ai/upload-docker")
-def upload_application_to_docker(image_name: str = Body("minecraft-server-manager", embed=True)):
-    """Upload the application to Docker Hub."""
-    try:
-        return upload_to_docker(image_name)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to upload to Docker: {e}")
-
-@app.post("/ai/rebuild-runtime")
-def rebuild_runtime_image():
-    """Rebuild the Docker runtime image with multiple Java versions."""
-    try:
-        import subprocess
-        from pathlib import Path
-        
-        # Run docker build command
-        cmd = [
-            "docker", "build", "-t", "mc-runtime:latest", 
-            "-f", "docker/runtime.Dockerfile", "docker"
-        ]
-        
-        result = subprocess.run(
-            cmd, 
-            capture_output=True, 
-            text=True, 
-            cwd=Path.cwd().parent
-        )
-        
-        if result.returncode == 0:
-            return {"success": True, "message": "Runtime image rebuilt successfully"}
-        else:
-            return {"success": False, "error": f"Build failed: {result.stderr}"}
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to rebuild runtime image: {e}")
-
-@app.post("/ai/restart-containers")
-def restart_all_containers():
-    """Restart all Minecraft server containers."""
-    try:
-        docker_manager = get_docker_manager()
-        servers = docker_manager.list_servers()
-        
-        results = []
-        for server in servers:
-            try:
-                container_id = server.get("id")
-                if container_id:
-                    docker_manager.stop_server(container_id)
-                    docker_manager.start_server(container_id)
-                    results.append({"container": server.get("name"), "status": "restarted"})
-            except Exception as e:
-                results.append({"container": server.get("name"), "status": "failed", "error": str(e)})
-        
-        return {"success": True, "results": results}
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to restart containers: {e}")
-
-@app.post("/ai/cleanup")
-def cleanup_system():
-    """Clean up the system by removing old containers, images, and files."""
-    try:
-        import subprocess
-        from pathlib import Path
-        
-        results = []
-        
-        # Remove stopped containers
-        cmd = ["docker", "container", "prune", "-f"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            results.append({"operation": "container_cleanup", "status": "success"})
-        else:
-            results.append({"operation": "container_cleanup", "status": "failed", "error": result.stderr})
-        
-        # Remove unused images
-        cmd = ["docker", "image", "prune", "-f"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            results.append({"operation": "image_cleanup", "status": "success"})
-        else:
-            results.append({"operation": "image_cleanup", "status": "failed", "error": result.stderr})
-        
-        # Remove unused volumes
-        cmd = ["docker", "volume", "prune", "-f"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            results.append({"operation": "volume_cleanup", "status": "success"})
-        else:
-            results.append({"operation": "volume_cleanup", "status": "failed", "error": result.stderr})
-        
-        # Clean up old log files
-        log_dir = Path("logs")
-        if log_dir.exists():
-            for log_file in log_dir.glob("*.log"):
-                if log_file.stat().st_size > 10 * 1024 * 1024:  # 10MB
-                    log_file.unlink()
-                    results.append({"operation": "log_cleanup", "file": log_file.name, "status": "removed"})
-        
-        return {"success": True, "results": results}
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to cleanup system: {e}")
+"""(AI error fixer routes removed)"""
 
 # Mount the React UI at root as the last route so it doesn't shadow API endpoints
 try:

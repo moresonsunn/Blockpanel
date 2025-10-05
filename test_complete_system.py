@@ -70,7 +70,6 @@ def test_python_imports():
         "user_routes",
         "monitoring_routes",
         "health_routes",
-        "ai_error_fixer",
         "app",  # app last since it pulls in many of the above
     ]
 
@@ -94,7 +93,6 @@ def test_configuration_files():
         ("docker-compose.yml", "Docker Compose configuration"),
         ("backend/requirements.txt", "Python requirements"),
         ("frontend/package.json", "Node.js package configuration"),
-        ("backend/ai_config.json", "AI configuration"),
         ("frontend/tailwind.config.js", "TailwindCSS configuration")
     ]
     
@@ -249,36 +247,6 @@ def test_database_models():
         print(f"❌ Error testing models: {e}")
         return False
 
-def test_ai_configuration():
-    """Test AI error fixer configuration"""
-    print("\n=== Testing AI Configuration ===")
-    
-    try:
-        config_path = Path("backend/ai_config.json")
-        if not config_path.exists():
-            print("❌ AI configuration file missing")
-            return False
-        
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-        
-        required_sections = ['ai_error_fixer', 'error_patterns', 'fix_strategies']
-        found_sections = []
-        
-        for section in required_sections:
-            if section in config.get('ai_error_fixer', {}):
-                found_sections.append(section)
-                print(f"✅ AI config section {section} exists")
-            else:
-                print(f"❌ AI config section {section} missing")
-        
-        success = len(found_sections) == len(required_sections)
-        print(f"\nAI Config Results: {len(found_sections)}/{len(required_sections)} sections found")
-        return success
-        
-    except Exception as e:
-        print(f"❌ Error testing AI configuration: {e}")
-        return False
 
 def test_file_structure():
     """Test that all required files and directories exist"""
@@ -358,7 +326,6 @@ def main():
         "Python Module Imports": test_python_imports(),
         "Backend Syntax": test_backend_syntax(),
         "Database Models": test_database_models(),
-        "AI Configuration": test_ai_configuration(),
         "Docker Configuration": test_docker_configuration(),
         "Frontend Configuration": test_frontend_configuration()
     }

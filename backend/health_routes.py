@@ -195,14 +195,8 @@ async def get_application_health():
     # Application uptime (simplified - would need to track actual start time)
     uptime_seconds = 0  # This would be tracked from app startup
     
-    # Check AI monitoring status
+    # AI monitoring removed
     ai_monitoring = False
-    try:
-        from ai_error_fixer import get_ai_status
-        ai_status = get_ai_status()
-        ai_monitoring = ai_status.get('monitoring', False)
-    except Exception:
-        pass
     
     # Check scheduler status
     scheduler_running = False

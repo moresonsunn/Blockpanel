@@ -36,28 +36,13 @@ python test_docker_build.py
 # Test Java version selection fixes
 python test_java_version_fixes.py
 
-# Test AI error fixer functionality
-python backend/test_ai_fixer.py
 
 # Test server creation for all types
 python test_server_types.py
 ```
 
-### AI Error Fixer Management
-```bash
-# Check AI fixer status
-python backend/ai_cli.py status
-
-# Start/stop monitoring
-python backend/ai_cli.py start
-python backend/ai_cli.py stop
-
-# Manual fix attempt
-python backend/ai_cli.py fix
-
-# Test specific error types
-python backend/ai_cli.py test jar_corruption
-```
+### (AI Error Fixer Removed)
+The experimental AI Error Fixer subsystem was removed during project cleanup.
 
 ### System Validation
 ```bash
@@ -95,7 +80,7 @@ This is a **multi-container Minecraft server management platform** built with:
 - **Docker Manager** (`docker_manager.py`): Orchestrates Minecraft server containers
 - **Authentication System**: JWT-based with role hierarchy (admin > moderator > user)
 - **Database Layer**: SQLAlchemy + SQLite for persistent data
-- **AI Error Fixer** (`ai_error_fixer.py`): Automated error detection and resolution
+<!-- AI Error Fixer removed -->
 - **Scheduler System**: APScheduler for automated tasks (backups, restarts, cleanup)
 
 #### Router Organization
@@ -159,7 +144,7 @@ This is a **multi-container Minecraft server management platform** built with:
 - `DOCKER_HOST`: Docker daemon connection (default: tcp://host.docker.internal:2375)
 
 **Config Files**:
-- `backend/ai_config.json`: AI error fixer configuration
+<!-- ai_config.json removed -->
 - `docker-compose.yml`: Service orchestration
 - `backend/requirements.txt`: Python dependencies with pinned bcrypt version
 
@@ -175,13 +160,13 @@ This is a **multi-container Minecraft server management platform** built with:
 #### Error Handling Strategy
 - **Graceful Degradation**: Services continue operating when non-critical components fail
 - **Comprehensive Logging**: Structured logging throughout the application
-- **AI-Powered Recovery**: Automatic detection and resolution of common server issues
+<!-- AI powered recovery removed -->
 - **Validation Layers**: JAR file validation, input sanitization, container health checks
 
 #### Testing Approach
 - **Integration Tests**: Full Docker build and Java version validation
 - **API Testing**: Server creation flows and Java version selection
-- **Error Simulation**: Artificial error injection for AI fixer testing
+<!-- AI error simulation removed -->
 - **Manual Test Scripts**: Python scripts for common development scenarios
 
 ### Deployment Considerations
@@ -195,7 +180,7 @@ This is a **multi-container Minecraft server management platform** built with:
 - **Server Providers**: Plugin system for adding new server types
 - **Authentication Backends**: Configurable auth providers
 - **Task Schedulers**: Extensible task types beyond built-in ones
-- **AI Fix Strategies**: New error patterns and resolution strategies
+<!-- AI extension point removed -->
 - **Frontend Themes**: TailwindCSS-based theming system
 
 ### Recently Added Features

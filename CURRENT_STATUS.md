@@ -23,14 +23,7 @@
   - Shows current Java version
   - Includes "Restart Server" button to apply changes
 
-### 4. AI Error Fixer System
-- **Core System**: `backend/ai_error_fixer.py` with automated error detection and resolution
-- **CLI Tool**: `backend/ai_cli.py` for command-line management
-- **Configuration**: `backend/ai_config.json` for customization
-- **Auto-Startup**: Integrated with FastAPI application startup/shutdown events
-- **API Endpoints**: Full REST API for AI fixer management
-
-### 5. Enhanced Server Management
+### 4. Enhanced Server Management
 - **RAM Configuration**: Support for min/max RAM settings
 - **Port Management**: Proper port binding and configuration
 - **JAR Validation**: Robust validation of server JAR files
@@ -81,14 +74,7 @@ python test_server_types.py
 3. Select a different Java version
 4. Click "Restart Server" to apply changes
 
-### 5. Verify AI Error Fixer
-```bash
-# Check AI fixer status
-python backend/ai_cli.py status
-
-# Test manual fix
-python backend/ai_cli.py fix
-```
+<!-- AI Error Fixer verification section removed -->
 
 ## 📁 Key Files Modified
 
@@ -97,17 +83,15 @@ python backend/ai_cli.py fix
 - `docker/runtime-entrypoint.sh` - Dynamic Java selection logic
 
 ### Backend
-- `backend/app.py` - Java version API endpoints, AI fixer integration
+- `backend/app.py` - Java version API endpoints
 - `backend/docker_manager.py` - Java version management for containers
-- `backend/ai_error_fixer.py` - AI-powered error detection and resolution
-- `backend/ai_cli.py` - Command-line interface for AI fixer
 
 ### Frontend
 - `frontend/src/App.js` - ConfigPanel component for Java version selection
 
 ### Documentation
 - `JAVA_VERSION_SUPPORT.md` - Comprehensive Java version guide
-- `backend/AI_ERROR_FIXER_README.md` - AI fixer documentation
+// AI Error Fixer feature was removed in initial public release cleanup.
 - `CURRENT_STATUS.md` - This status document
 
 ## 🎯 User Request Status
@@ -129,5 +113,4 @@ python backend/ai_cli.py fix
 - [ ] Automatic Java selection works for different server types/versions
 - [ ] Manual Java version selection works in UI
 - [ ] Server restart applies new Java version
-- [ ] AI error fixer starts automatically with application
-- [ ] AI error fixer can detect and fix common issues
+<!-- AI Error Fixer checklist items removed -->

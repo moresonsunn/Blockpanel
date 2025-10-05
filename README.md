@@ -35,7 +35,7 @@ Release tags (when pushing annotated git tags like `v0.1.0`) will also publish v
 - ANSI-colored console output with reset between power cycles
 - User authentication, roles, permissions, audit logging
 - Monitoring endpoints (system health, dashboard data, alerts)
-- AI error fixer scaffold (optional background monitoring)
+<!-- AI error fixer removed during cleanup -->
 
 ## Tech Stack
 - Backend: Python (FastAPI, SQLAlchemy, Docker SDK)

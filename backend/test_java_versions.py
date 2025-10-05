@@ -60,32 +60,6 @@ def test_java_versions():
     
     return len(available_versions) == len(java_versions)
 
-def test_ai_monitoring():
-    """Test AI monitoring functionality."""
-    print("\nTesting AI monitoring...")
-    print("=" * 50)
-    
-    try:
-        from ai_error_fixer import start_ai_monitoring, stop_ai_monitoring, get_ai_status
-        
-        # Start monitoring
-        print("Starting AI monitoring...")
-        start_ai_monitoring()
-        
-        # Get status
-        status = get_ai_status()
-        print(f"AI monitoring status: {status}")
-        
-        # Stop monitoring
-        print("Stopping AI monitoring...")
-        stop_ai_monitoring()
-        
-        print("✅ AI monitoring test completed successfully")
-        return True
-        
-    except Exception as e:
-        print(f"❌ AI monitoring test failed: {e}")
-        return False
 
 if __name__ == "__main__":
     print("Java Version and AI Monitoring Test")
@@ -94,17 +68,12 @@ if __name__ == "__main__":
     # Test Java versions
     java_success = test_java_versions()
     
-    # Test AI monitoring
-    ai_success = test_ai_monitoring()
     
     print("\n" + "=" * 50)
     print("Test Results:")
     print(f"Java versions: {'✅ PASS' if java_success else '❌ FAIL'}")
-    print(f"AI monitoring: {'✅ PASS' if ai_success else '❌ FAIL'}")
-    
-    if java_success and ai_success:
+    if java_success:
         print("\n🎉 All tests passed!")
         sys.exit(0)
-    else:
-        print("\n❌ Some tests failed!")
-        sys.exit(1)
+    print("\n❌ Some tests failed!")
+    sys.exit(1)

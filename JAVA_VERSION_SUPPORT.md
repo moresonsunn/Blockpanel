@@ -102,29 +102,7 @@ This will:
    - Try using a newer Java version for better performance
    - Java 21 offers the best performance for modern servers
 
-### AI Error Fixer Integration
-
-The AI error fixer automatically:
-- Detects Java version mismatches
-- Suggests appropriate Java versions
-- Can automatically switch Java versions if needed
-- Monitors for Java-related errors
-
-## Configuration
-
-The Java version selection can be configured in the AI error fixer config:
-
-```json
-{
-  "ai_error_fixer": {
-    "java_version_mapping": {
-      "legacy": "8",
-      "modern": "17", 
-      "latest": "21"
-    }
-  }
-}
-```
+<!-- AI Error Fixer integration and configuration removed -->
 
 ## Performance Comparison
 
@@ -152,4 +130,4 @@ When upgrading Java versions:
 4. **Update mods if necessary**
 5. **Adjust JVM arguments if needed**
 
-The AI error fixer will help automate this process and detect any issues during migration.
+<!-- AI-assisted migration note removed -->

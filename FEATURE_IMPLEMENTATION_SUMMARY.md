@@ -146,12 +146,11 @@ pip install 'bcrypt==4.0.1'
 ## 🆚 **COMPARISON: Your Controller vs Crafty Controller**
 
 ### ✅ **Features You Have That Crafty Doesn't**
-1. **AI-Powered Error Detection & Fixing** 🤖
-2. **Advanced Java Version Management** ☕ (8, 11, 17, 21)
-3. **Modern Docker Architecture** 🐳
-4. **Automatic Loader Version Detection** 📦
-5. **Smart Java Version Auto-Selection** 🧠
-6. **Template System with Import/Export** 📄
+1. **Advanced Java Version Management** ☕ (8, 11, 17, 21)
+2. **Modern Docker Architecture** 🐳
+3. **Automatic Loader Version Detection** 📦
+4. **Smart Java Version Auto-Selection** 🧠
+5. **Template System with Import/Export** 📄
 
 ### ✅ **Features Now Matching Crafty Controller**
 1. **User Authentication & Roles** ✅
@@ -290,7 +289,7 @@ Deprecated: templates-related endpoints have been removed.
 You now have a **production-ready Minecraft server management system** that:
 
 ✅ **Matches Crafty Controller's core features**  
-✅ **Exceeds Crafty with unique AI-powered capabilities**  
+<!-- AI capabilities claim removed -->
 ✅ **Uses modern architecture (Docker + FastAPI + React)**  
 ✅ **Supports enterprise-grade user management**  
 ✅ **Automates server maintenance tasks**  
