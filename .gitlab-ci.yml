@@ -5,7 +5,7 @@ stages:
 
 # Global variables (tweak as needed)
 variables:
-  PYTHON_VERSION: "3.13"
+  PYTHON_VERSION: "3.13" # informational only; image tag explicitly set where needed
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   DOCKER_DRIVER: overlay2
   DOCKER_TLS_CERTDIR: ""  # Disable TLS for docker:dind
@@ -23,7 +23,8 @@ cache:
 
 test:backend:
   stage: test
-  image: python:${PYTHON_VERSION}-slim
+  # GitLab does not expand CI variables in the image field reliably; use explicit tag
+  image: python:3.13-slim
   <<: *default_rules
   before_script:
     - python -m pip install --upgrade pip
