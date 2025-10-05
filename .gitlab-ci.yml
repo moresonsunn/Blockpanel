@@ -1,4 +1,155 @@
-stages: [test, build, release]
+stages:
+  - test
+  - build
+  - release
+
+# Global variables (tweak as needed)
+variables:
+  PYTHON_VERSION: "3.13"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""  # Disable TLS for docker:dind
+  # Customize image name if you also push to Docker Hub (set DOCKERHUB_* variables in CI settings)
+  DOCKERHUB_REPO: "blockypanel/blockpanel"  # Optional; override in project CI/CD variables
+
+cache:
+  paths:
+    - .cache/pip
+
+.default_rules: &default_rules
+  rules:
+    - if: $CI_COMMIT_TAG  # run on tags
+    - if: $CI_COMMIT_BRANCH == "main"  # and on main branch
+
+test:backend:
+  stage: test
+  image: python:${PYTHON_VERSION}-slim
+  <<: *default_rules
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r backend/requirements.txt
+    - pip install pytest
+  script:
+    # Skip Java heavy tests by default to keep pipeline fast; adjust as needed
+    - pytest -q -k "not test_java_version" backend || (echo "Tests failed" && exit 1)
+  artifacts:
+    when: always
+    reports:
+      junit: junit-report.xml
+    paths:
+      - junit-report.xml
+
+build:image:
+  stage: build
+  image: docker:27
+  services:
+    - name: docker:27-dind
+      command: ["--registry-mirror=https://registry-1.docker.io"]
+  needs:
+    - test:backend
+  <<: *default_rules
+  variables:
+    # Ensure buildx is isolated per job
+    DOCKER_BUILDKIT: "1"
+  before_script:
+    - docker info
+    # Enable buildx
+    - docker buildx create --name ci-builder --use
+    - docker buildx inspect --bootstrap
+    # Login to GitLab registry (built-in credentials)
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    # Optional Docker Hub login if variables provided
+    - |
+      if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_PASSWORD" ]; then \
+        echo "Logging into Docker Hub"; \
+        echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin; \
+      else \
+        echo "Docker Hub credentials not provided; skipping Hub login"; \
+      fi
+  script:
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then VERSION=${CI_COMMIT_TAG#v}; else VERSION="${CI_COMMIT_SHORT_SHA}"; fi
+      echo "Building version: $VERSION"
+      GIT_SHA=$CI_COMMIT_SHORT_SHA
+      # Build & push multi-arch to GitLab registry
+      docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        -t "$CI_REGISTRY_IMAGE:$VERSION" \
+        -t "$CI_REGISTRY_IMAGE:latest" \
+        --build-arg APP_VERSION=$VERSION \
+        --build-arg GIT_COMMIT=$GIT_SHA \
+        --push .
+      # Optionally also push to Docker Hub mirror repo
+      if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_PASSWORD" ]; then \
+        docker buildx build \
+          --platform linux/amd64,linux/arm64 \
+          -t "$DOCKERHUB_REPO:$VERSION" \
+          -t "$DOCKERHUB_REPO:latest" \
+          --build-arg APP_VERSION=$VERSION \
+          --build-arg GIT_COMMIT=$GIT_SHA \
+          --push .; \
+      fi
+    - echo $VERSION > build_version.txt
+  artifacts:
+    paths:
+      - build_version.txt
+
+release:
+  stage: release
+  image: alpine:3.19
+  needs:
+    - build:image
+  rules:
+    - if: $CI_COMMIT_TAG  # Only run on tags
+  script:
+    - echo "Preparing release notes"
+    - |
+      if [ -f CHANGELOG.md ]; then \
+        awk '/^## /{p++;} p==1{print}' CHANGELOG.md > RELEASE_NOTES.md || echo "Initial release" > RELEASE_NOTES.md; \
+      else \
+        echo "Initial release of project" > RELEASE_NOTES.md; \
+      fi
+    - echo "Release notes:" && cat RELEASE_NOTES.md
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: "Release $CI_COMMIT_TAG"
+    description: RELEASE_NOTES.md
+    assets:
+      links:
+        - name: Multi-arch Image (latest)
+          url: "$CI_REGISTRY_IMAGE:latest"
+        - name: Versioned Image
+          url: "$CI_REGISTRY_IMAGE:${CI_COMMIT_TAG#v}"
+  artifacts:
+    paths:
+      - RELEASE_NOTES.md
+
+# Optional manual job to trigger a dry run build without pushing
+build:dry-run:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  rules:
+    - when: manual
+  script:
+    - docker buildx create --name ci-builder --use
+    - docker buildx inspect --bootstrap
+    - docker buildx build --platform linux/amd64 -t test-build:dry-run --load .
+    - docker images | grep test-build || true
+
+############################################################
+# Setup Instructions (Documentation Inline)
+# 1. In GitLab project Settings > CI/CD > Variables add (masked):
+#    - DOCKERHUB_USERNAME (optional)
+#    - DOCKERHUB_PASSWORD (optional)
+# 2. Enable Container Registry in project settings.
+# 3. Commit this file to main before tagging a release.
+# 4. Create first release tag locally:
+#       git tag -a v0.1.0 -m "Initial release"
+#       git push origin v0.1.0
+# 5. Pipeline will build & publish images and create a GitLab Release.
+############################################################stages: [test, build, release]
 
 variables:
   DOCKER_TLS_CERTDIR: ""
