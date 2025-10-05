@@ -150,15 +150,8 @@ _docker_manager: DockerManager | None = None
 def get_docker_manager() -> DockerManager:
     global _docker_manager
     if _docker_manager is None:
-        ## AI Error Fixer feature has been removed.
-            "loader_site_url": loader_site_url,
-        }
-        payload.update(extra)
-        return payload
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        _docker_manager = DockerManager()
+    return _docker_manager
 
 
 @app.get("/servers")
