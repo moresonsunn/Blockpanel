@@ -79,7 +79,7 @@ build:image:
       [ -f "$CONTROLLER_DOCKERFILE" ] || { echo "Missing $CONTROLLER_DOCKERFILE"; exit 1; }
       [ -f "$RUNTIME_DOCKERFILE" ] || { echo "Missing $RUNTIME_DOCKERFILE"; exit 1; }
       CONTROLLER_IMAGE="$CI_REGISTRY_IMAGE"
-    RUNTIME_IMAGE="${CI_REGISTRY_IMAGE}/runtime"
+      RUNTIME_IMAGE="${CI_REGISTRY_IMAGE}/runtime"
       echo "Controller image: $CONTROLLER_IMAGE"; echo "Runtime image: $RUNTIME_IMAGE"
       # Build controller (API + frontend static files)
       docker buildx build \
@@ -157,10 +157,11 @@ build:dry-run:
   rules:
     - when: manual
   script:
-    - docker buildx create --name ci-builder --use
+    - docker buildx create --name ci-builder --use || docker buildx use ci-builder
     - docker buildx inspect --bootstrap
-    - docker buildx build --platform linux/amd64 -t test-build:dry-run --load .
-    - docker images | grep test-build || true
+    - echo "Dry-run build using controller Dockerfile (no push)"
+    - docker buildx build --platform linux/amd64 -f docker/controller.Dockerfile -t test-build:dry-run --load .
+    - docker images | grep test-build:dry-run || true
 
 ############################################################
 # Setup Instructions (Documentation Inline)
