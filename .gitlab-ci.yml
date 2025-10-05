@@ -79,7 +79,11 @@ build:image:
       [ -f "$CONTROLLER_DOCKERFILE" ] || { echo "Missing $CONTROLLER_DOCKERFILE"; exit 1; }
       [ -f "$RUNTIME_DOCKERFILE" ] || { echo "Missing $RUNTIME_DOCKERFILE"; exit 1; }
       CONTROLLER_IMAGE="$CI_REGISTRY_IMAGE"
-      RUNTIME_IMAGE="${CI_REGISTRY_IMAGE}-runtime"
+  # Use a sub-repository path within the same project for the runtime image.
+  # Previous form used a hyphen (project-runtime) which pointed to a different project path
+  # and caused: push access denied, repository does not exist or may require authorization.
+  # Correct form: registry.gitlab.com/namespace/project/runtime:tag
+  RUNTIME_IMAGE="${CI_REGISTRY_IMAGE}/runtime"
       echo "Controller image: $CONTROLLER_IMAGE"; echo "Runtime image: $RUNTIME_IMAGE"
       # Build controller (API + frontend static files)
       docker buildx build \
@@ -140,6 +144,10 @@ release:
           url: "$CI_REGISTRY_IMAGE:latest"
         - name: Versioned Image
           url: "$CI_REGISTRY_IMAGE:${CI_COMMIT_TAG#v}"
+        - name: Runtime Multi-arch Image (latest)
+          url: "$CI_REGISTRY_IMAGE/runtime:latest"
+        - name: Runtime Versioned Image
+          url: "$CI_REGISTRY_IMAGE/runtime:${CI_COMMIT_TAG#v}"
   artifacts:
     paths:
       - RELEASE_NOTES.md
