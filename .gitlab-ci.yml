@@ -52,10 +52,12 @@ build:image:
   variables:
     # Ensure buildx is isolated per job
     DOCKER_BUILDKIT: "1"
+    CONTROLLER_DOCKERFILE: docker/controller.Dockerfile
+    RUNTIME_DOCKERFILE: docker/runtime.Dockerfile
   before_script:
     - docker info
     # Enable buildx
-    - docker buildx create --name ci-builder --use
+    - docker buildx create --name ci-builder --use || docker buildx use ci-builder
     - docker buildx inspect --bootstrap
     # Login to GitLab registry (built-in credentials)
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
@@ -69,31 +71,48 @@ build:image:
       fi
   script:
     - |
+      # Determine version/tag
       if [ -n "$CI_COMMIT_TAG" ]; then VERSION=${CI_COMMIT_TAG#v}; else VERSION="${CI_COMMIT_SHORT_SHA}"; fi
-      echo "Building version: $VERSION"
       GIT_SHA=$CI_COMMIT_SHORT_SHA
-      # Build & push multi-arch to GitLab registry
+      echo "Building BlockPanel images version: $VERSION (commit $GIT_SHA)"
+      # Ensure Dockerfiles exist
+      [ -f "$CONTROLLER_DOCKERFILE" ] || { echo "Missing $CONTROLLER_DOCKERFILE"; exit 1; }
+      [ -f "$RUNTIME_DOCKERFILE" ] || { echo "Missing $RUNTIME_DOCKERFILE"; exit 1; }
+      CONTROLLER_IMAGE="$CI_REGISTRY_IMAGE"
+      RUNTIME_IMAGE="${CI_REGISTRY_IMAGE}-runtime"
+      echo "Controller image: $CONTROLLER_IMAGE"; echo "Runtime image: $RUNTIME_IMAGE"
+      # Build controller (API + frontend static files)
       docker buildx build \
         --platform linux/amd64,linux/arm64 \
-        -t "$CI_REGISTRY_IMAGE:$VERSION" \
-        -t "$CI_REGISTRY_IMAGE:latest" \
+        -f "$CONTROLLER_DOCKERFILE" \
+        -t "$CONTROLLER_IMAGE:$VERSION" \
+        -t "$CONTROLLER_IMAGE:latest" \
         --build-arg APP_VERSION=$VERSION \
         --build-arg GIT_COMMIT=$GIT_SHA \
         --push .
-      # Optionally also push to Docker Hub mirror repo
+      # Build runtime (multi-Java runtime)
+      docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        -f "$RUNTIME_DOCKERFILE" \
+        -t "$RUNTIME_IMAGE:$VERSION" \
+        -t "$RUNTIME_IMAGE:latest" \
+        --build-arg APP_VERSION=$VERSION \
+        --build-arg GIT_COMMIT=$GIT_SHA \
+        --push .
+      # Optional Docker Hub mirror (controller only, extend as needed)
       if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_PASSWORD" ]; then \
-        docker buildx build \
-          --platform linux/amd64,linux/arm64 \
-          -t "$DOCKERHUB_REPO:$VERSION" \
-          -t "$DOCKERHUB_REPO:latest" \
-          --build-arg APP_VERSION=$VERSION \
-          --build-arg GIT_COMMIT=$GIT_SHA \
-          --push .; \
+        docker buildx build --platform linux/amd64,linux/arm64 -f "$CONTROLLER_DOCKERFILE" \
+          -t "$DOCKERHUB_REPO:$VERSION" -t "$DOCKERHUB_REPO:latest" \
+          --build-arg APP_VERSION=$VERSION --build-arg GIT_COMMIT=$GIT_SHA --push .; \
       fi
-    - echo $VERSION > build_version.txt
+      echo $VERSION > build_version.txt
+      echo $CONTROLLER_IMAGE > controller_image.txt
+      echo $RUNTIME_IMAGE > runtime_image.txt
   artifacts:
     paths:
       - build_version.txt
+      - controller_image.txt
+      - runtime_image.txt
 
 release:
   stage: release
