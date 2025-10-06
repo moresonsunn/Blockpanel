@@ -79,10 +79,10 @@ build:image:
       if [ -n "$CI_COMMIT_TAG" ]; then VERSION=${CI_COMMIT_TAG#v}; else VERSION="${CI_COMMIT_SHORT_SHA}"; fi
       GIT_SHA=$CI_COMMIT_SHORT_SHA
       echo "Building BlockPanel images version: $VERSION (commit $GIT_SHA)"
-  # Derive Docker Hub repo names if not explicitly provided
-  : "${DOCKERHUB_NAMESPACE:=moresonsun}"
-  if [ -z "$DOCKERHUB_REPO" ]; then DOCKERHUB_REPO="${DOCKERHUB_NAMESPACE}/blockypanel"; fi
-  if [ -z "$DOCKERHUB_RUNTIME_REPO" ]; then DOCKERHUB_RUNTIME_REPO="${DOCKERHUB_NAMESPACE}/blockypanel-runtime"; fi
+      # Derive Docker Hub repo names if not explicitly provided (run-time logic)
+      : "${DOCKERHUB_NAMESPACE:=moresonsun}"
+      if [ -z "$DOCKERHUB_REPO" ]; then DOCKERHUB_REPO="${DOCKERHUB_NAMESPACE}/blockypanel"; fi
+      if [ -z "$DOCKERHUB_RUNTIME_REPO" ]; then DOCKERHUB_RUNTIME_REPO="${DOCKERHUB_NAMESPACE}/blockypanel-runtime"; fi
       # Ensure Dockerfiles exist
       [ -f "$CONTROLLER_DOCKERFILE" ] || { echo "Missing $CONTROLLER_DOCKERFILE"; exit 1; }
       [ -f "$RUNTIME_DOCKERFILE" ] || { echo "Missing $RUNTIME_DOCKERFILE"; exit 1; }
