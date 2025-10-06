@@ -206,6 +206,16 @@ def suggest_port(
     except Exception as e:
         raise HTTPException(status_code=503, detail=str(e))
 
+class ServerCreateRequest(BaseModel):
+    name: str
+    type: str  # e.g. vanilla, paper, purpur, fabric, forge, neoforge
+    version: str  # minecraft version (e.g. 1.21.1)
+    host_port: int
+    loader_version: str | None = None  # specific loader build (fabric/forge/etc.)
+    installer_version: str | None = None  # for installers that have separate versioning
+    min_ram: int | str = 1024  # MB or string like "512M"
+    max_ram: int | str = 2048  # MB or string like "2G"
+
 @app.post("/servers")
 def create_server(req: ServerCreateRequest, current_user: User = Depends(require_auth)):
     try:
