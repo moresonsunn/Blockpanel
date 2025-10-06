@@ -14,7 +14,7 @@
 
 services:
   controller:
-    image: ${BLOCKPANEL_IMAGE:-blockypanel/blockpanel}:${BLOCKPANEL_TAG:-latest}
+    image: ${BLOCKPANEL_IMAGE:-moresonsun/blockypanel}:${BLOCKPANEL_TAG:-latest}
     container_name: blockpanel
     env_file:
       - .env
@@ -69,7 +69,7 @@ services:
       - internal
 
   runtime_prewarm:
-    image: ${BLOCKPANEL_RUNTIME_IMAGE:-blockypanel/blockpanel-runtime}:${BLOCKPANEL_TAG:-latest}
+    image: ${BLOCKPANEL_RUNTIME_IMAGE:-moresonsun/blockypanel-runtime}:${BLOCKPANEL_TAG:-latest}
     container_name: blockpanel-runtime-prewarm
     command: ["true"]
     restart: "no"

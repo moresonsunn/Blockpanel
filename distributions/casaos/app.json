@@ -26,7 +26,7 @@
   "services": [
     {
       "name": "blockpanel",
-  "image": "blockypanel/blockpanel:v0.2.1",
+  "image": "moresonsun/blockypanel:v0.2.1",
       "container_name": "blockpanel",
       "ports": ["8000:8000"],
       "volumes": [

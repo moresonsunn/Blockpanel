@@ -26,6 +26,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = 'blockypanel/Blockpanel'
+$namespace = $env:BLOCKPANEL_NAMESPACE
+if (-not $namespace -or $namespace -eq '') { $namespace = 'moresonsun' }
 $branch = 'main'
 $rawBase = "https://raw.githubusercontent.com/$repo/$branch"
 
@@ -53,10 +55,10 @@ Invoke-Step 'Download docker-compose.yml' { Invoke-WebRequest -Uri $composeUrl -
 if (-not $Edge -and $Version) {
   Write-Host "Pinning images to $Version" -ForegroundColor Green
   Invoke-Step 'Replace controller image tag' {
-    (Get-Content docker-compose.yml) -replace 'blockypanel/blockpanel:latest', "blockypanel/blockpanel:$Version" | Set-Content docker-compose.yml
+    (Get-Content docker-compose.yml) -replace "$namespace/blockypanel:latest", "$namespace/blockypanel:$Version" | Set-Content docker-compose.yml
   }
   Invoke-Step 'Replace runtime image tag' {
-    (Get-Content docker-compose.yml) -replace 'blockypanel/blockpanel-runtime:latest', "blockypanel/blockpanel-runtime:$Version" | Set-Content docker-compose.yml
+    (Get-Content docker-compose.yml) -replace "$namespace/blockypanel-runtime:latest", "$namespace/blockypanel-runtime:$Version" | Set-Content docker-compose.yml
   }
   Invoke-Step 'Replace APP_VERSION env' {
     (Get-Content docker-compose.yml) -replace 'APP_VERSION=v[0-9A-Za-z\.\-]+', "APP_VERSION=$Version" | Set-Content docker-compose.yml

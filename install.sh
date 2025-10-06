@@ -19,7 +19,8 @@ NO_START="false"
 EDGE="false"
 DRY="false"
 SKIP_CHOWN="false"
-GITHUB_REPO="blockypanel/Blockpanel"
+GITHUB_REPO="blockypanel/Blockpanel"  # Source repository (GitHub)
+NAMESPACE="${BLOCKPANEL_NAMESPACE:-moresonsun}"  # Docker image namespace (override with BLOCKPANEL_NAMESPACE env)
 RAW_BASE="https://raw.githubusercontent.com/${GITHUB_REPO}"
 BRANCH="main"
 
@@ -63,8 +64,8 @@ run curl -fsSL "$COMPOSE_URL" -o docker-compose.yml
 if [[ "$EDGE" == "false" && -n "$VERSION" ]]; then
   echo "Pinning images to $VERSION"
   # Replace :latest with :$VERSION for controller and runtime images
-  run sed -i.bak "s#blockypanel/blockpanel:latest#blockypanel/blockpanel:${VERSION}#" docker-compose.yml
-  run sed -i.bak "s#blockypanel/blockpanel-runtime:latest#blockypanel/blockpanel-runtime:${VERSION}#" docker-compose.yml
+  run sed -i.bak "s#${NAMESPACE}/blockypanel:latest#${NAMESPACE}/blockypanel:${VERSION}#" docker-compose.yml || true
+  run sed -i.bak "s#${NAMESPACE}/blockypanel-runtime:latest#${NAMESPACE}/blockypanel-runtime:${VERSION}#" docker-compose.yml || true
   # Replace APP_VERSION env if present
   run sed -i.bak "s#APP_VERSION=v[^\n]*#APP_VERSION=${VERSION}#" docker-compose.yml || true
 fi

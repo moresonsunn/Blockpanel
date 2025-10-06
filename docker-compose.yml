@@ -1,13 +1,13 @@
 services:
   # Pre-pull runtime image (optional warm cache). Controller spawns per-server containers using this image.
   runtime_prewarm:
-    image: blockypanel/blockpanel-runtime:latest
+    image: moresonsun/blockypanel-runtime:latest
     container_name: blockpanel-runtime-prewarm
     command: ["true"]
     restart: "no"
 
   controller:
-    image: blockypanel/blockpanel:latest
+    image: moresonsun/blockypanel:latest
     container_name: blockpanel
     ports:
       - "8000:8000"

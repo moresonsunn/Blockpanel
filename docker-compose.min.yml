@@ -1,6 +1,6 @@
 services:
   controller:
-    image: blockypanel/blockpanel:latest
+    image: moresonsun/blockypanel:latest
     container_name: blockpanel
     ports:
       - "8000:8000"

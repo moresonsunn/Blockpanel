@@ -2,7 +2,7 @@
 
 ![GitLab CI](https://gitlab.com/kyzen4/blockpanel/badges/main/pipeline.svg)
 ![GitHub CI](https://github.com/blockypanel/Blockpanel/actions/workflows/ci.yml/badge.svg)
-![Docker Pulls](https://img.shields.io/docker/pulls/blockypanel/blockpanel)
+![Docker Pulls](https://img.shields.io/docker/pulls/moresonsun/blockypanel)
 ![Architecture](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-blue)
 
 BlockPanel is a modern web-based controller to create, manage, monitor, and automate multiple Minecraft servers using Docker containers. Inspired by Crafty but focused on:
@@ -14,9 +14,11 @@ BlockPanel is a modern web-based controller to create, manage, monitor, and auto
 - Role & permission management (users, roles, audit logs)
 - REST API + future extensibility
 
-Docker images (multi-arch: linux/amd64 + linux/arm64) are automatically published:
-- Controller UI/API: `blockypanel/blockpanel:latest`
-- Runtime (Java server runner base): `blockypanel/blockpanel-runtime:latest`
+Docker images (multi-arch: linux/amd64 + linux/arm64) are automatically published (default namespace: `moresonsun`):
+- Controller UI/API: `moresonsun/blockypanel:latest`
+- Runtime (Java server runner base): `moresonsun/blockypanel-runtime:latest`
+
+Brand / Org Override: If/when a dedicated Docker Hub org `blockypanel` is created, set `DOCKERHUB_NAMESPACE=blockypanel` (or explicitly set `DOCKERHUB_REPO` / `DOCKERHUB_RUNTIME_REPO`) in CI to publish under that namespace without code changes.
 
 GitLab Container Registry (when pipeline runs with `GITLAB_PUSH=true`):
 - Controller: `registry.gitlab.com/kyzen4/blockpanel/blockpanel:latest`
@@ -61,20 +63,20 @@ minecraft-server/
 
 1. Clone repo (optional if just using images):
 ```
-git clone https://github.com/blockypanel/Blockpanel.git
+git clone https://github.com/blockypanel/Blockpanel.git  # (Repo path stable even if Docker namespace differs)
 cd Blockpanel
 ```
 2. Pull images:
 ```
-docker pull blockypanel/blockpanel:latest
-docker pull blockypanel/blockpanel-runtime:latest
+docker pull moresonsun/blockypanel:latest
+docker pull moresonsun/blockypanel-runtime:latest
 ```
   Or from GitLab registry (if enabled & pushed):
 ```
 docker pull registry.gitlab.com/kyzen4/blockpanel/blockpanel:latest
 docker pull registry.gitlab.com/kyzen4/blockpanel/blockpanel-runtime:latest
 ```
-3. (Optional) Adjust `docker-compose.yml` to use `blockypanel/blockpanel` & `blockypanel/blockpanel-runtime` if not already.
+3. (Optional) Adjust `docker-compose.yml` to pin a version tag instead of :latest (images default to `moresonsun/*`).
 4. Launch:
 ```
 docker compose up -d
@@ -107,7 +109,7 @@ docker build -t blockpanel:dev -f docker/controller.Dockerfile .
 The CI workflow uses `docker/setup-buildx-action` and `docker/build-push-action` to publish `linux/amd64, linux/arm64` manifests. Local multi-arch emulate build example:
 ```
 docker buildx create --name bp --use
-docker buildx build -f docker/runtime.Dockerfile -t blockypanel/blockpanel-runtime:test --platform linux/amd64,linux/arm64 --push .
+docker buildx build -f docker/runtime.Dockerfile -t moresonsun/blockypanel-runtime:test --platform linux/amd64,linux/arm64 --push .
 ```
 
 ## Releasing
@@ -133,20 +135,20 @@ Run a tagged release on either platform (`vX.Y.Z`) to produce versioned images i
 
 Pulling by version:
 ```
-docker pull blockypanel/blockpanel:v0.1.1
+docker pull moresonsun/blockypanel:v0.1.1
 docker pull registry.gitlab.com/kyzen4/blockpanel/blockpanel:v0.1.1
 ```
 
-## Migration Notice (Repository & Image Renaming)
+## Namespace & Branding Strategy
 
-The project repository moved to `blockypanel/Blockpanel` and Docker images were renamed from the `moresonsun/*` namespace to `blockypanel/*`.
+Current Docker Hub default namespace: `moresonsun`.
 
-Old image names still work only until deprecation (if tags remain); update any scripts:
-```
-sed -i 's/moresonsun\/blockpanel/blockypanel\/blockpanel/g' docker-compose.yml
-sed -i 's/moresonsun\/blockpanel-runtime/blockypanel\/blockpanel-runtime/g' docker-compose.yml
-```
-If using the installation script, pull a fresh copy (it now points to the new repo and image names).
+Future branding (planned): a dedicated `blockypanel` organization. When ready:
+1. Create org + public repos `blockpanel` and `blockpanel-runtime`.
+2. In CI/CD variables set `DOCKERHUB_NAMESPACE=blockypanel` (or explicit `DOCKERHUB_REPO` / `DOCKERHUB_RUNTIME_REPO`).
+3. Tag a new release; images will appear under the new org while existing tags in `moresonsun/*` remain for backwards compatibility.
+
+Consumers who want to stay on the old namespace need not change anything until you announce deprecation.
 
 ## Roadmap (Excerpt)
 - Websocket or SSE live logs (reduce polling)
@@ -164,7 +166,7 @@ Currently unlicensed (all rights reserved) unless updated. Add a LICENSE file be
 > Ultra-Quick Install (Controller only, ephemeral DB fallback)
 >
 > 1. Pull image (or rely on on-demand pull):
->    docker pull blockypanel/blockpanel:latest
+>    docker pull moresonsun/blockypanel:latest
 > 2. Start with compose (build not required unless modifying source):
 >    curl -L https://raw.githubusercontent.com/blockypanel/Blockpanel/main/docker-compose.min.yml -o docker-compose.yml
 >    docker compose up -d controller
