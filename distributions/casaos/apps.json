@@ -3,7 +3,7 @@
     "id": "blockpanel",
     "title": "BlockPanel",
     "description": "Manage multiple Minecraft servers with a web UI.",
-    "version": "v0.2.1",
+  "version": "v0.1.0",
   "icon": "https://raw.githubusercontent.com/blockypanel/Blockpanel/main/frontend/public/favicon.ico",
     "index": "app.json"
   }
