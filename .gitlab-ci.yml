@@ -11,6 +11,7 @@ variables:
   DOCKER_TLS_CERTDIR: ""  # Disable TLS for docker:dind
   # Customize image name if you also push to Docker Hub (set DOCKERHUB_* variables in CI settings)
   DOCKERHUB_REPO: "blockypanel/blockpanel"  # Optional; override in project CI/CD variables
+  DOCKERHUB_RUNTIME_REPO: "blockypanel/blockpanel-runtime"  # Optional; runtime image mirror repo
 
 cache:
   paths:
@@ -101,8 +102,13 @@ build:image:
         --push .
       # Optional Docker Hub mirror (controller only, extend as needed)
       if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_PASSWORD" ]; then \
+        echo "Mirroring controller image to Docker Hub: $DOCKERHUB_REPO"; \
         docker buildx build --platform linux/amd64,linux/arm64 -f "$CONTROLLER_DOCKERFILE" \
           -t "$DOCKERHUB_REPO:$VERSION" -t "$DOCKERHUB_REPO:latest" \
+          --build-arg APP_VERSION=$VERSION --build-arg GIT_COMMIT=$GIT_SHA --push .; \
+        echo "Mirroring runtime image to Docker Hub: $DOCKERHUB_RUNTIME_REPO"; \
+        docker buildx build --platform linux/amd64,linux/arm64 -f "$RUNTIME_DOCKERFILE" \
+          -t "$DOCKERHUB_RUNTIME_REPO:$VERSION" -t "$DOCKERHUB_RUNTIME_REPO:latest" \
           --build-arg APP_VERSION=$VERSION --build-arg GIT_COMMIT=$GIT_SHA --push .; \
       fi
       echo $VERSION > build_version.txt
