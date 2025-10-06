@@ -1,0 +1,13 @@
+# Local development override to avoid pulling remote images that do not yet exist.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build controller db
+#   (Add --profile prewarm if you also want to build the runtime prewarm image locally.)
+
+services:
+  controller:
+    # Force a purely local tag to prevent remote pull attempts
+    image: blockpanel-dev-controller:latest
+    pull_policy: never
+  runtime_prewarm:
+    image: blockpanel-dev-runtime:latest
+    pull_policy: never
