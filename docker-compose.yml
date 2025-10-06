@@ -1,13 +1,14 @@
 services:
-  # Pre-pull runtime image (optional warm cache). Controller spawns per-server containers using this image.
+  # Optional pre-pull of runtime image (can be disabled or moved to a profile)
   runtime_prewarm:
-    image: moresonsun/blockypanel-runtime:latest
+    image: ${BLOCKPANEL_RUNTIME_IMAGE:-moresonsun/blockypanel-runtime}:${BLOCKPANEL_TAG:-latest}
     container_name: blockpanel-runtime-prewarm
     command: ["true"]
     restart: "no"
+    profiles: [prewarm]
 
   controller:
-    image: moresonsun/blockypanel:latest
+    image: ${BLOCKPANEL_IMAGE:-moresonsun/blockypanel}:${BLOCKPANEL_TAG:-latest}
     container_name: blockpanel
     ports:
       - "8000:8000"
@@ -24,8 +25,8 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres123@db:5432/minecraft_controller
     restart: unless-stopped
     depends_on:
-      - runtime_prewarm
       - db
+      # runtime_prewarm is optional; if you want to force it, include the profile or remove this comment
 
   db:
     image: postgres:15-alpine
