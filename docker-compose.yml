@@ -6,10 +6,16 @@ services:
     command: ["true"]
     restart: "no"
     profiles: [prewarm]
+    build:
+      context: .
+      dockerfile: docker/runtime.Dockerfile
 
   controller:
     image: ${BLOCKPANEL_IMAGE:-moresonsun/blockypanel}:${BLOCKPANEL_TAG:-latest}
     container_name: blockpanel
+    build:
+      context: .
+      dockerfile: docker/controller.Dockerfile
     ports:
       - "8000:8000"
     volumes:
