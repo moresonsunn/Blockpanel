@@ -85,6 +85,70 @@ docker compose up -d
 
 Data persists under `./data/servers/` (or mapped volume). Each server runs in its own container created by the controller using the runtime image.
 
+## Local Development With No Published Images Yet (dev override)
+If the public images (e.g. `moresonsun/blockypanel:latest`) are not published yet or you are iterating locally, use the provided override file to force purely local image tags and skip remote pulls.
+
+1. Build (optional: compose will build if missing):
+```
+docker build -f docker/controller.Dockerfile -t blockpanel-dev-controller:latest .
+docker build -f docker/runtime.Dockerfile -t blockpanel-dev-runtime:latest .
+```
+2. Start controller + Postgres using override:
+```
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d controller db
+```
+3. (Optional) Prewarm runtime image (builds the runtime image locally):
+```
+docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile prewarm up -d runtime_prewarm
+```
+
+What the override (`docker-compose.dev.yml`) does:
+- Replaces image references with `blockpanel-dev-*` tags
+- Sets `pull_policy: never` so compose does not attempt a registry pull
+- Still reuses the build section from the base file so `--build` or missing images will trigger a local build
+
+To revert to using the real registry images, simply omit the override file in subsequent compose commands.
+
+## Troubleshooting: `protocol not available` During `docker compose up --build`
+On some Docker Desktop / Windows setups, especially when BuildKit or buildx integration is in a transient state, you may see an immediate `protocol not available` with a 0/0 build graph.
+
+Common causes & fixes:
+- BuildKit temporarily unhappy / stale builder context.
+  Fix: Restart Docker Desktop OR run:
+  ```
+  docker buildx inspect --bootstrap
+  docker buildx ls
+  ```
+- Disabled BuildKit via environment variables (`DOCKER_BUILDKIT=0` or `COMPOSE_DOCKER_CLI_BUILD=0`). These disable optimized builds and can surface obscure errors.
+  Fix: Remove or unset those vars in your shell and retry.
+- Outdated Docker Desktop (older Compose versions had occasional WSL2 socket glitches).
+  Fix: Update Docker Desktop.
+- Corrupted buildx builder instance.
+  Fix:
+  ```
+  docker buildx rm blockpanelx  # or the failing builder name
+  docker buildx create --name blockpanelx --use
+  docker buildx inspect --bootstrap
+  ```
+- WSL2 backend networking hiccup (less common now).
+  Fix: `wsl --shutdown` from an elevated PowerShell, then restart Docker Desktop.
+
+If the error occurs only with the dev override + `--build` but manual `docker build` works:
+1. Ensure BuildKit is enabled (unset `DOCKER_BUILDKIT` or set it to `1`).
+2. Run a manual build once (as you did) to populate the local image, then `docker compose ... up -d` without `--build` while you diagnose.
+3. Run `docker compose config` to confirm the merged file shows the expected `blockpanel-dev-controller:latest` image and not the remote one.
+
+If problems persist, capture:
+```
+docker version
+docker buildx ls
+docker compose version
+docker compose -f docker-compose.yml -f docker-compose.dev.yml config
+```
+And open an issue with that output.
+
+## Environment Variables
+
 ## Environment Variables
 | Variable | Purpose | Default |
 |----------|---------|---------|
