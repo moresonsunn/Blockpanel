@@ -128,19 +128,24 @@ jobs:
           APP_VERSION="${SHORT_SHA}"
         fi
         echo "app_version=${APP_VERSION}" >> $GITHUB_OUTPUT
-        # Decide whether to push (only when we have creds AND this is not a pull_request from fork)
+        # Decide whether to push (need creds; skip external PRs)
         if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
           SHOULD_PUSH=false
+          PUSH_REASON="external pull request"
         else
-          if [[ "${{ secrets.DOCKERHUB_USERNAME }}" != "" && "${{ secrets.DOCKERHUB_TOKEN }}" != "" ]]; then
+          if [[ -n "${{ secrets.DOCKERHUB_TOKEN }}" && ( -n "${{ secrets.DOCKERHUB_NAMESPACE }}" || -n "${{ secrets.DOCKERHUB_USERNAME }}" ) ]]; then
             SHOULD_PUSH=true
+            PUSH_REASON="credentials present"
           else
             SHOULD_PUSH=false
+            PUSH_REASON="missing creds (DOCKERHUB_TOKEN / NAMESPACE or USERNAME)"
           fi
         fi
         echo "push_images=${SHOULD_PUSH}" >> $GITHUB_OUTPUT
-        # Image prefix always non-empty (fallback to 'local' to avoid leading slash tags)
-        if [[ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]]; then
+        # Image prefix preference: DOCKERHUB_NAMESPACE (org) > DOCKERHUB_USERNAME > local
+        if [[ -n "${{ secrets.DOCKERHUB_NAMESPACE }}" ]]; then
+          IMAGE_PREFIX="${{ secrets.DOCKERHUB_NAMESPACE }}"
+        elif [[ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]]; then
           IMAGE_PREFIX="${{ secrets.DOCKERHUB_USERNAME }}"
         else
           IMAGE_PREFIX="local"
@@ -152,6 +157,7 @@ jobs:
         else
           echo "include_release_tag=false" >> $GITHUB_OUTPUT
         fi
+        echo "Meta summary -> push_images=${SHOULD_PUSH} (${PUSH_REASON}); image_prefix=${IMAGE_PREFIX}; app_version=${APP_VERSION}" 
     
     - name: Build runtime image (multi-arch)
       uses: docker/build-push-action@v5
