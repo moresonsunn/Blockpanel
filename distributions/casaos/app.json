@@ -1,7 +1,7 @@
 {
   "id": "blockpanel",
   "title": "BlockPanel",
-  "version": "v0.1.0",
+  "version": "v0.1.1",
   "description": "Manage multiple Minecraft servers (Vanilla, Fabric, Forge, NeoForge, etc.) with a web UI.",
   "tagline": "Minecraft server controller",
   "author": "BlockPanel Team",
@@ -13,10 +13,9 @@
   "restart": "unless-stopped",
   "port_map": "8000",
   "arch": ["amd64", "arm64"],
-  "title_zh": "BlockPanel",
   "env": [
     {"name": "APP_NAME", "value": "BlockPanel"},
-  {"name": "APP_VERSION", "value": "v0.1.0"},
+    {"name": "APP_VERSION", "value": "v0.1.1"},
     {"name": "USE_POSTGRES", "value": "true"},
     {"name": "DATABASE_URL", "value": "postgresql://postgres:postgres123@db:5432/minecraft_controller"},
     {"name": "SERVERS_CONTAINER_ROOT", "value": "/data/servers"},
@@ -26,24 +25,21 @@
   "services": [
     {
       "name": "blockpanel",
-  "image": "moresonsun/blockypanel:v0.1.0",
+      "image": "moresonsun/blockypanel:v0.1.1",
       "container_name": "blockpanel",
       "ports": ["8000:8000"],
       "volumes": [
         {"container": "/data/servers", "host": "blockpanel_servers"},
         {"container": "/var/run/docker.sock", "host": "/var/run/docker.sock"}
       ],
+      "healthcheck": {
+        "test": ["CMD", "curl", "-f", "http://localhost:8000/health"],
+        "interval": "30s",
+        "timeout": "5s",
+        "retries": 5
+      },
       "depends_on": ["blockpanel-db"],
       "restart": "unless-stopped"
-    },
-    {
-      "name": "blockpanel-runtime-prewarm",
-      "image": "moresonsun/blockypanel-runtime:v0.1.0",
-      "container_name": "blockpanel-runtime-prewarm",
-      "command": ["true"],
-      "restart": "no",
-      "tips": "Optional: pulls the runtime image early so first server creation is faster. Safe to remove.",
-      "depends_on": []
     },
     {
       "name": "blockpanel-db",
@@ -57,6 +53,15 @@
         {"container": "/var/lib/postgresql/data", "host": "blockpanel_dbdata"}
       ],
       "restart": "unless-stopped"
+    },
+    {
+      "name": "blockpanel-runtime-prewarm",
+      "image": "moresonsun/blockypanel-runtime:v0.1.1",
+      "container_name": "blockpanel-runtime-prewarm",
+      "command": ["true"],
+      "restart": "no",
+      "tips": "Optional: pulls the runtime image early so first server creation is faster. Safe to remove.",
+      "depends_on": []
     }
   ],
   "tips": {
