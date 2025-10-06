@@ -32,6 +32,12 @@
         {"container": "/data/servers", "host": "blockpanel_servers"},
         {"container": "/var/run/docker.sock", "host": "/var/run/docker.sock"}
       ],
+      "healthcheck": {
+        "test": ["CMD", "curl", "-f", "http://localhost:8000/health"],
+        "interval": "30s",
+        "timeout": "5s",
+        "retries": 5
+      },
       "depends_on": ["blockpanel-db"],
       "restart": "unless-stopped"
     },

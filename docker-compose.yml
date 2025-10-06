@@ -30,6 +30,11 @@ services:
       - USE_POSTGRES=true
       - DATABASE_URL=postgresql://postgres:postgres123@db:5432/minecraft_controller
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
     depends_on:
       - db
       # runtime_prewarm is optional; if you want to force it, include the profile or remove this comment
