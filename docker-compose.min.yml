@@ -1,0 +1,18 @@
+services:
+  controller:
+    image: blockypanel/blockpanel:latest
+    container_name: blockpanel
+    ports:
+      - "8000:8000"
+    volumes:
+      - mc_servers_data:/data/servers
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - APP_NAME=BlockPanel
+      - USE_POSTGRES=false
+      - SERVERS_CONTAINER_ROOT=/data/servers
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  mc_servers_data:

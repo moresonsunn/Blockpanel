@@ -160,3 +160,16 @@ PRs and issues welcome. Keep changes small & focused. Include reproduction steps
 
 ## License
 Currently unlicensed (all rights reserved) unless updated. Add a LICENSE file before public distribution if desired.
+
+> Ultra-Quick Install (Controller only, ephemeral DB fallback)
+>
+> 1. Pull image (or rely on on-demand pull):
+>    docker pull blockypanel/blockpanel:latest
+> 2. Start with compose (build not required unless modifying source):
+>    curl -L https://raw.githubusercontent.com/blockypanel/Blockpanel/main/docker-compose.min.yml -o docker-compose.yml
+>    docker compose up -d controller
+>
+> Or if you cloned the repo already:
+>    docker compose up -d controller
+>
+> Need Postgres + runtime prewarm? Use the full docker-compose.yml in the repo instead of docker-compose.min.yml.
