@@ -158,6 +158,13 @@ jobs:
           echo "include_release_tag=false" >> $GITHUB_OUTPUT
         fi
         echo "Meta summary -> push_images=${SHOULD_PUSH} (${PUSH_REASON}); image_prefix=${IMAGE_PREFIX}; app_version=${APP_VERSION}" 
+
+    - name: Fail if release tag but cannot push images
+      if: steps.meta.outputs.is_release == 'true' && steps.meta.outputs.push_images == 'false'
+      run: |
+        echo "ERROR: This is a release tag but Docker Hub credentials are missing."
+        echo "Add DOCKERHUB_USERNAME + DOCKERHUB_TOKEN (and optionally DOCKERHUB_NAMESPACE) as GitHub Action secrets."
+        exit 1
     
     - name: Build runtime image (multi-arch)
       uses: docker/build-push-action@v5
