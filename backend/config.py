@@ -34,3 +34,4 @@ SERVERS_VOLUME_NAME = os.environ.get("SERVERS_VOLUME_NAME", "minecraft-server_mc
 
 # Branding / application identity
 APP_NAME = os.environ.get("APP_NAME", "BlockPanel")
+APP_VERSION = os.environ.get("APP_VERSION", "dev")

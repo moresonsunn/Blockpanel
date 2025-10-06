@@ -44,7 +44,7 @@ from routers import (
 from auth import require_auth, get_current_user, require_admin, require_moderator
 from scheduler import get_scheduler
 from models import User
-from config import SERVERS_ROOT, APP_NAME
+from config import SERVERS_ROOT, APP_NAME, APP_VERSION
 
 def get_forge_loader_versions(mc_version: str) -> list[str]:
     url = f"https://files.minecraftforge.net/net/minecraftforge/forge/index_{mc_version}.html"
@@ -698,7 +698,6 @@ def get_server_java_version(container_id: str):
         }
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Java version info unavailable: {e}")
-        raise HTTPException(status_code=404, detail=f"Java version info unavailable: {e}")
 
 @app.post("/servers/{container_id}/java-version")
 def set_server_java_version(container_id: str, request: dict = Body(...)):
@@ -755,6 +754,12 @@ def get_available_java_versions(container_id: str):
         raise HTTPException(status_code=404, detail=f"Java versions info unavailable: {e}")
 
 """(AI error fixer routes removed)"""
+
+@app.get("/version")
+def version_info():
+    """Simple version + commit metadata endpoint for health/diagnostics."""
+    git_sha = os.environ.get("GIT_COMMIT", "unknown")
+    return {"name": APP_NAME, "version": APP_VERSION, "git_commit": git_sha}
 
 # Mount the React UI at root as the last route so it doesn't shadow API endpoints
 try:
