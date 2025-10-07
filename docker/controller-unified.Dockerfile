@@ -41,9 +41,12 @@ ENV JAVA_TOOL_OPTIONS="-Djava.awt.headless=true -Dsun.java2d.noddraw=true -Djava
     APP_VERSION=$APP_VERSION \
     GIT_COMMIT=$GIT_COMMIT
 
-# Python dependencies
+# Python dependencies (use venv to avoid Debian PEP 668 externally managed restriction)
 COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r requirements.txt
+RUN python3 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy backend
 COPY backend ./
