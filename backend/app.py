@@ -95,20 +95,30 @@ try:
     from fastapi.middleware.cors import CORSMiddleware
     _origins_env = os.getenv("ALLOWED_ORIGINS", "*")
     if _origins_env.strip() == "*":
-        allowed_origins = ["*"]
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origin_regex=".*",
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=["Authorization"],
+            max_age=600,
+        )
+        print("[CORS] Configured with allow_origin_regex=.*")
     else:
-        allowed_origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=allowed_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["Authorization"],
-        max_age=600,
-    )
-except Exception:
-    pass
+        allow_list = [o.strip() for o in _origins_env.split(",") if o.strip()]
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allow_list,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=["Authorization"],
+            max_age=600,
+        )
+        print(f"[CORS] Configured with allow_origins={allow_list}")
+except Exception as e:
+    print(f"[CORS] Skipped due to error: {e}")
 
 # Enable gzip compression for API responses and static assets
 try:
@@ -151,6 +161,17 @@ for _router in [
         app.include_router(_router, prefix="/api")
     except Exception:
         pass
+
+# Debug endpoint for header inspection (disabled unless explicitly enabled)
+if os.getenv("ENABLE_DEBUG_ENDPOINTS", "0") == "1":
+    @app.get("/debug/echo-headers")
+    async def debug_echo_headers(request: Request):  # type: ignore
+        return {
+            "headers": {k: v for k, v in request.headers.items()},
+            "origin": request.headers.get("origin"),
+            "method": request.method,
+            "client": request.client.host if request.client else None,
+        }
 
 
 @app.on_event("startup")
@@ -218,6 +239,7 @@ def get_docker_manager() -> DockerManager:
 
 
 @app.get("/servers")
+@app.get("/api/servers")
 def list_servers(current_user: User = Depends(require_auth)):
     try:
         return get_docker_manager().list_servers()
@@ -225,6 +247,7 @@ def list_servers(current_user: User = Depends(require_auth)):
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
 @app.get("/ports/used")
+@app.get("/api/ports/used")
 def list_used_ports(from_port: int | None = Query(None), to_port: int | None = Query(None), current_user: User = Depends(require_auth)):
     """
     List host ports currently used by Docker containers.
@@ -240,6 +263,7 @@ def list_used_ports(from_port: int | None = Query(None), to_port: int | None = Q
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
 @app.get("/ports/validate")
+@app.get("/api/ports/validate")
 def validate_port(port: int = Query(..., ge=1, le=65535), current_user: User = Depends(require_auth)):
     """
     Validate if a given host port is available (not used by Docker containers).
@@ -253,6 +277,7 @@ def validate_port(port: int = Query(..., ge=1, le=65535), current_user: User = D
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
 @app.get("/ports/suggest")
+@app.get("/api/ports/suggest")
 def suggest_port(
     start: int = Query(25565, ge=1, le=65535),
     end: int = Query(25999, ge=1, le=65535),
@@ -280,6 +305,7 @@ class ServerCreateRequest(BaseModel):
     max_ram: int | str = 2048  # MB or string like "2G"
 
 @app.post("/servers")
+@app.post("/api/servers")
 def create_server(req: ServerCreateRequest, current_user: User = Depends(require_auth)):
     try:
         # Convert RAM values to proper format
@@ -320,6 +346,7 @@ def create_server(req: ServerCreateRequest, current_user: User = Depends(require
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
 @app.post("/servers/{container_id}/start")
+@app.post("/api/servers/{container_id}/start")
 def start_server(container_id: str):
     try:
         return get_docker_manager().start_server(container_id)
@@ -327,6 +354,7 @@ def start_server(container_id: str):
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
 @app.post("/servers/{container_id}/stop")
+@app.post("/api/servers/{container_id}/stop")
 def stop_server(container_id: str):
     try:
         return get_docker_manager().stop_server(container_id)
@@ -342,6 +370,7 @@ class MkdirRequest(BaseModel):
     path: str
 
 @app.post("/servers/{container_id}/power")
+@app.post("/api/servers/{container_id}/power")
 def power_server(container_id: str, payload: PowerSignal, current_user: User = Depends(require_moderator)):
     try:
         signal = payload.signal.lower().strip()
@@ -362,6 +391,7 @@ def power_server(container_id: str, payload: PowerSignal, current_user: User = D
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
 @app.get("/servers/{container_id}/resources")
+@app.get("/api/servers/{container_id}/resources")
 def get_server_resources(container_id: str, current_user: User = Depends(require_auth)):
     try:
         dm = get_docker_manager()
@@ -400,6 +430,7 @@ def get_server_resources(container_id: str, current_user: User = Depends(require
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
 @app.delete("/servers/{container_id}")
+@app.delete("/api/servers/{container_id}")
 def delete_server(container_id: str, current_user: User = Depends(require_moderator)):
     try:
         return get_docker_manager().delete_server(container_id)
@@ -408,6 +439,7 @@ def delete_server(container_id: str, current_user: User = Depends(require_modera
 
 # Simple directory creation endpoint for Files panel
 @app.post("/servers/{name}/mkdir")
+@app.post("/api/servers/{name}/mkdir")
 def mkdir_path(name: str, req: MkdirRequest, current_user: User = Depends(require_moderator)):
     try:
         base = SERVERS_ROOT.resolve() / name
@@ -421,14 +453,10 @@ def mkdir_path(name: str, req: MkdirRequest, current_user: User = Depends(requir
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/servers/{container_id}/logs")
-def get_server_logs(container_id: str):
-    try:
-        return get_docker_manager().get_server_logs(container_id)
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
+"""(Removed earlier duplicate /servers/{container_id}/logs endpoint in favor of authenticated variant defined later)"""
 
 @app.post("/servers/{container_id}/command")
+@app.post("/api/servers/{container_id}/command")
 def send_command(container_id: str, command: str = Body(..., embed=True)):
     try:
         if not command or not command.strip():
@@ -440,6 +468,7 @@ def send_command(container_id: str, command: str = Body(..., embed=True)):
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
 @app.get("/servers/{container_id}/stats")
+@app.get("/api/servers/{container_id}/stats")
 def get_server_stats(container_id: str):
     try:
         return get_docker_manager().get_server_stats(container_id)
@@ -447,6 +476,7 @@ def get_server_stats(container_id: str):
         raise HTTPException(status_code=404, detail=f"Stats unavailable: {e}")
 
 @app.get("/servers/stats")
+@app.get("/api/servers/stats")
 def get_bulk_stats(ttl: int = Query(3, ge=0, le=60), current_user: User = Depends(require_auth)):
     """Return stats for all servers in one response (cached briefly)."""
     try:
@@ -456,6 +486,7 @@ def get_bulk_stats(ttl: int = Query(3, ge=0, le=60), current_user: User = Depend
         raise HTTPException(status_code=503, detail=f"Stats unavailable: {e}")
 
 @app.get("/servers/{container_id}/info")
+@app.get("/api/servers/{container_id}/info")
 def get_server_info(container_id: str, request: Request):
     try:
         info = get_docker_manager().get_server_info(container_id)
@@ -501,6 +532,7 @@ def get_server_info(container_id: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Server info unavailable: {e}")
 
 @app.get("/servers/{container_id}/console")
+@app.get("/api/servers/{container_id}/console")
 def get_server_console(container_id: str, tail: int = 100):
     try:
         return get_docker_manager().get_server_terminal(container_id, tail=tail)
@@ -510,6 +542,7 @@ def get_server_console(container_id: str, tail: int = 100):
 #
 
 @app.get("/servers/{name}/files")
+@app.get("/api/servers/{name}/files")
 def files_list(name: str, request: Request, path: str = "."):
     # Compute a simple ETag based on directory mtime to enable client caching
     try:
@@ -546,6 +579,7 @@ def files_list(name: str, request: Request, path: str = "."):
     return JSONResponse(content={"items": items}, headers=headers)
 
 @app.get("/servers/{name}/file")
+@app.get("/api/servers/{name}/file")
 def file_read(name: str, request: Request, path: str):
     # ETag based on file size and mtime
     try:
@@ -572,16 +606,19 @@ def file_read(name: str, request: Request, path: str):
     return JSONResponse(content={"content": content}, headers=headers)
 
 @app.post("/servers/{name}/file")
+@app.post("/api/servers/{name}/file")
 def file_write(name: str, path: str, content: str = Form(...)):
     fm_write_file(name, path, content)
     return {"ok": True}
 
 @app.delete("/servers/{name}/file")
+@app.delete("/api/servers/{name}/file")
 def file_delete(name: str, path: str):
     fm_delete_path(name, path)
     return {"ok": True}
 
 @app.get("/servers/{name}/download")
+@app.get("/api/servers/{name}/download")
 def file_or_folder_download(name: str, path: str = Query(".")):
     """
     Download a single file directly, or if a directory is requested, return a zipped archive on the fly.
@@ -606,6 +643,7 @@ def file_or_folder_download(name: str, path: str = Query(".")):
     return FileResponse(archive_path, filename=fname)
 
 @app.post("/servers/{name}/upload")
+@app.post("/api/servers/{name}/upload")
 async def file_upload(
     name: str,
     path: str = Query("."),
@@ -649,11 +687,13 @@ class RenameRequest(BaseModel):
     dest: str
 
 @app.post("/servers/{name}/rename")
+@app.post("/api/servers/{name}/rename")
 def file_rename(name: str, req: RenameRequest, current_user: User = Depends(require_moderator)):
     fm_rename_path(name, req.src, req.dest)
     return {"ok": True}
 
 @app.post("/servers/{name}/upload-multiple")
+@app.post("/api/servers/{name}/upload-multiple")
 async def files_upload(
     name: str,
     path: str = Form("."),
@@ -674,36 +714,44 @@ class UnzipRequest(BaseModel):
     dest: str | None = None
 
 @app.post("/servers/{name}/zip")
+@app.post("/api/servers/{name}/zip")
 def make_zip(name: str, req: ZipRequest, current_user: User = Depends(require_moderator)):
     archive_rel = fm_zip_path(name, req.path, req.dest)
     return {"ok": True, "archive": archive_rel}
 
 @app.post("/servers/{name}/unzip")
+@app.post("/api/servers/{name}/unzip")
 def do_unzip(name: str, req: UnzipRequest, current_user: User = Depends(require_moderator)):
     dest_rel = fm_unzip_path(name, req.path, req.dest)
     return {"ok": True, "dest": dest_rel}
 
 @app.get("/servers/{name}/backups")
+@app.get("/api/servers/{name}/backups")
 def backups_list(name: str):
     return {"items": bk_list(name)}
 
 @app.post("/servers/{name}/backups")
+@app.post("/api/servers/{name}/backups")
 def backups_create(name: str):
     return bk_create(name)
 
 @app.post("/servers/{name}/restore")
+@app.post("/api/servers/{name}/restore")
 def backups_restore(name: str, file: str):
     bk_restore(name, file)
     return {"ok": True}
 
 @app.get("/servers/{name}/players")
+@app.get("/api/servers/{name}/players")
 def players_list(name: str):
     return {"players": []}
 
 @app.get("/servers/{name}/configs")
+@app.get("/api/servers/{name}/configs")
 def configs_list(name: str):
     return {"configs": ["server.properties", "bukkit.yml", "spigot.yml"]}
 @app.get("/servers/{name}/config-bundle")
+@app.get("/api/servers/{name}/config-bundle")
 def get_server_config_bundle(name: str, container_id: str | None = Query(None)):
     """Return a bundle of server.properties (parsed) and EULA state.
     This reduces multiple round-trips for the Config panel.
@@ -758,26 +806,10 @@ def get_server_config_bundle(name: str, container_id: str | None = Query(None)):
         "java": java,
     }
 
-@app.get("/servers/{container_id}/java-versions")
-def get_server_java_version(container_id: str):
-    """Get the current Java version for a server."""
-    try:
-        docker_manager = get_docker_manager()
-        container_info = docker_manager.get_server_info(container_id)
-        
-        # Get Java version from container environment or labels
-        java_version = container_info.get("java_version", "unknown")
-        java_bin = container_info.get("java_bin", "/usr/local/bin/java21")
-        
-        return {
-            "java_version": java_version,
-            "java_bin": java_bin,
-            "available_versions": ["8", "11", "17", "21"]
-        }
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Java version info unavailable: {e}")
+"""(Removed duplicate get_server_java_version in favor of consolidated get_available_java_versions endpoint)"""
 
 @app.post("/servers/{container_id}/java-version")
+@app.post("/api/servers/{container_id}/java-version")
 def set_server_java_version(container_id: str, request: dict = Body(...)):
     """Set the Java version for a server."""
     try:
@@ -805,6 +837,7 @@ def set_server_java_version(container_id: str, request: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"Failed to update Java version: {e}")
 
 @app.get("/servers/{container_id}/java-versions")
+@app.get("/api/servers/{container_id}/java-versions")
 def get_available_java_versions(container_id: str):
     """Get available Java versions and current selection."""
     try:
@@ -834,6 +867,7 @@ def get_available_java_versions(container_id: str):
 """(AI error fixer routes removed)"""
 
 @app.get("/version")
+@app.get("/api/version")
 def version_info():
     """Simple version + commit metadata endpoint for health/diagnostics."""
     git_sha = os.environ.get("GIT_COMMIT", "unknown")
@@ -841,6 +875,7 @@ def version_info():
 
 # --- Added convenience endpoints for server detail & logs ---
 @app.get("/servers/{container_id}")
+@app.get("/api/servers/{container_id}")
 def get_server_details(container_id: str, current_user: User = Depends(require_auth)):
     """Return detailed info (including port mappings, java version, stats) for a server container."""
     try:
@@ -855,6 +890,7 @@ def get_server_details(container_id: str, current_user: User = Depends(require_a
         raise HTTPException(status_code=500, detail=f"Failed to get server info: {e}")
 
 @app.get("/servers/{container_id}/logs")
+@app.get("/api/servers/{container_id}/logs")
 def get_server_logs_endpoint(container_id: str, tail: int = Query(200, ge=1, le=2000), current_user: User = Depends(require_auth)):
     """Return the last N lines of console output for the server container."""
     try:

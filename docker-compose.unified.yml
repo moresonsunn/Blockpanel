@@ -128,6 +128,11 @@ services:
       - ENVIRONMENT=production
       - SECRET_KEY=${SECRET_KEY:-change-me-single-container-secret}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ADMIN_PASSWORD=YourNewStrongPass123!
+      # Explicit origins required for credentialed requests (Authorization header)
+      - ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000,http://192.168.2.190:8000
+      # Temporary debug endpoint enabling /debug/echo-headers (remove or set 0 in production)
+      - ENABLE_DEBUG_ENDPOINTS=1
     volumes:
       - servers_data:/data/servers
       - sqlite_data:/data/sqlite

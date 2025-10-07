@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+import logging
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
@@ -73,6 +74,7 @@ async def login(
     svc = UserService(db)
     user = svc.authenticate_user(form_data.username, form_data.password, ip_address=get_client_ip(request))
     if not user:
+        logging.warning(f"Login failed for username='{form_data.username}' from IP={get_client_ip(request)} user_agent='{get_user_agent(request)}'")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -81,6 +83,7 @@ async def login(
 
     # Create a session token and return it
     session = svc.create_user_session(user, ip_address=get_client_ip(request), user_agent=get_user_agent(request))
+    logging.info(f"Login success username='{form_data.username}' session_id={session.id} IP={get_client_ip(request)}")
     return {"access_token": session.session_token, "token_type": "bearer"}
 
 @router.get("/me", response_model=UserResponse)
