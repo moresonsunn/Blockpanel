@@ -1,0 +1,41 @@
+# All-in-one single image using controller-unified.Dockerfile (includes Java runtimes)
+# Build & run:
+#   docker compose -f docker-compose.unified.yml up -d --build
+
+services:
+  blockpanel:
+    image: ${BLOCKPANEL_UNIFIED_IMAGE:-moresonsun/blockypanel-unified}:${BLOCKPANEL_TAG:-latest}
+    build:
+      context: .
+      dockerfile: docker/controller-unified.Dockerfile
+      args:
+        - APP_VERSION=${BLOCKPANEL_TAG:-dev}
+    ports:
+      - "8000:8000"
+      # Minimal single exposed Minecraft port; additional servers can map dynamically
+      - "25565:25565"
+    environment:
+      - APP_NAME=BlockPanel
+      - APP_VERSION=${BLOCKPANEL_TAG:-v0.3.2}
+      - USE_POSTGRES=false
+      - DATABASE_URL=sqlite:////data/sqlite/minecraft_controller.db
+      - SERVERS_CONTAINER_ROOT=/data/servers
+      - SERVERS_VOLUME_NAME=minecraft-controller_mc_servers_data
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - ENVIRONMENT=production
+      - SECRET_KEY=${SECRET_KEY:-change-me-single-container-secret}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - servers_data:/data/servers
+      - sqlite_data:/data/sqlite
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/quick"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  servers_data:
+  sqlite_data:
