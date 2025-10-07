@@ -1,0 +1,115 @@
+name: Release Unified Image
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Build & Publish Unified Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create release & upload assets
+      packages: read
+    env:
+      IMAGE_NAME: moresonsun/blockpanel-unified
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (multi-arch)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract version metadata
+        id: meta
+        run: |
+          TAG="${GITHUB_REF##*/}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          DATE_TAG=$(date -u +%Y%m%d)
+          echo "date_tag=$DATE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Docker Hub login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & Push (multi-arch)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/controller-unified.Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.tag }}
+            GIT_COMMIT=${{ steps.meta.outputs.commit }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.short_sha }}
+            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.date_tag }}
+
+      - name: Inspect image manifests
+        id: inspect
+        run: |
+          docker buildx imagetools inspect $IMAGE_NAME:${{ steps.meta.outputs.tag }} > manifest.txt
+          echo "--- manifest.txt ---"
+          cat manifest.txt
+          DIGEST=$(grep -m1 'Digest:' manifest.txt | awk '{print $2}') || true
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+
+      - name: Generate evidence JSON
+        id: evidence
+        run: |
+          python3 scripts/generate_evidence.py \
+            --version "${{ steps.meta.outputs.tag }}" \
+            --commit "${{ steps.meta.outputs.commit }}" \
+            --image "${{ env.IMAGE_NAME }}" \
+            --digest "${{ steps.inspect.outputs.digest }}" \
+            --output evidence-${{ steps.meta.outputs.tag }}-${{ steps.meta.outputs.short_sha }}.json
+          echo "evidence_file=evidence-${{ steps.meta.outputs.tag }}-${{ steps.meta.outputs.short_sha }}.json" >> $GITHUB_OUTPUT
+
+      - name: Update CHANGELOG (dry-run append section)
+        id: changelog
+        run: |
+          python3 scripts/update_changelog.py --version "${{ steps.meta.outputs.tag }}" --write || true
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          awk 'NR<=400' CHANGELOG.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: BlockPanel ${{ steps.meta.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            Automated release for ${{ steps.meta.outputs.tag }}
+            Commit: ${{ steps.meta.outputs.commit }}
+            Image: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+            Digest: ${{ steps.inspect.outputs.digest }}
+
+            CHANGELOG (excerpt):
+            ```
+            ${{ steps.changelog.outputs.changelog }}
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Evidence Asset
+        uses: actions/upload-artifact@v4
+        with:
+            name: evidence-${{ steps.meta.outputs.tag }}
+            path: ${{ steps.evidence.outputs.evidence_file }}
+            if-no-files-found: error
