@@ -22,5 +22,14 @@
       "index": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/casaos-appstore/Apps/blockpanel-lite/app.json",
       "port_map": "8000"
     }
+    ,
+    {
+      "id": "blockpanel-unified",
+      "title": "BlockPanel (Unified)",
+      "description": "All-in-one image (controller + UI + multi-Java runtime) using SQLite.",
+      "icon": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/frontend/public/favicon.ico",
+      "index": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/casaos-appstore/Apps/blockpanel-unified/app.json",
+      "port_map": "8000"
+    }
   ]
 }
