@@ -25,7 +25,7 @@ services:
       - APP_NAME=BlockPanel
       - APP_VERSION=v0.3.2
       - SERVERS_CONTAINER_ROOT=/data/servers
-      - SERVERS_VOLUME_NAME=minecraft-controller_mc_servers_data
+      - SERVERS_VOLUME_NAME=mc_servers_data
       - DOCKER_HOST=unix:///var/run/docker.sock
       - USE_POSTGRES=true
       - DATABASE_URL=postgresql://postgres:postgres123@db:5432/minecraft_controller
