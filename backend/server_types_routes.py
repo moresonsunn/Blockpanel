@@ -30,3 +30,12 @@ def list_server_type_versions(server_type: str):
     except Exception as e:
         logger.error(f"Failed to list versions for {server_type}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Alias endpoints under /api prefix to mitigate aggressive browser extensions blocking plain paths ---
+@router.get("/api/server-types")
+def list_server_types_api():
+    return list_server_types()
+
+@router.get("/api/server-types/{server_type}/versions")
+def list_server_type_versions_api(server_type: str):
+    return list_server_type_versions(server_type)
