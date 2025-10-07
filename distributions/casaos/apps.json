@@ -4,7 +4,7 @@
     "title": "BlockPanel",
     "description": "Manage multiple Minecraft servers with a web UI.",
     "version": "v0.3.2",
-    "icon": "https://raw.githubusercontent.com/blockypanel/Blockpanel/main/frontend/public/favicon.ico",
-    "index": "app.json"
+    "icon": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/frontend/public/favicon.ico",
+    "index": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/distributions/casaos/app.json"
   }
 ]
