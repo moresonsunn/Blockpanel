@@ -1,7 +1,7 @@
 {
   "id": "blockpanel",
   "title": "BlockPanel",
-  "version": "v0.1.1",
+  "version": "v0.3.2",
   "description": "Manage multiple Minecraft servers (Vanilla, Fabric, Forge, NeoForge, etc.) with a web UI.",
   "tagline": "Minecraft server controller",
   "author": "BlockPanel Team",
@@ -15,7 +15,7 @@
   "arch": ["amd64", "arm64"],
   "env": [
     {"name": "APP_NAME", "value": "BlockPanel"},
-    {"name": "APP_VERSION", "value": "v0.1.1"},
+    {"name": "APP_VERSION", "value": "v0.3.2"},
     {"name": "USE_POSTGRES", "value": "true"},
     {"name": "DATABASE_URL", "value": "postgresql://postgres:postgres123@db:5432/minecraft_controller"},
     {"name": "SERVERS_CONTAINER_ROOT", "value": "/data/servers"},
@@ -25,7 +25,7 @@
   "services": [
     {
       "name": "blockpanel",
-      "image": "moresonsun/blockypanel:v0.1.1",
+      "image": "moresonsun/blockypanel:v0.3.2",
       "container_name": "blockpanel",
       "ports": ["8000:8000"],
       "volumes": [
@@ -56,7 +56,7 @@
     },
     {
       "name": "blockpanel-runtime-prewarm",
-      "image": "moresonsun/blockypanel-runtime:v0.1.1",
+      "image": "moresonsun/blockypanel-runtime:v0.3.2",
       "container_name": "blockpanel-runtime-prewarm",
       "command": ["true"],
       "restart": "no",
