@@ -752,6 +752,16 @@ class DockerManager:
         last_err: Exception | None = None
         while attempt < max_retries:
             try:
+                # If we are using the unified image (which has a default CMD that starts uvicorn),
+                # override the entrypoint so the container runs the runtime script instead.
+                run_kwargs = {}
+                if (
+                    os.getenv("BLOCKPANEL_UNIFIED_IMAGE")
+                    or "blockpanel-unified" in RUNTIME_IMAGE.lower()
+                    or os.getenv("BLOCKPANEL_RUNTIME_IMAGE", "").lower().endswith("blockpanel-unified")
+                ):
+                    # Only set entrypoint if the script exists in the image; if missing, let it fail visibly.
+                    run_kwargs["entrypoint"] = ["/usr/local/bin/runtime-entrypoint.sh"]
                 container = self.client.containers.run(
                     RUNTIME_IMAGE,
                     name=name,
@@ -764,6 +774,7 @@ class DockerManager:
                     stdin_open=True,
                     working_dir="/data",
                     mem_limit=memory_limit,
+                    **run_kwargs,
                 )
                 logger.info(f"Container {container.id} created successfully for server {name}")
                 break
@@ -853,6 +864,13 @@ class DockerManager:
         except Exception:
             pass
         try:
+            run_kwargs = {}
+            if (
+                os.getenv("BLOCKPANEL_UNIFIED_IMAGE")
+                or "blockpanel-unified" in RUNTIME_IMAGE.lower()
+                or os.getenv("BLOCKPANEL_RUNTIME_IMAGE", "").lower().endswith("blockpanel-unified")
+            ):
+                run_kwargs["entrypoint"] = ["/usr/local/bin/runtime-entrypoint.sh"]
             container = self.client.containers.run(
                 RUNTIME_IMAGE,
                 name=name,
@@ -864,6 +882,7 @@ class DockerManager:
                 tty=True,
                 stdin_open=True,
                 working_dir="/data",
+                **run_kwargs,
             )
             logger.info(f"Container {container.id} created from existing dir for server {name}")
             return {"id": container.id, "name": container.name, "status": container.status}
