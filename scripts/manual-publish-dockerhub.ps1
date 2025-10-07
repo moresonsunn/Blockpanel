@@ -56,8 +56,7 @@ $dateTag  = (Get-Date -Format 'yyyyMMdd')
 if (-not $Version -or $Version -eq '') { $Version = $shortSha; Write-Warn "No -Version provided; using commit short SHA '$Version'" }
 $appVersion = $Version
 
-$controllerRepo = "$Namespace/blockypanel"
-$runtimeRepo    = "$Namespace/blockypanel-runtime"
+$unifiedRepo = "$Namespace/blockpanel-unified"
 
 Write-Step "Docker Hub login ($($env:DOCKERHUB_USERNAME))"
 $env:DOCKERHUB_TOKEN | docker login -u $env:DOCKERHUB_USERNAME --password-stdin | Out-Null
@@ -78,39 +77,22 @@ docker buildx inspect --bootstrap | Out-Null
 Write-Info "Version tag: $Version | short: $shortSha | date: $dateTag | namespace: $Namespace"
 
 # Runtime build
-Write-Step "Building & pushing runtime image"
-$runtimeArgs = @(
+Write-Step "Building & pushing unified image"
+$unifiedArgs = @(
   'buildx','build',
   '--platform','linux/amd64,linux/arm64',
-  '-f','docker/runtime.Dockerfile',
-  '-t',"${runtimeRepo}:latest",
-  '-t',"${runtimeRepo}:${Version}",
-  '-t',"${runtimeRepo}:${shortSha}",
-  '-t',"${runtimeRepo}:${dateTag}",
+  '-f','docker/controller-unified.Dockerfile',
+  '-t',"${unifiedRepo}:latest",
+  '-t',"${unifiedRepo}:${Version}",
+  '-t',"${unifiedRepo}:${shortSha}",
+  '-t',"${unifiedRepo}:${dateTag}",
   '--build-arg',"APP_VERSION=$appVersion",
   '--build-arg',"GIT_COMMIT=$fullSha",
   '--push','.'
 )
-& docker @runtimeArgs
-
-# Controller build
-Write-Step "Building & pushing controller image"
-$controllerArgs = @(
-  'buildx','build',
-  '--platform','linux/amd64,linux/arm64',
-  '-f','docker/controller.Dockerfile',
-  '-t',"${controllerRepo}:latest",
-  '-t',"${controllerRepo}:${Version}",
-  '-t',"${controllerRepo}:${shortSha}",
-  '-t',"${controllerRepo}:${dateTag}",
-  '--build-arg',"APP_VERSION=$appVersion",
-  '--build-arg',"GIT_COMMIT=$fullSha",
-  '--push','.'
-)
-& docker @controllerArgs
+& docker @unifiedArgs
 
 Write-Step "Inspect (optional)"
-Write-Host "  docker buildx imagetools inspect ${controllerRepo}:${Version}" -ForegroundColor DarkGray
-Write-Host "  docker buildx imagetools inspect ${runtimeRepo}:${Version}" -ForegroundColor DarkGray
+Write-Host "  docker buildx imagetools inspect ${unifiedRepo}:${Version}" -ForegroundColor DarkGray
 
 Write-Host "Publish complete." -ForegroundColor Green

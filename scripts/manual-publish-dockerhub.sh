@@ -9,8 +9,7 @@ set -euo pipefail
 
 VERSION_TAG="${1:-}"
 DOCKER_NS="${DOCKERHUB_NAMESPACE:-${DOCKERHUB_USERNAME:-moresonsun}}"
-CONTROLLER_REPO="${DOCKER_NS}/blockypanel"
-RUNTIME_REPO="${DOCKER_NS}/blockypanel-runtime"
+UNIFIED_REPO="${DOCKER_NS}/blockpanel-unified"
 
 if [[ -z "${DOCKERHUB_USERNAME:-}" || -z "${DOCKERHUB_TOKEN:-}" ]]; then
   echo "Docker Hub credentials missing (DOCKERHUB_USERNAME / DOCKERHUB_TOKEN)" >&2
@@ -36,31 +35,17 @@ APP_VERSION="$VERSION_TAG"
 
 # Build & push runtime
 
-echo "Building runtime -> ${RUNTIME_REPO}:{latest,$VERSION_TAG,$SHORT_SHA,$DATE_TAG}";
+echo "Building unified -> ${UNIFIED_REPO}:{latest,$VERSION_TAG,$SHORT_SHA,$DATE_TAG}";
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -f docker/runtime.Dockerfile \
-  -t ${RUNTIME_REPO}:latest \
-  -t ${RUNTIME_REPO}:${VERSION_TAG} \
-  -t ${RUNTIME_REPO}:${SHORT_SHA} \
-  -t ${RUNTIME_REPO}:${DATE_TAG} \
-  --build-arg APP_VERSION=${APP_VERSION} \
-  --build-arg GIT_COMMIT=$(git rev-parse HEAD) \
-  --push .
-
-# Build & push controller
-
-echo "Building controller -> ${CONTROLLER_REPO}:{latest,$VERSION_TAG,$SHORT_SHA,$DATE_TAG}";
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  -f docker/controller.Dockerfile \
-  -t ${CONTROLLER_REPO}:latest \
-  -t ${CONTROLLER_REPO}:${VERSION_TAG} \
-  -t ${CONTROLLER_REPO}:${SHORT_SHA} \
-  -t ${CONTROLLER_REPO}:${DATE_TAG} \
+  -f docker/controller-unified.Dockerfile \
+  -t ${UNIFIED_REPO}:latest \
+  -t ${UNIFIED_REPO}:${VERSION_TAG} \
+  -t ${UNIFIED_REPO}:${SHORT_SHA} \
+  -t ${UNIFIED_REPO}:${DATE_TAG} \
   --build-arg APP_VERSION=${APP_VERSION} \
   --build-arg GIT_COMMIT=$(git rev-parse HEAD) \
   --push .
 
 echo "Publish complete. Inspect manifests with:"
-echo "  docker buildx imagetools inspect ${CONTROLLER_REPO}:${VERSION_TAG}"
+echo "  docker buildx imagetools inspect ${UNIFIED_REPO}:${VERSION_TAG}"

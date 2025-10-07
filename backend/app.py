@@ -212,7 +212,7 @@ class ServerCreateRequest(BaseModel):
     name: str
     type: str  # e.g. vanilla, paper, purpur, fabric, forge, neoforge
     version: str  # minecraft version (e.g. 1.21.1)
-    host_port: int
+    host_port: int | None = None  # if omitted/None we will auto-pick an available port
     loader_version: str | None = None  # specific loader build (fabric/forge/etc.)
     installer_version: str | None = None  # for installers that have separate versioning
     min_ram: int | str = 1024  # MB or string like "512M"
@@ -237,9 +237,24 @@ def create_server(req: ServerCreateRequest, current_user: User = Depends(require
         max_ram = format_ram(req.max_ram)
         
         # Pass loader_version if present, otherwise None
-        return get_docker_manager().create_server(
+        result = get_docker_manager().create_server(
             req.name, req.type, req.version, req.host_port, req.loader_version, min_ram, max_ram, req.installer_version
         )
+        # Enrich with selected host port if possible (best effort)
+        try:
+            # If result doesn't already have host_port, attempt to look it up from container mapping
+            if isinstance(result, dict) and 'id' in result and 'host_port' not in result:
+                from docker_manager import MINECRAFT_PORT  # local import to avoid circular issues
+                import docker
+                client = docker.from_env()
+                c = client.containers.get(result['id'])
+                ports = c.attrs.get('NetworkSettings', {}).get('Ports', {}) or {}
+                mapping = ports.get(f"{MINECRAFT_PORT}/tcp") or []
+                if mapping and isinstance(mapping, list) and mapping[0].get('HostPort'):
+                    result['host_port'] = int(mapping[0]['HostPort'])
+        except Exception:
+            pass
+        return result
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
@@ -762,6 +777,30 @@ def version_info():
     """Simple version + commit metadata endpoint for health/diagnostics."""
     git_sha = os.environ.get("GIT_COMMIT", "unknown")
     return {"name": APP_NAME, "version": APP_VERSION, "git_commit": git_sha}
+
+# --- Added convenience endpoints for server detail & logs ---
+@app.get("/servers/{container_id}")
+def get_server_details(container_id: str, current_user: User = Depends(require_auth)):
+    """Return detailed info (including port mappings, java version, stats) for a server container."""
+    try:
+        dm = get_docker_manager()
+        info = dm.get_server_info(container_id)
+        if info.get("error"):
+            raise HTTPException(status_code=404, detail=info.get("error"))
+        return info
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get server info: {e}")
+
+@app.get("/servers/{container_id}/logs")
+def get_server_logs_endpoint(container_id: str, tail: int = Query(200, ge=1, le=2000), current_user: User = Depends(require_auth)):
+    """Return the last N lines of console output for the server container."""
+    try:
+        dm = get_docker_manager()
+        return dm.get_server_logs(container_id, tail=tail)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get server logs: {e}")
 
 # Mount the React UI at root as the last route so it doesn't shadow API endpoints
 try:

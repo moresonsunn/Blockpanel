@@ -260,8 +260,7 @@ def test_file_structure():
         "backend/requirements.txt",
         "frontend/src/App.js",
         "frontend/package.json",
-        "docker/controller.Dockerfile",
-        "docker/runtime.Dockerfile",
+    "docker/controller-unified.Dockerfile",
         "docker/runtime-entrypoint.sh",
         "docker-compose.yml"
     ]

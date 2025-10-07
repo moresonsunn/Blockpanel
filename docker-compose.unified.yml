@@ -129,7 +129,7 @@ services:
       - SECRET_KEY=${SECRET_KEY:-change-me-single-container-secret}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
-      - mc_servers_data:/data/servers
+      - servers_data:/data/servers
       - sqlite_data:/data/sqlite
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:

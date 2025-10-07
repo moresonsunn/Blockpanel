@@ -474,7 +474,7 @@ class DockerManager:
         except docker.errors.ImageNotFound as exc:
             logger.error(f"Runtime image '{RUNTIME_IMAGE}' not found")
             raise RuntimeError(
-                "Runtime image '{}' not found. Build it with: docker build -t {} -f docker/runtime.Dockerfile docker".format(
+                "Runtime image '{}' not found. Build it with: docker build -t {} -f docker/controller-unified.Dockerfile .".format(
                     RUNTIME_IMAGE, RUNTIME_IMAGE
                 )
             ) from exc

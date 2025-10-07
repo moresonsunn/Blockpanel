@@ -14,9 +14,8 @@ BlockPanel is a modern web-based controller to create, manage, monitor, and auto
 - Role & permission management (users, roles, audit logs)
 - REST API + future extensibility
 
-Docker images (multi-arch: linux/amd64 + linux/arm64) are automatically published (default namespace: `moresonsun`):
-- Controller UI/API: `moresonsun/blockypanel:latest`
-- Runtime (Java server runner base): `moresonsun/blockypanel-runtime:latest`
+Single unified Docker image (multi-arch: linux/amd64 + linux/arm64) is published (default namespace: `moresonsun`):
+- Unified (controller + UI + embedded multi-Java runtime): `moresonsun/blockpanel-unified:latest`
 
 Brand / Org Override: If/when a dedicated Docker Hub org `blockypanel` is created, set `DOCKERHUB_NAMESPACE=blockypanel` (or explicitly set `DOCKERHUB_REPO` / `DOCKERHUB_RUNTIME_REPO`) in CI to publish under that namespace without code changes.
 
@@ -66,48 +65,28 @@ minecraft-server/
 git clone https://github.com/blockypanel/Blockpanel.git  # (Repo path stable even if Docker namespace differs)
 cd Blockpanel
 ```
-2. Pull images:
+2. Pull image:
 ```
-docker pull moresonsun/blockypanel:latest
-docker pull moresonsun/blockypanel-runtime:latest
+docker pull moresonsun/blockpanel-unified:latest
 ```
-  Or from GitLab registry (if enabled & pushed):
+3. (Optional) Adjust `docker-compose.yml` to pin a version tag instead of :latest.
+4. Launch (build locally if modifying sources):
 ```
-docker pull registry.gitlab.com/kyzen4/blockpanel/blockpanel:latest
-docker pull registry.gitlab.com/kyzen4/blockpanel/blockpanel-runtime:latest
-```
-3. (Optional) Adjust `docker-compose.yml` to pin a version tag instead of :latest (images default to `moresonsun/*`).
-4. Launch:
-```
-docker compose up -d
+docker compose up -d --build
 ```
 5. Open: http://localhost:8000
 
 Data persists under `./data/servers/` (or mapped volume). Each server runs in its own container created by the controller using the runtime image.
 
-## Local Development With No Published Images Yet (dev override)
-If the public images (e.g. `moresonsun/blockypanel:latest`) are not published yet or you are iterating locally, use the provided override file to force purely local image tags and skip remote pulls.
-
-1. Build (optional: compose will build if missing):
+## Local Development
+Build unified image locally:
 ```
-docker build -f docker/controller.Dockerfile -t blockpanel-dev-controller:latest .
-docker build -f docker/runtime.Dockerfile -t blockpanel-dev-runtime:latest .
+docker build -t blockpanel-unified:dev -f docker/controller-unified.Dockerfile .
 ```
-2. Start controller + Postgres using override:
+Run:
 ```
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d controller db
+docker compose up -d --build
 ```
-3. (Optional) Prewarm runtime image (builds the runtime image locally):
-```
-docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile prewarm up -d runtime_prewarm
-```
-
-What the override (`docker-compose.dev.yml`) does:
-- Replaces image references with `blockpanel-dev-*` tags
-- Sets `pull_policy: never` so compose does not attempt a registry pull
-- Still reuses the build section from the base file so `--build` or missing images will trigger a local build
-
-To revert to using the real registry images, simply omit the override file in subsequent compose commands.
 
 ## Troubleshooting: `protocol not available` During `docker compose up --build`
 On some Docker Desktop / Windows setups, especially when BuildKit or buildx integration is in a transient state, you may see an immediate `protocol not available` with a 0/0 build graph.
@@ -163,21 +142,20 @@ Frontend build-time override: set `REACT_APP_APP_NAME` to change displayed brand
 ## Branding Endpoint
 `GET /branding` returns `{ "name": APP_NAME, "version": APP_VERSION }` to allow dynamic frontend adaptation.
 
-## Building Images Manually
+## Building Image Manually
 ```
-docker build -t blockpanel-runtime:dev -f docker/runtime.Dockerfile .
-docker build -t blockpanel:dev -f docker/controller.Dockerfile .
+docker build -t blockpanel-unified:dev -f docker/controller-unified.Dockerfile .
 ```
 
 ## Multi-Arch Notes
 The CI workflow uses `docker/setup-buildx-action` and `docker/build-push-action` to publish `linux/amd64, linux/arm64` manifests. Local multi-arch emulate build example:
 ```
 docker buildx create --name bp --use
-docker buildx build -f docker/runtime.Dockerfile -t moresonsun/blockypanel-runtime:test --platform linux/amd64,linux/arm64 --push .
+docker buildx build -f docker/controller-unified.Dockerfile -t moresonsun/blockpanel-unified:test --platform linux/amd64,linux/arm64 --push .
 ```
 
 ## Releasing
-Push an annotated git tag starting with `v` (e.g. `v0.1.0`) to trigger version-tagged image publishes:
+Push an annotated git tag starting with `v` (e.g. `v0.1.0`) to trigger version-tagged unified image publish:
 ```
 git tag -a v0.1.0 -m "v0.1.0"
 git push --tags
@@ -199,8 +177,7 @@ Run a tagged release on either platform (`vX.Y.Z`) to produce versioned images i
 
 Pulling by version:
 ```
-docker pull moresonsun/blockypanel:v0.1.1
-docker pull registry.gitlab.com/kyzen4/blockpanel/blockpanel:v0.1.1
+docker pull moresonsun/blockpanel-unified:v0.1.1
 ```
 
 ## Namespace & Branding Strategy

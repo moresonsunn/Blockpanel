@@ -145,7 +145,7 @@ def test_docker_build():
     
     try:
         result = subprocess.run(
-            "docker build -t mc-runtime:test -f docker/runtime.Dockerfile .",
+            "docker build -t blockpanel-unified:test -f docker/controller-unified.Dockerfile .",
             shell=True, capture_output=True, text=True
         )
         

@@ -1,57 +1,38 @@
 services:
-  # Optional pre-pull of runtime image (can be disabled or moved to a profile)
-  runtime_prewarm:
-    image: ${BLOCKPANEL_RUNTIME_IMAGE:-moresonsun/blockypanel-runtime}:${BLOCKPANEL_TAG:-latest}
-    container_name: blockpanel-runtime-prewarm
-    command: ["true"]
-    restart: "no"
-    profiles: [prewarm]
-    build:
-      context: .
-      dockerfile: docker/runtime.Dockerfile
-
-  controller:
-    image: ${BLOCKPANEL_IMAGE:-moresonsun/blockypanel}:${BLOCKPANEL_TAG:-latest}
+  blockpanel:
+    image: ${BLOCKPANEL_UNIFIED_IMAGE:-moresonsun/blockpanel-unified}:${BLOCKPANEL_TAG:-latest}
     container_name: blockpanel
     build:
       context: .
-      dockerfile: docker/controller.Dockerfile
+      dockerfile: docker/controller-unified.Dockerfile
+      args:
+        - APP_VERSION=${BLOCKPANEL_TAG:-dev}
     ports:
       - "8000:8000"
-    volumes:
-      - mc_servers_data:/data/servers
-      - /var/run/docker.sock:/var/run/docker.sock
+      - "25565:25565" # primary server port (additional ports can be added or mapped dynamically)
     environment:
       - APP_NAME=BlockPanel
-      - APP_VERSION=v0.3.2
+      - APP_VERSION=${BLOCKPANEL_TAG:-dev}
+      - USE_POSTGRES=false
+      - DATABASE_URL=sqlite:////data/sqlite/minecraft_controller.db
       - SERVERS_CONTAINER_ROOT=/data/servers
-      - SERVERS_VOLUME_NAME=mc_servers_data
+      - SERVERS_VOLUME_NAME=servers_data
+      - BLOCKPANEL_RUNTIME_IMAGE=${BLOCKPANEL_UNIFIED_IMAGE:-moresonsun/blockpanel-unified}
+      - BLOCKPANEL_RUNTIME_TAG=${BLOCKPANEL_TAG:-latest}
+      - SECRET_KEY=${SECRET_KEY:-change-me}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - DOCKER_HOST=unix:///var/run/docker.sock
-      - USE_POSTGRES=true
-      - DATABASE_URL=postgresql://postgres:postgres123@db:5432/minecraft_controller
+    volumes:
+      - servers_data:/data/servers
+      - sqlite_data:/data/sqlite
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/quick" ]
       interval: 30s
       timeout: 5s
       retries: 5
-    depends_on:
-      - db
-      # runtime_prewarm is optional; if you want to force it, include the profile or remove this comment
-
-  db:
-    image: postgres:15-alpine
-    container_name: mc-postgres
-    environment:
-      - POSTGRES_DB=minecraft_controller
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres123
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    restart: unless-stopped
 
 volumes:
-  mc_servers_data:
-  postgres_data:
+  servers_data:
+  sqlite_data:
