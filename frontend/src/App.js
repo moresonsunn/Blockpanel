@@ -82,7 +82,13 @@ import FilesPanelWrapper from './components/server-details/FilesPanelWrapper';
 import EditingPanel from './components/server-details/EditingPanel';
 import { useFetch } from './lib/useFetch';
 
-const API = 'http://localhost:8000';
+// Dynamic API base: prefer same-origin; fallback to explicit localhost for dev
+const _defaultOrigin = (typeof window !== 'undefined' && window.location && window.location.origin)
+  ? window.location.origin
+  : 'http://localhost:8000';
+// Primary (no prefix) and alias (/api) – /api helps bypass aggressive browser extensions blocking certain paths
+const API_BASES = [_defaultOrigin, _defaultOrigin + '/api'];
+let API = _defaultOrigin; // retained for existing code below
 
 // Ensure document title reflects branding
 if (typeof window !== 'undefined') {
@@ -344,9 +350,44 @@ const authHeaders = () => {
 // Attach Authorization header to all fetch calls
 if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
   const originalFetch = window.fetch.bind(window);
-  window.fetch = (input, init = {}) => {
-    const headers = { ...(init && init.headers ? init.headers : {}), ...authHeaders() };
-    return originalFetch(input, { ...(init || {}), headers });
+  window.fetch = async (input, init = {}) => {
+    try {
+      const headers = { ...(init && init.headers ? init.headers : {}), ...authHeaders() };
+      const urlStr = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
+      const firstResp = await originalFetch(input, { ...(init || {}), headers });
+      // If OK or not a candidate for retry, return immediately
+      if (firstResp && firstResp.ok) return firstResp;
+      const shouldRetry = (() => {
+        // Network-level failures won't yield a Response (caught below), so only logic for non-ok
+        if (!urlStr.startsWith(_defaultOrigin)) return false;
+        if (urlStr.includes('/api/')) return false; // already using alias
+        // Retry on common auth endpoints or if blocked by extension (ad blockers sometimes force 0/401 early)
+        if (firstResp && (firstResp.status === 404 || firstResp.status === 0 || firstResp.status === 401)) return true;
+        return false;
+      })();
+      if (!shouldRetry) return firstResp;
+      const apiUrl = urlStr.replace(_defaultOrigin, _defaultOrigin + '/api');
+      try {
+        const secondResp = await originalFetch(apiUrl, { ...(init || {}), headers });
+        if (!secondResp.ok) return secondResp; // propagate
+        return secondResp;
+      } catch (e2) {
+        return firstResp; // fallback to original failure
+      }
+    } catch (e) {
+      // Network error before Response – try /api if possible
+      try {
+        const urlStr = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
+        if (urlStr.startsWith(_defaultOrigin) && !urlStr.includes('/api/')) {
+          const apiUrl = urlStr.replace(_defaultOrigin, _defaultOrigin + '/api');
+          const headers = { ...(init && init.headers ? init.headers : {}), ...authHeaders() };
+          return await originalFetch(apiUrl, { ...(init || {}), headers });
+        }
+      } catch {
+        // Swallow
+      }
+      throw e;
+    }
   };
 }
 
