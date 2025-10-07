@@ -1,0 +1,36 @@
+# Compose variant exposing a wide port range (25500-25600) for Minecraft server containers.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.ports.yml up -d
+# This keeps the base services but adds a dummy sidecar to reserve host ports, ensuring they stay available.
+# The controller will still create separate containers for individual Minecraft servers mapping into this range.
+
+services:
+  # Sidecar that simply reserves / exposes the port range on the host so firewall rules & UIs see them as open.
+  port_reserver:
+    image: alpine:3.20
+    container_name: mc-port-reserver
+    command: ["/bin/sh", "-c", "while true; do sleep 3600; done"]
+    # Expose the entire range so host firewall/NAT can be pre-configured.
+    ports:
+      - "25500-25600:25500-25600"
+    restart: unless-stopped
+    networks:
+      - mc_net
+
+  controller:
+    # Merge with existing controller service; ensure it is on same network.
+    networks:
+      - mc_net
+
+  db:
+    networks:
+      - mc_net
+
+  runtime_prewarm:
+    networks:
+      - mc_net
+
+networks:
+  mc_net:
+    name: minecraft_controller_network
+    driver: bridge
