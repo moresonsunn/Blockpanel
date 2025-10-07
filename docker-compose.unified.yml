@@ -20,7 +20,8 @@ services:
       - USE_POSTGRES=false
       - DATABASE_URL=sqlite:////data/sqlite/minecraft_controller.db
       - SERVERS_CONTAINER_ROOT=/data/servers
-      - SERVERS_VOLUME_NAME=minecraft-controller_mc_servers_data
+      # Must match the actual Docker named volume created by compose: <project>_servers_data
+      - SERVERS_VOLUME_NAME=minecraft-controller_servers_data
       - DOCKER_HOST=unix:///var/run/docker.sock
       - ENVIRONMENT=production
       - SECRET_KEY=${SECRET_KEY:-change-me-single-container-secret}

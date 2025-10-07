@@ -29,7 +29,7 @@
         {"name": "USE_POSTGRES", "value": "false"},
         {"name": "DATABASE_URL", "value": "sqlite:////data/sqlite/minecraft_controller.db"},
         {"name": "SERVERS_CONTAINER_ROOT", "value": "/data/servers"},
-        {"name": "SERVERS_VOLUME_NAME", "value": "blockpanel_mc_servers_data"},
+  {"name": "SERVERS_VOLUME_NAME", "value": "blockpanel_servers"},
         {"name": "DOCKER_HOST", "value": "unix:///var/run/docker.sock"},
         {"name": "ENVIRONMENT", "value": "production"},
         {"name": "SECRET_KEY", "value": "change-me-unified-secret"},
