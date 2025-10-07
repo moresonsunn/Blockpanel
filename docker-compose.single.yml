@@ -141,10 +141,16 @@ services:
   # building/running different Minecraft server types & versions (Fabric/Forge/etc.).
   # This speeds up the first server creation because the image layer fetch happens now.
   runtime_prewarm:
-    image: ${BLOCKPANEL_RUNTIME_IMAGE:-moresonsun/blockypanel-runtime}:${BLOCKPANEL_TAG:-latest}
+    # Separate tag so you can override if runtime image tags differ from controller
+    image: ${BLOCKPANEL_RUNTIME_IMAGE:-moresonsun/blockypanel-runtime}:${BLOCKPANEL_RUNTIME_TAG:-latest}
     container_name: blockpanel-runtime-prewarm
     command: ["true"]
     restart: "no"
+    profiles: [prewarm]
+    # If the remote runtime image tag doesn't exist yet, you can locally build it:
+    # build:
+    #   context: .
+    #   dockerfile: docker/runtime.Dockerfile
     # If you don't want this behavior, you can comment this service out safely.
 
 volumes:
