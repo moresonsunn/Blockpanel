@@ -37,6 +37,10 @@ RUN wget -qO- https://github.com/adoptium/temurin8-binaries/releases/download/jd
     ln -sf /opt/jdk-17.0.9+9/bin/java /usr/local/bin/java17 && \
     ln -sf /usr/local/openjdk-21/bin/java /usr/local/bin/java21
 
+# Include runtime entrypoint so unified image can act as runtime image for server containers
+COPY docker/runtime-entrypoint.sh /usr/local/bin/runtime-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/runtime-entrypoint.sh && chmod +x /usr/local/bin/runtime-entrypoint.sh
+
 ENV JAVA_TOOL_OPTIONS="-Djava.awt.headless=true -Dsun.java2d.noddraw=true -Djava.net.preferIPv4Stack=true" \
     APP_VERSION=$APP_VERSION \
     GIT_COMMIT=$GIT_COMMIT

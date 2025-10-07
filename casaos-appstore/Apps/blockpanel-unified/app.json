@@ -34,6 +34,8 @@
         {"name": "ENVIRONMENT", "value": "production"},
         {"name": "SECRET_KEY", "value": "change-me-unified-secret"},
         {"name": "LOG_LEVEL", "value": "INFO"}
+  , {"name": "BLOCKPANEL_RUNTIME_IMAGE", "value": "moresonsun/blockpanel-unified"}
+  , {"name": "BLOCKPANEL_RUNTIME_TAG", "value": "latest"}
       ],
       "health_check": {
         "test": ["CMD", "curl", "-f", "http://localhost:8000/health/quick"],

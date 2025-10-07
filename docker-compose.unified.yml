@@ -22,6 +22,8 @@ services:
       - SERVERS_CONTAINER_ROOT=/data/servers
       # Must match the actual Docker named volume created by compose: <project>_servers_data
       - SERVERS_VOLUME_NAME=minecraft-controller_servers_data
+  - BLOCKPANEL_RUNTIME_IMAGE=moresonsun/blockpanel-unified
+  - BLOCKPANEL_RUNTIME_TAG=latest
       - DOCKER_HOST=unix:///var/run/docker.sock
       - ENVIRONMENT=production
       - SECRET_KEY=${SECRET_KEY:-change-me-single-container-secret}
