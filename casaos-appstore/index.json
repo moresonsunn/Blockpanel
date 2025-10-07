@@ -2,6 +2,8 @@
   "name": "BlockPanel Store",
   "description": "Single-app 3rd party store delivering the BlockPanel Minecraft server controller.",
   "tips": "Add this URL as a Custom Source in CasaOS.",
+  "author": "BlockPanel Team",
+  "source": "https://github.com/moresonsunn/minecraft-server",
   "version": 1,
   "apps": [
     {
@@ -9,7 +11,7 @@
       "title": "BlockPanel",
       "description": "Manage multiple Minecraft servers (Vanilla, Fabric, Forge, NeoForge, etc.) with a web UI.",
       "icon": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/frontend/public/favicon.ico",
-      "index": "Apps/blockpanel/app.json",
+      "index": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/casaos-appstore/Apps/blockpanel/app.json",
       "port_map": "8000"
     }
   ]
