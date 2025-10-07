@@ -41,6 +41,7 @@ from routers import (
     catalog_router,
     integrations_router,
 )
+from server_types_routes import router as server_types_router
 from auth import require_auth, get_current_user, require_admin, require_moderator
 from scheduler import get_scheduler
 from models import User
@@ -109,6 +110,7 @@ app.include_router(health_router)
 app.include_router(modpack_router)
 app.include_router(catalog_router)
 app.include_router(integrations_router)
+app.include_router(server_types_router)
 
 
 @app.on_event("startup")
