@@ -23,7 +23,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - APP_NAME=BlockPanel
-      - APP_VERSION=v0.1.1
+      - APP_VERSION=v0.3.2
       - SERVERS_CONTAINER_ROOT=/data/servers
       - SERVERS_VOLUME_NAME=minecraft-controller_mc_servers_data
       - DOCKER_HOST=unix:///var/run/docker.sock
@@ -31,7 +31,7 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres123@db:5432/minecraft_controller
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health" ]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/quick" ]
       interval: 30s
       timeout: 5s
       retries: 5
