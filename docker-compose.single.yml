@@ -137,6 +137,16 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Lightweight one-shot container that pre-pulls the runtime image used for
+  # building/running different Minecraft server types & versions (Fabric/Forge/etc.).
+  # This speeds up the first server creation because the image layer fetch happens now.
+  runtime_prewarm:
+    image: ${BLOCKPANEL_RUNTIME_IMAGE:-moresonsun/blockypanel-runtime}:${BLOCKPANEL_TAG:-latest}
+    container_name: blockpanel-runtime-prewarm
+    command: ["true"]
+    restart: "no"
+    # If you don't want this behavior, you can comment this service out safely.
+
 volumes:
   mc_servers_data:
   sqlite_data:
