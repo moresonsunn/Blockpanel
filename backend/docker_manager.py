@@ -15,7 +15,11 @@ import requests  # For direct jar download fallback
 logger = logging.getLogger(__name__)
 
 MINECRAFT_LABEL = "minecraft_server_manager"
-RUNTIME_IMAGE = "mc-runtime:latest"
+RUNTIME_IMAGE = (
+    f"{os.getenv('BLOCKPANEL_RUNTIME_IMAGE')}:{os.getenv('BLOCKPANEL_RUNTIME_TAG', 'latest')}"
+    if os.getenv('BLOCKPANEL_RUNTIME_IMAGE')
+    else "mc-runtime:latest"
+)
 MINECRAFT_PORT = 25565
 
 # --- Helper functions for direct jar download fallback ---
