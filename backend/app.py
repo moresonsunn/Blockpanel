@@ -94,7 +94,20 @@ app = FastAPI()
 try:
     from fastapi.middleware.cors import CORSMiddleware
     _origins_env = os.getenv("ALLOWED_ORIGINS", "*")
-    if _origins_env.strip() == "*":
+    _origins_regex_env = os.getenv("ALLOWED_ORIGIN_REGEX")
+    # Priority: explicit regex > explicit list > wildcard fallback
+    if _origins_regex_env:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origin_regex=_origins_regex_env,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=["Authorization"],
+            max_age=600,
+        )
+        print(f"[CORS] Configured with allow_origin_regex={_origins_regex_env}")
+    elif _origins_env.strip() == "*":
         app.add_middleware(
             CORSMiddleware,
             allow_origin_regex=".*",
