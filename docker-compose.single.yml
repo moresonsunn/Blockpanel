@@ -118,7 +118,8 @@ services:
       - APP_NAME=BlockPanel
       - APP_VERSION=${BLOCKPANEL_TAG:-v0.3.2}
       - USE_POSTGRES=false
-      - DATABASE_URL=sqlite:///./minecraft_controller.db
+      # Persist DB under /data/sqlite so we don't shadow /app code with a volume
+      - DATABASE_URL=sqlite:////data/sqlite/minecraft_controller.db
       - SERVERS_CONTAINER_ROOT=/data/servers
       - SERVERS_VOLUME_NAME=minecraft-controller_mc_servers_data
       - DOCKER_HOST=unix:///var/run/docker.sock
@@ -128,8 +129,8 @@ services:
     volumes:
       - mc_servers_data:/data/servers
       - /var/run/docker.sock:/var/run/docker.sock
-      # Persist SQLite file by binding the work directory db file out if desired:
-      - sqlite_data:/app
+      # Persist SQLite database files (separate from code)
+      - sqlite_data:/data/sqlite
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/quick"]
       interval: 30s
