@@ -1,7 +1,7 @@
 {
   "id": "blockpanel-lite",
   "title": "BlockPanel (Lite)",
-  "version": "v0.3.2",
+  "version": "latest",
   "description": "Single-container BlockPanel using SQLite (no Postgres/Redis/Nginx). Suitable for quick trials.",
   "tagline": "Minecraft controller (single image)",
   "architecture": ["amd64", "arm64"],
@@ -16,7 +16,7 @@
   "container_list": [
     {
       "name": "blockpanel",
-      "image": "moresonsun/blockypanel:v0.3.2",
+      "image": "moresonsun/blockypanel:latest",
       "ports": ["8000:8000"],
       "volumes": [
         {"container": "/data/servers", "host": "blockpanel_servers"},
@@ -25,7 +25,7 @@
       ],
       "envs": [
         {"name": "APP_NAME", "value": "BlockPanel"},
-        {"name": "APP_VERSION", "value": "v0.3.2"},
+        {"name": "APP_VERSION", "value": "latest"},
         {"name": "USE_POSTGRES", "value": "false"},
         {"name": "DATABASE_URL", "value": "sqlite:///./minecraft_controller.db"},
         {"name": "SERVERS_CONTAINER_ROOT", "value": "/data/servers"},
