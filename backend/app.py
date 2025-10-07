@@ -90,6 +90,26 @@ def get_neoforge_loader_versions():
 
 app = FastAPI()
 
+# ---- CORS Configuration ----
+try:
+    from fastapi.middleware.cors import CORSMiddleware
+    _origins_env = os.getenv("ALLOWED_ORIGINS", "*")
+    if _origins_env.strip() == "*":
+        allowed_origins = ["*"]
+    else:
+        allowed_origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["Authorization"],
+        max_age=600,
+    )
+except Exception:
+    pass
+
 # Enable gzip compression for API responses and static assets
 try:
     from starlette.middleware.gzip import GZipMiddleware
@@ -111,6 +131,26 @@ app.include_router(modpack_router)
 app.include_router(catalog_router)
 app.include_router(integrations_router)
 app.include_router(server_types_router)
+
+# /api aliases to avoid ad-block filters blocking paths like /servers/stats or /auth/login
+for _router in [
+    auth_router,
+    scheduler_router,
+    player_router,
+    world_router,
+    plugin_router,
+    user_router,
+    monitoring_router,
+    health_router,
+    modpack_router,
+    catalog_router,
+    integrations_router,
+    server_types_router,
+]:
+    try:
+        app.include_router(_router, prefix="/api")
+    except Exception:
+        pass
 
 
 @app.on_event("startup")
