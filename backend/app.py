@@ -27,7 +27,7 @@ import threading
 import logging
 
 # New imports for enhanced features
-from database import init_db
+from database import init_db, SessionLocal
 from routers import (
     auth_router,
     scheduler_router,
@@ -42,7 +42,7 @@ from routers import (
     integrations_router,
 )
 from server_types_routes import router as server_types_router
-from auth import require_auth, get_current_user, require_admin, require_moderator
+from auth import require_auth, get_current_user, require_admin, require_moderator, get_password_hash
 from scheduler import get_scheduler
 from models import User
 from config import SERVERS_ROOT, APP_NAME, APP_VERSION
@@ -165,6 +165,27 @@ async def startup_event():
         init_db()
         print("Database initialized successfully")
         logging.info("Database initialized")
+        # Optional admin password reset via environment variable (one-shot on each start if set)
+        try:
+            admin_pw = os.getenv("ADMIN_PASSWORD")
+            if admin_pw:
+                if len(admin_pw) < 8:
+                    logging.warning("ADMIN_PASSWORD env var present but too short (<8); ignoring for security.")
+                else:
+                    db_sess = SessionLocal()
+                    from models import User
+                    admin_user = db_sess.query(User).filter(User.username == 'admin').first()
+                    if admin_user:
+                        # Use bulk update pattern to avoid ORM attribute typing issues under some analyzers
+                        db_sess.query(User).filter(User.id == admin_user.id).update({
+                            'hashed_password': get_password_hash(admin_pw),
+                            'must_change_password': False,
+                        })
+                        db_sess.commit()
+                        logging.info("Admin password reset via ADMIN_PASSWORD environment variable.")
+                    db_sess.close()
+        except Exception as e:
+            logging.error(f"Failed to process ADMIN_PASSWORD reset: {e}")
         
         # Start task scheduler
         logging.info("Starting task scheduler...")

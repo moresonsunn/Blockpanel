@@ -88,7 +88,8 @@ const _defaultOrigin = (typeof window !== 'undefined' && window.location && wind
   : 'http://localhost:8000';
 // Primary (no prefix) and alias (/api) – /api helps bypass aggressive browser extensions blocking certain paths
 const API_BASES = [_defaultOrigin, _defaultOrigin + '/api'];
-let API = _defaultOrigin; // retained for existing code below
+// Prefer /api base first to avoid ad-blockers intercepting original paths
+let API = _defaultOrigin + '/api'; // retained for existing code below
 
 // Ensure document title reflects branding
 if (typeof window !== 'undefined') {
