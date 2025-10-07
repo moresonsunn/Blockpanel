@@ -25,7 +25,7 @@ LABEL org.opencontainers.image.title="BlockPanel Unified" \
 
 # System deps (python, build basics, curl, wget, unzip, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-dev gcc curl wget unzip bash ca-certificates fontconfig libfreetype6 libxi6 libxrender1 libxext6 \
+    python3 python3-pip python3-venv python3-dev gcc curl wget unzip bash ca-certificates fontconfig libfreetype6 libxi6 libxrender1 libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Multi-Java toolchain (8, 11, 17 already added manually like runtime image)

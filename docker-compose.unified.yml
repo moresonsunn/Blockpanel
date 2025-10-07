@@ -4,7 +4,7 @@
 
 services:
   blockpanel:
-    image: ${BLOCKPANEL_UNIFIED_IMAGE:-moresonsun/blockypanel-unified}:${BLOCKPANEL_TAG:-latest}
+    image: moresonsun/blockpanel-unified:latest
     build:
       context: .
       dockerfile: docker/controller-unified.Dockerfile
