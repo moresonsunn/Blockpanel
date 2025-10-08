@@ -95,6 +95,9 @@ app = FastAPI()
 try:
     from fastapi.middleware.cors import CORSMiddleware
     _origins_env = os.getenv("ALLOWED_ORIGINS", "*")
+    # Strip surrounding quotes that may appear due to docker-compose quoting (e.g. "http://a,http://b")
+    if (_origins_env.startswith('"') and _origins_env.endswith('"')) or (_origins_env.startswith("'") and _origins_env.endswith("'")):
+        _origins_env = _origins_env[1:-1]
     _origins_regex_env = os.getenv("ALLOWED_ORIGIN_REGEX")
     # Priority: explicit regex > explicit list > wildcard fallback
     if _origins_regex_env:
@@ -120,7 +123,7 @@ try:
         )
         print("[CORS] Configured with allow_origin_regex=.*")
     else:
-        allow_list = [o.strip() for o in _origins_env.split(",") if o.strip()]
+        allow_list = [o.strip().strip('"').strip("'") for o in _origins_env.split(",") if o.strip()]
         app.add_middleware(
             CORSMiddleware,
             allow_origins=allow_list,
