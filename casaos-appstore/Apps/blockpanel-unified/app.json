@@ -1,7 +1,7 @@
 {
   "id": "blockpanel-unified",
   "title": "BlockPanel (Unified)",
-  "version": "latest",
+  "version": "f5cefc4d",
   "description": "Single image containing controller, frontend, and embedded multi-Java runtime (SQLite).",
   "tagline": "Minecraft controller (unified image)",
   "architecture": ["amd64", "arm64"],
@@ -16,20 +16,10 @@
   "container_list": [
     {
       "name": "blockpanel",
-      "image": "moresonsun/blockpanel-unified:latest",
+  "image": "moresonsun/blockpanel-unified:f5cefc4d",
       "ports": [
         "8000:8000",
-        "25500:25500","25501:25501","25502:25502","25503:25503","25504:25504","25505:25505","25506:25506","25507:25507","25508:25508","25509:25509",
-        "25510:25510","25511:25511","25512:25512","25513:25513","25514:25514","25515:25515","25516:25516","25517:25517","25518:25518","25519:25519",
-        "25520:25520","25521:25521","25522:25522","25523:25523","25524:25524","25525:25525","25526:25526","25527:25527","25528:25528","25529:25529",
-        "25530:25530","25531:25531","25532:25532","25533:25533","25534:25534","25535:25535","25536:25536","25537:25537","25538:25538","25539:25539",
-        "25540:25540","25541:25541","25542:25542","25543:25543","25544:25544","25545:25545","25546:25546","25547:25547","25548:25548","25549:25549",
-        "25550:25550","25551:25551","25552:25552","25553:25553","25554:25554","25555:25555","25556:25556","25557:25557","25558:25558","25559:25559",
-        "25560:25560","25561:25561","25562:25562","25563:25563","25564:25564","25565:25565","25566:25566","25567:25567","25568:25568","25569:25569",
-        "25570:25570","25571:25571","25572:25572","25573:25573","25574:25574","25575:25575","25576:25576","25577:25577","25578:25578","25579:25579",
-        "25580:25580","25581:25581","25582:25582","25583:25583","25584:25584","25585:25585","25586:25586","25587:25587","25588:25588","25589:25589",
-        "25590:25590","25591:25591","25592:25592","25593:25593","25594:25594","25595:25595","25596:25596","25597:25597","25598:25598","25599:25599",
-        "25600:25600"
+        "25565:25565"
       ],
       "volumes": [
         {"container": "/data/servers", "host": "blockpanel_servers"},
@@ -38,14 +28,15 @@
       ],
       "envs": [
         {"name": "APP_NAME", "value": "BlockPanel"},
-        {"name": "APP_VERSION", "value": "latest"},
+  {"name": "APP_VERSION", "value": "f5cefc4d"},
         {"name": "USE_POSTGRES", "value": "false"},
         {"name": "DATABASE_URL", "value": "sqlite:////data/sqlite/minecraft_controller.db"},
         {"name": "SERVERS_CONTAINER_ROOT", "value": "/data/servers"},
   {"name": "SERVERS_VOLUME_NAME", "value": "blockpanel_servers"},
         {"name": "DOCKER_HOST", "value": "unix:///var/run/docker.sock"},
         {"name": "ENVIRONMENT", "value": "production"},
-        {"name": "SECRET_KEY", "value": "change-me-unified-secret"},
+  {"name": "SECRET_KEY", "value": "change-me-unified-secret"},
+  {"name": "ALLOWED_ORIGIN_REGEX", "value": ".*"},
         {"name": "LOG_LEVEL", "value": "INFO"}
   , {"name": "BLOCKPANEL_RUNTIME_IMAGE", "value": "moresonsun/blockpanel-unified"}
   , {"name": "BLOCKPANEL_RUNTIME_TAG", "value": "latest"}
@@ -60,6 +51,6 @@
     }
   ],
   "tips": {
-    "before_install": "This unified image bundles the controller, UI and Java runtimes. Ideal for quick self-hosting.",
-    "after_install": "Visit http://<host>:8000 (admin/admin123). Change the admin password immediately."}
+    "before_install": "Unified controller + UI. Only panel (8000) and a single default Minecraft port (25565) are mapped. Additional servers get dynamic ports; set a fixed host_port during creation if you need a specific one.",
+    "after_install": "Visit http://<host>:8000 (default admin credentials if unchanged). Immediately change the admin password. Use the Import feature to adopt existing /data/servers/<name> folders."}
 }
