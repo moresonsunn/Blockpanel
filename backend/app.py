@@ -9,6 +9,7 @@ from server_providers.providers import get_provider_names, get_provider
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse
 import os
+from docker.errors import NotFound as DockerNotFound
 from file_manager import (
     list_dir as fm_list_dir,
     read_file as fm_read_file,
@@ -255,7 +256,32 @@ def get_docker_manager() -> DockerManager:
 @app.get("/api/servers")
 def list_servers(current_user: User = Depends(require_auth)):
     try:
-        return get_docker_manager().list_servers()
+        servers = get_docker_manager().list_servers()
+        # Enrich each with host_port convenience (primary Minecraft port 25565/tcp)
+        from docker_manager import MINECRAFT_PORT  # local import to avoid circular at module import time
+        for s in servers:
+            if isinstance(s, dict) and 'host_port' not in s:
+                # Prefer new style port_mappings if present
+                try:
+                    mappings = s.get('port_mappings') or {}
+                    primary = mappings.get(f"{MINECRAFT_PORT}/tcp") if isinstance(mappings, dict) else None
+                    hp = None
+                    if isinstance(primary, dict):
+                        hp = primary.get('host_port')
+                    if not hp:
+                        # Fallback to legacy 'ports' raw structure
+                        raw_ports = s.get('ports') or {}
+                        mapping = raw_ports.get(f"{MINECRAFT_PORT}/tcp") if isinstance(raw_ports, dict) else None
+                        if mapping and isinstance(mapping, list) and len(mapping) > 0:
+                            hp = mapping[0].get('HostPort')
+                    if hp is not None:
+                        try:
+                            s['host_port'] = int(hp)
+                        except Exception:
+                            s['host_port'] = hp
+                except Exception:
+                    pass
+        return servers
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
 
@@ -398,6 +424,74 @@ def power_server(container_id: str, payload: PowerSignal, current_user: User = D
             return dm.kill_server(container_id)
         else:
             raise HTTPException(status_code=400, detail="Invalid signal. Must be one of: start, stop, restart, kill")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Docker unavailable: {e}")
+
+@app.get("/servers/{container_id}/state")
+@app.get("/api/servers/{container_id}/state")
+def get_server_state(container_id: str, current_user: User = Depends(require_auth)):
+    """Lightweight container state with phase + uptime heuristic.
+
+    Phases:
+      not_found: container missing
+      stopped: exists but not running
+      starting: running with uptime <30s
+      running: running with uptime >=30s
+    """
+    try:
+        dm = get_docker_manager()
+        import docker
+        try:
+            c = dm.client.containers.get(container_id)
+        except DockerNotFound:
+            return {"id": container_id, "phase": "not_found", "status": "not_found"}
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"Docker error: {e}")
+        try:
+            c.reload()
+        except Exception:
+            pass
+        status = getattr(c, "status", "unknown")
+        attrs = getattr(c, "attrs", {}) or {}
+        created = attrs.get("Created")
+        uptime_seconds = None
+        if created:
+            from datetime import datetime, timezone
+            try:
+                ts = created.rstrip('Z')
+                if '.' in ts:
+                    head, frac = ts.split('.', 1)
+                    frac = (frac + '000000')[:6]
+                    ts = f"{head}.{frac}"
+                dt = datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
+                uptime_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
+            except Exception:
+                uptime_seconds = None
+        if status != 'running':
+            phase = 'stopped'
+        else:
+            if uptime_seconds is not None and uptime_seconds < 30:
+                phase = 'starting'
+            else:
+                phase = 'running'
+        host_port = None
+        ports = (attrs.get('NetworkSettings', {}) or {}).get('Ports', {}) or {}
+        primary = ports.get('25565/tcp')
+        if primary and isinstance(primary, list) and primary and primary[0].get('HostPort'):
+            try:
+                host_port = int(primary[0]['HostPort'])
+            except Exception:
+                host_port = primary[0].get('HostPort')
+        return {
+            'id': c.id,
+            'name': c.name,
+            'status': status,
+            'phase': phase,
+            'uptime_seconds': uptime_seconds,
+            'host_port': host_port,
+        }
     except HTTPException:
         raise
     except Exception as e:
