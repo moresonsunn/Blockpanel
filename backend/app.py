@@ -346,6 +346,62 @@ class ServerCreateRequest(BaseModel):
     min_ram: int | str = 1024  # MB or string like "512M"
     max_ram: int | str = 2048  # MB or string like "2G"
 
+class ServerImportRequest(BaseModel):
+    name: str  # Must match existing directory under SERVERS_CONTAINER_ROOT
+    host_port: int | None = None
+    min_ram: int | str = 1024
+    max_ram: int | str = 2048
+    java_version: str | None = None  # optional preferred Java version (8/11/17/21)
+
+@app.post("/servers/import")
+@app.post("/api/servers/import")
+def import_server(req: ServerImportRequest, current_user: User = Depends(require_auth)):
+    """Adopt an existing server directory into BlockPanel without re-downloading jars.
+
+    The directory must already exist at /data/servers/{name} (inside container) / host volume.
+    Optional: specify a host_port to bind the Minecraft port; otherwise auto-assign.
+    """
+    try:
+        # Normalize RAM inputs similar to create_server
+        def fmt(r):
+            if isinstance(r, int):
+                return f"{r // 1024}G" if r >= 1024 else f"{r}M"
+            return str(r)
+        min_ram = fmt(req.min_ram)
+        max_ram = fmt(req.max_ram)
+        dm = get_docker_manager()
+        extra_env = {}
+        if req.java_version:
+            if req.java_version not in ["8", "11", "17", "21"]:
+                raise HTTPException(status_code=400, detail="Invalid java_version (allowed: 8,11,17,21)")
+            extra_env["JAVA_VERSION"] = req.java_version
+            extra_env["JAVA_BIN"] = f"/usr/local/bin/java{req.java_version}"
+        result = dm.create_server_from_existing(
+            name=req.name,
+            host_port=req.host_port,
+            min_ram=min_ram,
+            max_ram=max_ram,
+            extra_env=extra_env or None,
+        )
+        # Enrich with host_port lookup (best effort)
+        try:
+            if isinstance(result, dict) and 'id' in result and 'host_port' not in result:
+                from docker_manager import MINECRAFT_PORT
+                import docker as _docker
+                _c = _docker.from_env().containers.get(result['id'])
+                _ports = _c.attrs.get('NetworkSettings', {}).get('Ports', {}) or {}
+                _mapping = _ports.get(f"{MINECRAFT_PORT}/tcp") or []
+                if _mapping and isinstance(_mapping, list) and _mapping[0].get('HostPort'):
+                    result['host_port'] = int(_mapping[0]['HostPort'])
+        except Exception:
+            pass
+        result['imported'] = True
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to import server: {e}")
+
 @app.post("/servers")
 @app.post("/api/servers")
 def create_server(req: ServerCreateRequest, current_user: User = Depends(require_auth)):
