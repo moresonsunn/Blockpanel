@@ -198,6 +198,45 @@ Consumers who want to stay on the old namespace need not change anything until y
 - Plugin & mod marketplace integration
 - Automatic port range reservation and conflict resolution
 
+## CasaOS Deployment
+
+The unified image is optimized for CasaOS by exposing only the panel/API port (8000) and optionally a single default server port (25565). Avoid mapping large static port ranges; runtime containers will dynamically bind Minecraft ports as you create servers.
+
+### Add Custom Store
+Add the raw URL to `casaos-appstore/index.json` as a custom source in CasaOS, then install "BlockPanel (Unified)".
+
+### Import Existing Server
+1. Stop any legacy standalone Minecraft container.
+2. Copy its world/server directory into the BlockPanel servers volume (visible in the unified container at `/data/servers/<name>`).
+3. Call `POST /api/servers/import` with `{ "name": "<name>" }` (optionally `host_port`, `java_version`).
+4. Start the server from the UI.
+
+### Environment Quick Reference
+| Variable | Purpose |
+|----------|---------|
+| ADMIN_PASSWORD | Sets/overrides admin password at startup (>=8 chars) |
+| ALLOWED_ORIGIN_REGEX | Broad CORS (use `.*` initially, tighten later) |
+| BLOCKPANEL_RUNTIME_IMAGE/TAG | Image & tag used for spawned runtime servers |
+| SERVERS_VOLUME_NAME | Docker volume name for servers data |
+| SERVERS_CONTAINER_ROOT | In-container path for servers (default `/data/servers`) |
+
+### Troubleshooting on CasaOS
+| Symptom | Likely Cause | Fix |
+|---------|--------------|-----|
+| Legacy flag shown | Too many mapped ports / old manifest | Use pruned `app.json` (only 8000 & 25565) |
+| Servers fail to start | Docker socket missing | Mount `/var/run/docker.sock` |
+| CORS errors for logs/files | Origin mismatch | Set `ALLOWED_ORIGIN_REGEX=.*` temporarily |
+| Port mismatch in UI | Wide pre-mapped range consumed | Remove static range; specify `host_port` per server if needed |
+
+### Dynamic Host Ports
+If you omit `host_port` on server creation the controller finds the next free port by inspecting Docker mappings. Use `GET /api/ports/suggest` before creation or specify a desired port (validated with `GET /api/ports/validate`).
+
+### Security Notes
+- Change `ADMIN_PASSWORD` immediately after first run.
+- Replace `SECRET_KEY` in production for JWT/session integrity.
+- Limit `ALLOWED_ORIGIN_REGEX` to specific origins once stable.
+
+
 ## Contributing
 PRs and issues welcome. Keep changes small & focused. Include reproduction steps for bug reports.
 

@@ -4,7 +4,7 @@
   "tips": "Add this URL as a Custom Source in CasaOS.",
   "author": "BlockPanel Team",
   "source": "https://github.com/moresonsunn/minecraft-server",
-  "version": 1,
+  "version": 2,
   "apps": [
     {
       "id": "blockpanel",

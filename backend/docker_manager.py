@@ -721,6 +721,8 @@ class DockerManager:
             MINECRAFT_LABEL: "true",
             "mc.type": server_type,
             "mc.version": version,
+            "io.casaos.managed": "true",
+            "io.casaos.category": "Game Servers",
         }
         if loader_version is not None:
             labels["mc.loader_version"] = str(loader_version)
@@ -855,6 +857,8 @@ class DockerManager:
         labels = {
             MINECRAFT_LABEL: "true",
             "mc.type": "custom",
+            "io.casaos.managed": "true",
+            "io.casaos.category": "Game Servers",
         }
         try:
             for k, v in (extra_labels or {}).items():
