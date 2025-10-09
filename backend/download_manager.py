@@ -2,6 +2,7 @@ import shutil
 from pathlib import Path
 import requests
 from server_providers.providers import get_provider
+from typing import Optional, Any
 import logging
 
 logger = logging.getLogger(__name__)
@@ -9,39 +10,95 @@ logger = logging.getLogger(__name__)
 def stream_download(url: str, dest_file: Path):
     logger.info(f"Downloading {url} to {dest_file}")
     dest_file.parent.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        with requests.get(url, stream=True, timeout=60) as r:
-            r.raise_for_status()
-            
 
-            content_type = r.headers.get('content-type', '').lower()
+    headers = {
+        # Some hosts require a UA; also helps avoid being flagged as a bot
+        "User-Agent": "BlockPanel/1.0 (+https://github.com/moresonsunn/minecraft-server)",
+        # Be explicit we expect a binary JAR but accept common fallbacks
+        "Accept": "application/java-archive, application/octet-stream, */*",
+    }
+
+    try:
+        with requests.get(url, headers=headers, stream=True, timeout=120, allow_redirects=True) as r:
+            r.raise_for_status()
+
+            # Ensure gzip transfer-encoding is handled when reading raw
+            try:
+                r.raw.decode_content = True  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+            content_type = (r.headers.get('content-type') or '').lower()
+            content_disp = r.headers.get('content-disposition') or ''
+
+            def _looks_like_jar() -> bool:
+                if 'application/java-archive' in content_type or 'application/octet-stream' in content_type:
+                    return True
+                if 'filename=' in content_disp and content_disp.lower().endswith('.jar"'):
+                    return True
+                # URL itself may end with .jar
+                if url.lower().endswith('.jar'):
+                    return True
+                return False
+
+            # If server returns JSON/HTML, try to read a small portion to include diagnostic message
             if 'application/json' in content_type or 'text/html' in content_type:
-                preview = r.raw.read(512)
-                logger.error(f"Received non-binary response instead of JAR from {url}; content-type={content_type}; preview={preview[:200]!r}")
-                raise ValueError(f"Download URL returned non-JAR content: {content_type}")
-            elif 'application/java-archive' in content_type or 'application/octet-stream' in content_type or content_type == '':
-                logger.info(f"Received JAR-like content type: {content_type or 'unknown'}")
+                # Read a small, decoded chunk for diagnostics
+                try:
+                    preview_bytes = next(r.iter_content(chunk_size=1024))
+                except StopIteration:
+                    preview_bytes = b''
+                except Exception:
+                    preview_bytes = b''
+
+                preview_text = ''
+                try:
+                    preview_text = preview_bytes.decode('utf-8', errors='replace')
+                except Exception:
+                    preview_text = repr(preview_bytes[:200])
+
+                # Try to parse JSON to surface error
+                err_detail = preview_text
+                try:
+                    import json
+                    j = json.loads(preview_text)
+                    msg = j.get('message') or j.get('error') or j.get('detail')
+                    if msg:
+                        err_detail = msg
+                except Exception:
+                    pass
+
+                # Common cause: rate limiting or build/file not found
+                if 'rate' in err_detail.lower() and 'limit' in err_detail.lower():
+                    raise ValueError("Remote server rate-limited the download. Please retry in a minute.")
+                raise ValueError(f"Download URL returned non-JAR content ({content_type}): {err_detail[:200]}")
+
+            if _looks_like_jar():
+                logger.info(f"Received JAR-like response (type: {content_type or 'unknown'})")
             else:
-                logger.warning(f"Unexpected content type: {content_type}, proceeding anyway")
-            
+                logger.warning(f"Ambiguous content-type for JAR download: {content_type!r}; proceeding to stream data")
+
+            # Stream to disk
             with open(dest_file, "wb") as f:
-                shutil.copyfileobj(r.raw, f)
-        
+                for chunk in r.iter_content(chunk_size=1024 * 128):
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+
         file_size = dest_file.stat().st_size
         logger.info(f"Download complete, size: {file_size} bytes")
-        
 
-        if file_size < 1024 * 5:  
+        # Basic sanity checks
+        if file_size < 1024 * 5:
             logger.error(f"Downloaded file is too small ({file_size} bytes), likely corrupted")
             raise ValueError(f"Downloaded file is too small ({file_size} bytes), expected at least 5KB")
-        
+
         with open(dest_file, 'rb') as f:
             magic = f.read(4)
         if magic[:2] != b'PK':
             logger.error(f"Downloaded file does not look like a JAR (missing PK header): magic={magic!r}")
             raise ValueError("Downloaded file is not a valid JAR (ZIP) archive")
-            
+
     except requests.exceptions.RequestException as e:
         logger.error(f"Download failed for {url}: {e}")
         raise
@@ -49,9 +106,9 @@ def stream_download(url: str, dest_file: Path):
         logger.error(f"Unexpected error during download: {e}")
         raise
 
-def prepare_server_files(server_type: str, version: str, dest_dir: Path, loader_version: str = None, installer_version: str = None):
+def prepare_server_files(server_type: str, version: str, dest_dir: Path, loader_version: Optional[str] = None, installer_version: Optional[str] = None):
     logger.info(f"Preparing {server_type} server v{version} in {dest_dir}")
-    provider = get_provider(server_type)
+    provider: Any = get_provider(server_type)
     
     try:
 

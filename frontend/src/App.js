@@ -82,14 +82,14 @@ import FilesPanelWrapper from './components/server-details/FilesPanelWrapper';
 import EditingPanel from './components/server-details/EditingPanel';
 import { useFetch } from './lib/useFetch';
 
-// Dynamic API base: prefer same-origin; fallback to explicit localhost for dev
+// Dynamic API base: prefer same-origin '/api' to avoid CORS; keep fallback to current origin if needed
 const _defaultOrigin = (typeof window !== 'undefined' && window.location && window.location.origin)
   ? window.location.origin
   : 'http://localhost:8000';
 // Primary (no prefix) and alias (/api) – /api helps bypass aggressive browser extensions blocking certain paths
-const API_BASES = [_defaultOrigin, _defaultOrigin + '/api'];
-// Prefer /api base first to avoid ad-blockers intercepting original paths
-let API = _defaultOrigin + '/api'; // retained for existing code below
+const API_BASES = [_defaultOrigin + '/api', _defaultOrigin];
+// Prefer /api base first to avoid cross-origin calls
+let API = (typeof window !== 'undefined') ? '/api' : 'http://localhost:8000';
 
 // Ensure document title reflects branding
 if (typeof window !== 'undefined') {

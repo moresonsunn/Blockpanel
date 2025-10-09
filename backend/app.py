@@ -252,41 +252,60 @@ from starlette.responses import Response  # noqa: E402
 
 def _preflight_headers(request: Request) -> dict:
     origin = request.headers.get("origin", "*") if request else "*"
+    req_method = (request.headers.get("access-control-request-method", "") or "").upper()
     req_headers = (request.headers.get("access-control-request-headers", "") or "").strip()
     allow_headers = [h.strip() for h in req_headers.split(",") if h.strip()]
     # Always include common headers we rely on
-    if "authorization" not in [h.lower() for h in allow_headers]:
-        allow_headers.append("Authorization")
-    if "content-type" not in [h.lower() for h in allow_headers]:
-        allow_headers.append("Content-Type")
+    lower = [h.lower() for h in allow_headers]
+    def ensure(h: str):
+        if h.lower() not in lower:
+            allow_headers.append(h)
+            lower.append(h.lower())
+    # Common headers browsers include
+    for h in [
+        "Authorization","Content-Type","Accept","Origin","X-Requested-With",
+        "Cache-Control","Pragma","If-Modified-Since","Accept-Language","Accept-Encoding"
+    ]:
+        ensure(h)
+    allow_methods = "GET,POST,PUT,DELETE,PATCH,OPTIONS"
+    if req_method and req_method not in allow_methods.split(","):
+        allow_methods = f"{allow_methods},{req_method}"
     return {
         "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+        "Access-Control-Allow-Methods": allow_methods,
         "Access-Control-Allow-Headers": ", ".join(allow_headers) if allow_headers else "*",
         "Access-Control-Allow-Credentials": "true",
         # Chrome Private Network Access (PNA) preflight support
         "Access-Control-Allow-Private-Network": "true",
         "Access-Control-Max-Age": "600",
+        # Expose common headers so the client can read them
+        "Access-Control-Expose-Headers": "Content-Length, Content-Type, ETag, Authorization",
         "Vary": "Origin",
     }
 
 @app.options("/{rest_of_path:path}")
 def cors_preflight_passthrough(rest_of_path: str, request: Request):  # type: ignore
     try:
-        return Response(status_code=204, headers=_preflight_headers(request))
+        headers = _preflight_headers(request)
+        headers.setdefault("Content-Length", "0")
+        return Response(status_code=200, headers=headers)
     except Exception:
-        return Response(status_code=204)
+        return Response(status_code=200, headers={"Content-Length": "0"})
 
 # Explicit preflight routes for common endpoints (some proxies match strictly)
 @app.options("/servers/{container_id}/logs")
 @app.options("/api/servers/{container_id}/logs")
 def cors_preflight_logs(container_id: str, request: Request):  # type: ignore
-    return Response(status_code=204, headers=_preflight_headers(request))
+    headers = _preflight_headers(request)
+    headers.setdefault("Content-Length", "0")
+    return Response(status_code=200, headers=headers)
 
 @app.options("/servers/{container_id}/command")
 @app.options("/api/servers/{container_id}/command")
 def cors_preflight_command(container_id: str, request: Request):  # type: ignore
-    return Response(status_code=204, headers=_preflight_headers(request))
+    headers = _preflight_headers(request)
+    headers.setdefault("Content-Length", "0")
+    return Response(status_code=200, headers=headers)
 
 from typing import Any
 _docker_manager: Any = None
@@ -1120,4 +1139,9 @@ try:
 except Exception:
     # Static directory may not exist in some environments (e.g., dev without build)
     pass
+
+# Avoid noisy 404s for favicon when UI is served without a favicon file
+@app.get("/favicon.ico")
+def favicon_placeholder():
+    return Response(status_code=204)
 
