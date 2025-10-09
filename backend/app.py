@@ -4,6 +4,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional
 from docker_manager import DockerManager
+from runtime_adapter import get_runtime_manager
 import server_providers  # noqa: F401 - ensure providers register
 from server_providers.providers import get_provider_names, get_provider
 from fastapi.staticfiles import StaticFiles
@@ -246,12 +247,19 @@ async def shutdown_event():
     except Exception as e:
         logging.error(f"Error during shutdown: {e}")
 
-_docker_manager: DockerManager | None = None
+from typing import Any
+_docker_manager: Any = None
 
-def get_docker_manager() -> DockerManager:
+def get_docker_manager() -> Any:
     global _docker_manager
     if _docker_manager is None:
-        _docker_manager = DockerManager()
+        # Prefer local runtime adapter when enabled
+        adapter = None
+        try:
+            adapter = get_runtime_manager()
+        except Exception:
+            adapter = None
+        _docker_manager = adapter or DockerManager()
     return _docker_manager
 
 

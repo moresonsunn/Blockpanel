@@ -18,6 +18,37 @@ MINECRAFT_LABEL = "minecraft_server_manager"
 # CasaOS application id to associate child runtime containers with the main app.
 # This helps CasaOS group containers and avoid showing them as standalone "Legacy Apps".
 CASAOS_APP_ID = os.getenv("CASAOS_APP_ID", "blockpanel-unified")
+
+# Compose grouping detection: try to read the current controller container's labels and networks
+def _detect_compose_context() -> tuple[str | None, str | None]:
+    try:
+        _client = docker.from_env()
+        # HOSTNAME is usually the container ID (short) in Docker
+        _self_id = os.getenv("HOSTNAME")
+        if not _self_id:
+            return None, None
+        _self = _client.containers.get(_self_id)
+        _labels = (_self.attrs.get("Config", {}) or {}).get("Labels", {}) or {}
+        compose_project = _labels.get("com.docker.compose.project")
+        # Pick any attached network that looks like a compose default network
+        networks = (_self.attrs.get("NetworkSettings", {}) or {}).get("Networks", {}) or {}
+        compose_net = None
+        if compose_project and networks:
+            # Common default network suffix "_default"
+            preferred = f"{compose_project}_default"
+            if preferred in networks:
+                compose_net = preferred
+            else:
+                # Fallback to the first network name
+                compose_net = next(iter(networks.keys())) if networks else None
+        return compose_project, compose_net
+    except Exception:
+        return None, None
+
+_detected_project, _detected_network = _detect_compose_context()
+COMPOSE_PROJECT = _detected_project or os.getenv("COMPOSE_PROJECT_NAME") or os.getenv("CASAOS_COMPOSE_PROJECT") or CASAOS_APP_ID
+COMPOSE_RUNTIME_SERVICE = os.getenv("COMPOSE_RUNTIME_SERVICE", "minecraft-runtime")
+COMPOSE_NETWORK = _detected_network or os.getenv("COMPOSE_NETWORK") or (f"{os.getenv('COMPOSE_PROJECT_NAME')}_default" if os.getenv("COMPOSE_PROJECT_NAME") else None)
 RUNTIME_IMAGE = (
     f"{os.getenv('BLOCKPANEL_RUNTIME_IMAGE')}:{os.getenv('BLOCKPANEL_RUNTIME_TAG', 'latest')}"
     if os.getenv('BLOCKPANEL_RUNTIME_IMAGE')
@@ -724,11 +755,10 @@ class DockerManager:
             MINECRAFT_LABEL: "true",
             "mc.type": server_type,
             "mc.version": version,
-            "io.casaos.managed": "true",
-            "io.casaos.category": "Game Servers",
-            # Associate with CasaOS app and hint the UI this is a child/runtime container.
-            "io.casaos.app": CASAOS_APP_ID,
-            "io.casaos.parent": CASAOS_APP_ID,
+            # Compose-equivalent grouping for UIs that rely on compose metadata
+            "com.docker.compose.project": COMPOSE_PROJECT,
+            "com.docker.compose.service": COMPOSE_RUNTIME_SERVICE,
+            "com.docker.compose.version": "2",
             # Optional: generic metadata that some dashboards honor
             "org.opencontainers.image.title": "BlockPanel Runtime",
             "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
@@ -780,6 +810,7 @@ class DockerManager:
                     environment=env_vars,
                     ports=port_binding,
                     volumes=self._get_bind_volume(server_dir),
+                    network=COMPOSE_NETWORK if COMPOSE_NETWORK else None,
                     detach=True,
                     tty=True,
                     stdin_open=True,
@@ -866,10 +897,10 @@ class DockerManager:
         labels = {
             MINECRAFT_LABEL: "true",
             "mc.type": "custom",
-            "io.casaos.managed": "true",
-            "io.casaos.category": "Game Servers",
-            "io.casaos.app": CASAOS_APP_ID,
-            "io.casaos.parent": CASAOS_APP_ID,
+            # Group with controller using compose-style labels only
+            "com.docker.compose.project": COMPOSE_PROJECT,
+            "com.docker.compose.service": COMPOSE_RUNTIME_SERVICE,
+            "com.docker.compose.version": "2",
             "org.opencontainers.image.title": "BlockPanel Runtime",
             "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
         }
@@ -895,6 +926,7 @@ class DockerManager:
                 environment=env_vars,
                 ports=port_binding,
                 volumes=self._get_bind_volume(server_dir),
+                network=COMPOSE_NETWORK if COMPOSE_NETWORK else None,
                 detach=True,
                 tty=True,
                 stdin_open=True,

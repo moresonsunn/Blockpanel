@@ -14,6 +14,7 @@ services:
     environment:
       APP_NAME: BlockPanel
       APP_VERSION: latest
+      RUNTIME_MODE: local
       USE_POSTGRES: "false"
       DATABASE_URL: sqlite:////data/sqlite/minecraft_controller.db
       SERVERS_CONTAINER_ROOT: /data/servers
