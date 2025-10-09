@@ -41,45 +41,60 @@ def stream_download(url: str, dest_file: Path):
                     return True
                 return False
 
-            # If server returns JSON/HTML, try to read a small portion to include diagnostic message
+            # If server returns JSON/HTML, read a small portion to decide if it's actually a JAR (mis-labeled) or a real error
+            initial_chunk: bytes | None = None
             if 'application/json' in content_type or 'text/html' in content_type:
-                # Read a small, decoded chunk for diagnostics
+                # Peek the first chunk
                 try:
-                    preview_bytes = next(r.iter_content(chunk_size=1024))
+                    initial_chunk = next(r.iter_content(chunk_size=1024))
                 except StopIteration:
-                    preview_bytes = b''
+                    initial_chunk = b''
                 except Exception:
-                    preview_bytes = b''
+                    initial_chunk = b''
 
-                preview_text = ''
-                try:
-                    preview_text = preview_bytes.decode('utf-8', errors='replace')
-                except Exception:
-                    preview_text = repr(preview_bytes[:200])
+                def _is_zip_header(b: bytes) -> bool:
+                    if not b or len(b) < 4:
+                        return False
+                    sig = b[:4]
+                    # Valid ZIP local/header signatures
+                    return sig in (b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08') or b.startswith(b'PK')
 
-                # Try to parse JSON to surface error
-                err_detail = preview_text
-                try:
-                    import json
-                    j = json.loads(preview_text)
-                    msg = j.get('message') or j.get('error') or j.get('detail')
-                    if msg:
-                        err_detail = msg
-                except Exception:
-                    pass
+                if initial_chunk and _is_zip_header(initial_chunk):
+                    logger.warning(
+                        f"Content-Type {content_type!r} claims JSON/HTML but body looks like a JAR (ZIP header detected). Proceeding with download."
+                    )
+                    # fall-through to streaming, but ensure we write the peeked bytes first
+                else:
+                    # Try to parse JSON to surface error details
+                    preview_text = ''
+                    try:
+                        preview_text = (initial_chunk or b'')[:2048].decode('utf-8', errors='replace')
+                    except Exception:
+                        preview_text = repr((initial_chunk or b'')[:200])
 
-                # Common cause: rate limiting or build/file not found
-                if 'rate' in err_detail.lower() and 'limit' in err_detail.lower():
-                    raise ValueError("Remote server rate-limited the download. Please retry in a minute.")
-                raise ValueError(f"Download URL returned non-JAR content ({content_type}): {err_detail[:200]}")
+                    err_detail = preview_text
+                    try:
+                        import json
+                        j = json.loads(preview_text)
+                        msg = j.get('message') or j.get('error') or j.get('detail')
+                        if msg:
+                            err_detail = msg
+                    except Exception:
+                        pass
+
+                    if 'rate' in err_detail.lower() and 'limit' in err_detail.lower():
+                        raise ValueError("Remote server rate-limited the download. Please retry in a minute.")
+                    raise ValueError(f"Download URL returned non-JAR content ({content_type}): {err_detail[:200]}")
 
             if _looks_like_jar():
                 logger.info(f"Received JAR-like response (type: {content_type or 'unknown'})")
             else:
                 logger.warning(f"Ambiguous content-type for JAR download: {content_type!r}; proceeding to stream data")
 
-            # Stream to disk
+            # Stream to disk (include any initial peeked bytes first when present)
             with open(dest_file, "wb") as f:
+                if initial_chunk:
+                    f.write(initial_chunk)
                 for chunk in r.iter_content(chunk_size=1024 * 128):
                     if not chunk:
                         continue
