@@ -250,22 +250,41 @@ async def shutdown_event():
 # Catch-all OPTIONS preflight to avoid proxy-related 400 responses
 from starlette.responses import Response  # noqa: E402
 
+def _preflight_headers(request: Request) -> dict:
+    origin = request.headers.get("origin", "*") if request else "*"
+    req_headers = (request.headers.get("access-control-request-headers", "") or "").strip()
+    allow_headers = [h.strip() for h in req_headers.split(",") if h.strip()]
+    # Always include common headers we rely on
+    if "authorization" not in [h.lower() for h in allow_headers]:
+        allow_headers.append("Authorization")
+    if "content-type" not in [h.lower() for h in allow_headers]:
+        allow_headers.append("Content-Type")
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+        "Access-Control-Allow-Headers": ", ".join(allow_headers) if allow_headers else "*",
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Max-Age": "600",
+        "Vary": "Origin",
+    }
+
 @app.options("/{rest_of_path:path}")
 def cors_preflight_passthrough(rest_of_path: str, request: Request):  # type: ignore
     try:
-        origin = request.headers.get("origin", "*") if request else "*"
-        req_method = request.headers.get("access-control-request-method", "*") if request else "*"
-        req_headers = request.headers.get("access-control-request-headers", "*") if request else "*"
-        headers = {
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Methods": req_method or "*",
-            "Access-Control-Allow-Headers": req_headers or "*",
-            "Access-Control-Allow-Credentials": "true",
-            "Vary": "Origin",
-        }
-        return Response(status_code=204, headers=headers)
+        return Response(status_code=204, headers=_preflight_headers(request))
     except Exception:
         return Response(status_code=204)
+
+# Explicit preflight routes for common endpoints (some proxies match strictly)
+@app.options("/servers/{container_id}/logs")
+@app.options("/api/servers/{container_id}/logs")
+def cors_preflight_logs(container_id: str, request: Request):  # type: ignore
+    return Response(status_code=204, headers=_preflight_headers(request))
+
+@app.options("/servers/{container_id}/command")
+@app.options("/api/servers/{container_id}/command")
+def cors_preflight_command(container_id: str, request: Request):  # type: ignore
+    return Response(status_code=204, headers=_preflight_headers(request))
 
 from typing import Any
 _docker_manager: Any = None
