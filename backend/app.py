@@ -247,6 +247,26 @@ async def shutdown_event():
     except Exception as e:
         logging.error(f"Error during shutdown: {e}")
 
+# Catch-all OPTIONS preflight to avoid proxy-related 400 responses
+from starlette.responses import Response  # noqa: E402
+
+@app.options("/{rest_of_path:path}")
+def cors_preflight_passthrough(rest_of_path: str, request: Request):  # type: ignore
+    try:
+        origin = request.headers.get("origin", "*") if request else "*"
+        req_method = request.headers.get("access-control-request-method", "*") if request else "*"
+        req_headers = request.headers.get("access-control-request-headers", "*") if request else "*"
+        headers = {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Methods": req_method or "*",
+            "Access-Control-Allow-Headers": req_headers or "*",
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
+        }
+        return Response(status_code=204, headers=headers)
+    except Exception:
+        return Response(status_code=204)
+
 from typing import Any
 _docker_manager: Any = None
 

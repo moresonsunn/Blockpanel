@@ -9,8 +9,10 @@ services:
       - blockpanel_net
     ports:
       - "8000:8000"
-      # Optional: map a default Minecraft port for the first server you create; others get dynamic ports
-      - "25565:25565"
+      # Publish a safe range of Minecraft ports so multiple servers can run in local mode
+      # Match the controller's suggested range (25565-25999) for TCP and UDP
+      - "25565-25999:25565-25999/tcp"
+      - "25565-25999:25565-25999/udp"
     environment:
       APP_NAME: BlockPanel
       APP_VERSION: latest
