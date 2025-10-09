@@ -1,7 +1,7 @@
 {
   "id": "blockpanel-unified",
   "title": "BlockPanel (Unified)",
-  "version": "f5cefc4d",
+  "version": "v0.1.1",
   "description": "Single image containing controller, frontend, and embedded multi-Java runtime (SQLite).",
   "tagline": "Minecraft controller (unified image)",
   "architecture": ["amd64", "arm64"],
@@ -15,8 +15,8 @@
   "restart": "unless-stopped",
   "container_list": [
     {
-      "name": "blockpanel",
-  "image": "moresonsun/blockpanel-unified:f5cefc4d",
+    "name": "blockpanel",
+  "image": "moresonsun/blockpanel-unified:casaos-fix",
       "ports": [
         "8000:8000",
         "25565:25565"
@@ -28,7 +28,7 @@
       ],
       "envs": [
         {"name": "APP_NAME", "value": "BlockPanel"},
-  {"name": "APP_VERSION", "value": "f5cefc4d"},
+  {"name": "APP_VERSION", "value": "v0.1.1"},
         {"name": "USE_POSTGRES", "value": "false"},
         {"name": "DATABASE_URL", "value": "sqlite:////data/sqlite/minecraft_controller.db"},
         {"name": "SERVERS_CONTAINER_ROOT", "value": "/data/servers"},
@@ -37,10 +37,17 @@
         {"name": "ENVIRONMENT", "value": "production"},
   {"name": "SECRET_KEY", "value": "change-me-unified-secret"},
   {"name": "ALLOWED_ORIGIN_REGEX", "value": ".*"},
+  {"name": "CASAOS_APP_ID", "value": "blockpanel-unified"},
         {"name": "LOG_LEVEL", "value": "INFO"}
   , {"name": "BLOCKPANEL_RUNTIME_IMAGE", "value": "moresonsun/blockpanel-unified"}
   , {"name": "BLOCKPANEL_RUNTIME_TAG", "value": "latest"}
       ],
+  "labels": [
+    {"name": "io.casaos.app", "value": "blockpanel-unified"},
+    {"name": "io.casaos.parent", "value": "blockpanel-unified"},
+    {"name": "io.casaos.managed", "value": "true"},
+    {"name": "io.casaos.category", "value": "Game Servers"}
+  ],
       "health_check": {
         "test": ["CMD", "curl", "-f", "http://localhost:8000/health/quick"],
         "interval": "30s",

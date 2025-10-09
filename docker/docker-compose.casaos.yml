@@ -3,7 +3,7 @@
 
 services:
   blockpanel:
-    image: moresonsun/blockpanel-unified:latest
+    image: moresonsun/blockpanel-unified:casaos-fix
     container_name: blockpanel
     networks:
       - blockpanel_net
@@ -45,6 +45,9 @@ services:
       io.casaos.app: "blockpanel-unified"
       io.casaos.managed: "true"
       io.casaos.category: "Game Servers"
+      com.docker.compose.project: "blockpanel-unified"
+      com.docker.compose.service: "controller"
+      com.docker.compose.version: "2"
 
 volumes:
   blockpanel_servers:
