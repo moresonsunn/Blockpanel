@@ -43,4 +43,6 @@ services:
 
 volumes:
   blockpanel_servers:
+    name: blockpanel_servers
   blockpanel_sqlite:
+    name: blockpanel_sqlite
