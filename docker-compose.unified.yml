@@ -27,10 +27,12 @@ services:
       - SECRET_KEY=${SECRET_KEY:-change-me-single-container-secret}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ADMIN_PASSWORD=YourNewStrongPass123!
-      # Explicit origins required for credentialed requests (Authorization header)
-      - ALLOWED_ORIGINS="http://localhost:8000,http://127.0.0.1:8000,http://192.168.2.190:8000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000"
+      # Prefer regex-based CORS to accommodate CasaOS and dev hosts without quotes parsing issues
+      - ALLOWED_ORIGIN_REGEX=.*
       # Temporary debug endpoint enabling /debug/echo-headers (remove or set 0 in production)
       - ENABLE_DEBUG_ENDPOINTS=1
+      # Ensure runtime containers can be associated with the CasaOS app to avoid "Legacy App" display
+      - CASAOS_APP_ID=blockpanel-unified
     volumes:
       - servers_data:/data/servers
       - sqlite_data:/data/sqlite
@@ -41,6 +43,10 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    labels:
+      io.casaos.app: "blockpanel-unified"
+      io.casaos.managed: "true"
+      io.casaos.category: "Game Servers"
 
 volumes:
   servers_data:

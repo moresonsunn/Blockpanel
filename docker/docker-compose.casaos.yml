@@ -1,0 +1,46 @@
+# CasaOS-ready compose for BlockPanel (Unified)
+# Minimal ports, proper volumes, CasaOS labels, and environment for dynamic runtime containers.
+
+services:
+  blockpanel:
+    image: moresonsun/blockpanel-unified:latest
+    container_name: blockpanel
+    ports:
+      - "8000:8000"
+      # Optional: map a default Minecraft port for the first server you create; others get dynamic ports
+      - "25565:25565"
+    environment:
+      APP_NAME: BlockPanel
+      APP_VERSION: latest
+      USE_POSTGRES: "false"
+      DATABASE_URL: sqlite:////data/sqlite/minecraft_controller.db
+      SERVERS_CONTAINER_ROOT: /data/servers
+      SERVERS_VOLUME_NAME: blockpanel_servers
+      BLOCKPANEL_RUNTIME_IMAGE: moresonsun/blockpanel-unified
+      BLOCKPANEL_RUNTIME_TAG: latest
+      DOCKER_HOST: unix:///var/run/docker.sock
+      ENVIRONMENT: production
+      SECRET_KEY: ${SECRET_KEY:-change-me-unified-secret}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # CORS: allow CasaOS and local LAN by regex; tighten in production if desired
+      ALLOWED_ORIGIN_REGEX: ".*"
+      # Associate runtime containers to avoid legacy-app grouping in CasaOS UI
+      CASAOS_APP_ID: blockpanel-unified
+    volumes:
+      - blockpanel_servers:/data/servers
+      - blockpanel_sqlite:/data/sqlite
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/quick"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    labels:
+      io.casaos.app: "blockpanel-unified"
+      io.casaos.managed: "true"
+      io.casaos.category: "Game Servers"
+
+volumes:
+  blockpanel_servers:
+  blockpanel_sqlite:

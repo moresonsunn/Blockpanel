@@ -15,6 +15,9 @@ import requests  # For direct jar download fallback
 logger = logging.getLogger(__name__)
 
 MINECRAFT_LABEL = "minecraft_server_manager"
+# CasaOS application id to associate child runtime containers with the main app.
+# This helps CasaOS group containers and avoid showing them as standalone "Legacy Apps".
+CASAOS_APP_ID = os.getenv("CASAOS_APP_ID", "blockpanel-unified")
 RUNTIME_IMAGE = (
     f"{os.getenv('BLOCKPANEL_RUNTIME_IMAGE')}:{os.getenv('BLOCKPANEL_RUNTIME_TAG', 'latest')}"
     if os.getenv('BLOCKPANEL_RUNTIME_IMAGE')
@@ -723,6 +726,12 @@ class DockerManager:
             "mc.version": version,
             "io.casaos.managed": "true",
             "io.casaos.category": "Game Servers",
+            # Associate with CasaOS app and hint the UI this is a child/runtime container.
+            "io.casaos.app": CASAOS_APP_ID,
+            "io.casaos.parent": CASAOS_APP_ID,
+            # Optional: generic metadata that some dashboards honor
+            "org.opencontainers.image.title": "BlockPanel Runtime",
+            "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
         }
         if loader_version is not None:
             labels["mc.loader_version"] = str(loader_version)
@@ -859,6 +868,10 @@ class DockerManager:
             "mc.type": "custom",
             "io.casaos.managed": "true",
             "io.casaos.category": "Game Servers",
+            "io.casaos.app": CASAOS_APP_ID,
+            "io.casaos.parent": CASAOS_APP_ID,
+            "org.opencontainers.image.title": "BlockPanel Runtime",
+            "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
         }
         try:
             for k, v in (extra_labels or {}).items():
