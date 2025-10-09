@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 from typing import Dict, List, Optional, Set
+import json
+import time
+import psutil
 
 from local_runtime import LocalRuntimeManager, MINECRAFT_PORT
 from config import SERVERS_ROOT
@@ -89,13 +92,37 @@ class LocalAdapter:
 
     # --- Info & metrics ---
     def get_server_stats(self, container_id: str) -> Dict:
-        # No cgroups in local mode; return zeros
+        # Approximate stats for local mode using psutil and PID file
+        p = (SERVERS_ROOT / container_id).resolve()
+        pid = None
+        try:
+            pid_txt = (p / ".server.pid").read_text().strip()
+            pid = int(pid_txt) if pid_txt else None
+        except Exception:
+            pid = None
+        cpu_percent = 0.0
+        mem_usage_mb = 0.0
+        mem_limit_mb = float(psutil.virtual_memory().total) / (1024 * 1024)
+        mem_percent = 0.0
+        if pid:
+            try:
+                proc = psutil.Process(pid)
+                # cpu_percent with interval=0 gives last computed value; call twice for a fresh sample
+                proc.cpu_percent(interval=None)
+                time.sleep(0.05)
+                denom = psutil.cpu_count(logical=True) or 1
+                cpu_percent = proc.cpu_percent(interval=None) / float(denom)
+                mem = proc.memory_info().rss
+                mem_usage_mb = float(mem) / (1024 * 1024)
+                mem_percent = (mem_usage_mb / mem_limit_mb) * 100.0 if mem_limit_mb else 0.0
+            except Exception:
+                pass
         return {
             "id": container_id,
-            "cpu_percent": 0.0,
-            "memory_usage_mb": 0.0,
-            "memory_limit_mb": 0.0,
-            "memory_percent": 0.0,
+            "cpu_percent": round(cpu_percent, 2),
+            "memory_usage_mb": round(mem_usage_mb, 2),
+            "memory_limit_mb": round(mem_limit_mb, 2),
+            "memory_percent": round(mem_percent, 2),
             "network_rx_mb": 0.0,
             "network_tx_mb": 0.0,
         }
@@ -112,26 +139,33 @@ class LocalAdapter:
         return {"online": 0, "max": 0, "names": []}
 
     def get_server_info(self, container_id: str) -> Dict:
-        # Minimal info for UI
+        # Enriched info for UI in local mode using metadata
         p = (SERVERS_ROOT / container_id).resolve()
         exists = p.exists()
-        java_version = None
+        meta = {}
         try:
-            sp = p / "server.properties"
-            if sp.exists():
-                for line in sp.read_text(encoding="utf-8", errors="ignore").splitlines():
-                    if line.startswith("enable-rcon"):
-                        break
+            mp = p / "server_meta.json"
+            if mp.exists():
+                meta = json.loads(mp.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            meta = {}
+        host_port = meta.get("host_port") or MINECRAFT_PORT
+        server_type = meta.get("type")
+        version = meta.get("version")
+        created_at = meta.get("created_at")
+        # Infer java version from env file if present (best effort)
+        java_version = meta.get("java_version", "unknown")
         return {
             "id": container_id,
             "name": container_id,
             "status": "running",
-            "java_version": java_version or "unknown",
+            "type": server_type,
+            "version": version,
+            "created_at": created_at,
+            "java_version": java_version,
             "mounts": [],
             "ports": {f"{MINECRAFT_PORT}/tcp": None},
-            "port_mappings": {f"{MINECRAFT_PORT}/tcp": {"host_port": None, "host_ip": None}},
+            "port_mappings": {f"{MINECRAFT_PORT}/tcp": {"host_port": host_port, "host_ip": None}},
             "exists": exists,
         }
 
@@ -155,8 +189,20 @@ class LocalAdapter:
         return self.get_server_logs(container_id, tail=tail)
 
     def send_command(self, container_id: str, command: str) -> Dict:
-        # Not supported; requires stdin pipe to Java process
-        return {"id": container_id, "ok": False, "error": "Not supported in local mode"}
+        # Write command to FIFO console.in if present
+        fifo_path = (SERVERS_ROOT / container_id / "console.in").resolve()
+        try:
+            if not fifo_path.exists():
+                return {"id": container_id, "ok": False, "error": "Console pipe not available"}
+            # Ensure command ends with newline
+            data = (command or '').strip()
+            if not data:
+                return {"id": container_id, "ok": False, "error": "Empty command"}
+            with open(fifo_path, 'w', encoding='utf-8', buffering=1) as f:
+                f.write(data + "\n")
+            return {"id": container_id, "ok": True}
+        except Exception as e:
+            return {"id": container_id, "ok": False, "error": str(e)}
 
     # --- Ports helpers used by API ---
     def get_used_host_ports(self, only_minecraft: bool = True) -> Set[int]:

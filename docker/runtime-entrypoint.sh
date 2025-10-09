@@ -567,10 +567,14 @@ if { [ "$SERVER_TYPE" = "fabric" ] || [ "$SERVER_TYPE" = "quilt" ]; } && [ -n "$
   # If the chosen jar filename contains 'fabric' or 'quilt', assume it's the launcher and use 'server' argument; otherwise, run normally (nogui)
   if echo "$start_jar" | grep -Eqi "fabric|quilt"; then
     echo "Starting ${SERVER_TYPE^} via launcher: $start_jar (with 'server' argument)"
-    exec "$JAVA_BIN" $ALL_JAVA_ARGS -jar "$start_jar" server
+  # Create stdin FIFO bridge to allow external commands
+  mkfifo -m 600 console.in 2>/dev/null || true
+  # Feed FIFO into Java stdin so the controller can write commands
+  tail -f -n +1 console.in | exec "$JAVA_BIN" $ALL_JAVA_ARGS -jar "$start_jar" server
   else
     echo "Starting ${SERVER_TYPE^} using standard server jar: $start_jar (nogui)"
-    exec "$JAVA_BIN" $ALL_JAVA_ARGS -jar "$start_jar" nogui
+  mkfifo -m 600 console.in 2>/dev/null || true
+  tail -f -n +1 console.in | exec "$JAVA_BIN" $ALL_JAVA_ARGS -jar "$start_jar" nogui
   fi
 fi
 
@@ -613,7 +617,8 @@ if [ -n "$start_jar" ]; then
     echo "WARNING: JAR file validation failed, but attempting to start anyway..."
   fi
   
-  exec "$JAVA_BIN" $ALL_JAVA_ARGS -jar "$start_jar" nogui
+  mkfifo -m 600 console.in 2>/dev/null || true
+  tail -f -n +1 console.in | exec "$JAVA_BIN" $ALL_JAVA_ARGS -jar "$start_jar" nogui
 fi
 
 echo "No server jar or run.sh found in $(pwd). Contents:" >&2

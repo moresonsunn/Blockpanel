@@ -7,6 +7,7 @@ from typing import Optional, Dict, List
 
 from config import SERVERS_ROOT
 from download_manager import prepare_server_files
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,9 @@ class LocalRuntimeManager:
 
     def _log_file(self, name: str) -> Path:
         return self._server_dir(name) / "server.stdout.log"
+
+    def _meta_file(self, name: str) -> Path:
+        return self._server_dir(name) / "server_meta.json"
 
     def _is_running(self, pid: int) -> bool:
         try:
@@ -84,7 +88,6 @@ class LocalRuntimeManager:
             self._pid_file(name).write_text(str(proc.pid), encoding="utf-8")
         except Exception:
             pass
-
         return {"id": name, "name": name, "status": "running", "pid": proc.pid}
 
     def _ensure_server_port(self, srv_dir: Path, port: int) -> None:
@@ -128,6 +131,22 @@ class LocalRuntimeManager:
             loader_version=loader_version or "",
             installer_version=installer_version or "",
         )
+        # Persist metadata for UI and management
+        meta = {
+            "name": name,
+            "type": server_type,
+            "version": version,
+            "loader_version": loader_version or None,
+            "installer_version": installer_version or None,
+            "min_ram": str(min_ram),
+            "max_ram": str(max_ram),
+            "host_port": int(host_port or MINECRAFT_PORT),
+            "created_at": int(time.time()),
+        }
+        try:
+            self._meta_file(name).write_text(json.dumps(meta), encoding="utf-8")
+        except Exception:
+            pass
         env = {
             "SERVER_DIR_NAME": name,
             "MIN_RAM": str(min_ram),
@@ -150,6 +169,32 @@ class LocalRuntimeManager:
         srv_dir = self._server_dir(name)
         if not srv_dir.exists() or not srv_dir.is_dir():
             raise RuntimeError(f"Server directory {srv_dir} does not exist")
+        # Update or create metadata
+        meta_path = self._meta_file(name)
+        meta = {}
+        try:
+            if meta_path.exists():
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+        # Ensure defaults
+        meta.setdefault("name", name)
+        meta.setdefault("type", None)
+        meta.setdefault("version", None)
+        meta.setdefault("created_at", int(time.time()))
+        if host_port:
+            try:
+                meta["host_port"] = int(host_port)
+            except Exception:
+                pass
+        if min_ram:
+            meta["min_ram"] = str(min_ram)
+        if max_ram:
+            meta["max_ram"] = str(max_ram)
+        try:
+            meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        except Exception:
+            pass
         env = {
             "SERVER_DIR_NAME": name,
             "MIN_RAM": str(min_ram),
@@ -212,12 +257,25 @@ class LocalRuntimeManager:
                 except Exception:
                     pid = None
                 status = "running" if (pid and self._is_running(pid)) else "exited"
+                # Load metadata
+                meta = {}
+                try:
+                    mp = self._meta_file(name)
+                    if mp.exists():
+                        meta = json.loads(mp.read_text(encoding="utf-8"))
+                except Exception:
+                    meta = {}
+                host_port = meta.get("host_port") or MINECRAFT_PORT
+                server_type = meta.get("type")
+                version = meta.get("version")
                 items.append({
                     "id": name,
                     "name": name,
                     "status": status,
-                    "type": None,
-                    "version": None,
+                    "type": server_type,
+                    "version": version,
+                    "host_port": host_port,
+                    "created_at": meta.get("created_at"),
                     "ports": {f"{MINECRAFT_PORT}/tcp": None},
                 })
         except Exception as e:
