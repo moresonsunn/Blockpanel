@@ -264,6 +264,8 @@ def _preflight_headers(request: Request) -> dict:
         "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
         "Access-Control-Allow-Headers": ", ".join(allow_headers) if allow_headers else "*",
         "Access-Control-Allow-Credentials": "true",
+        # Chrome Private Network Access (PNA) preflight support
+        "Access-Control-Allow-Private-Network": "true",
         "Access-Control-Max-Age": "600",
         "Vary": "Origin",
     }
