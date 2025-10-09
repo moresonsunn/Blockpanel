@@ -29,6 +29,7 @@
       "envs": [
         {"name": "APP_NAME", "value": "BlockPanel"},
   {"name": "APP_VERSION", "value": "v0.1.1"},
+        {"name": "RUNTIME_MODE", "value": "local"},
         {"name": "USE_POSTGRES", "value": "false"},
         {"name": "DATABASE_URL", "value": "sqlite:////data/sqlite/minecraft_controller.db"},
         {"name": "SERVERS_CONTAINER_ROOT", "value": "/data/servers"},

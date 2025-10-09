@@ -29,9 +29,10 @@ services:
       ALLOWED_ORIGIN_REGEX: ".*"
       # Associate runtime containers to avoid legacy-app grouping in CasaOS UI
       CASAOS_APP_ID: blockpanel-unified
-    CASAOS_COMPOSE_PROJECT: blockpanel-unified
-    # Ensure runtime containers join the same network as the controller
-    COMPOSE_NETWORK: blockpanel_net
+      # Compose context so runtime (if docker mode is used) can join same group
+      CASAOS_COMPOSE_PROJECT: blockpanel-unified
+      # Ensure runtime containers join the same network as the controller
+      COMPOSE_NETWORK: blockpanel_net
     volumes:
       - blockpanel_servers:/data/servers
       - blockpanel_sqlite:/data/sqlite
