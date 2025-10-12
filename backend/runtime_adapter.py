@@ -120,10 +120,15 @@ class LocalAdapter:
         return self.local.stop_server(container_id)
 
     def start_server(self, container_id: str) -> Dict:
+        # For local runtime, starting means spawn from existing folder
         return self.local.create_server_from_existing(container_id)
 
     def restart_server(self, container_id: str) -> Dict:
-        self.local.stop_server(container_id)
+        # Stop then start again from existing
+        try:
+            self.local.stop_server(container_id)
+        except Exception:
+            pass
         return self.local.create_server_from_existing(container_id)
 
     def kill_server(self, container_id: str) -> Dict:

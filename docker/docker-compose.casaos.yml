@@ -10,7 +10,7 @@ services:
     ports:
       - "8000:8000"
       # Explicitly publish Minecraft ports (no range syntax for CasaOS)
-      # TCP and UDP for 25565-25665; extend similarly if you need more servers
+      # TCP and UDP for 25565-25580; extend similarly if you need more servers
       - "25565:25565/tcp"
       - "25566:25566/tcp"
       - "25567:25567/tcp"

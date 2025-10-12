@@ -130,9 +130,9 @@ def main():
             servers = docker_manager.list_servers()
             
             for server in servers:
+                name = server.get("name", "unknown")
                 try:
                     container_id = server.get("id")
-                    name = server.get("name")
                     if container_id:
                         print(f"  Restarting {name}...")
                         docker_manager.stop_server(container_id)

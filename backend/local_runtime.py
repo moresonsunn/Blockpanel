@@ -151,6 +151,7 @@ class LocalRuntimeManager:
                 stderr=subprocess.STDOUT,
                 env=run_env,
                 close_fds=True,
+                start_new_session=True,  # ensure new process group for clean termination
             )
         except Exception as e:
             logf.close()
@@ -292,23 +293,33 @@ class LocalRuntimeManager:
         if not pid:
             return {"id": name, "status": "unknown", "method": "noop"}
 
-        # Try graceful SIGTERM first
+        # Try graceful SIGTERM on process group first, then on PID
+        sent = False
         try:
-            os.kill(pid, 15)  # SIGTERM
-        except Exception as e:
-            logger.warning(f"SIGTERM failed for {name} ({pid}): {e}")
+            # If process started with start_new_session=True, pgid == pid
+            os.killpg(pid, 15)  # SIGTERM to the whole group
+            sent = True
+        except Exception:
+            try:
+                os.kill(pid, 15)  # fallback to single process
+                sent = True
+            except Exception as e:
+                logger.warning(f"SIGTERM failed for {name} ({pid}): {e}")
         # Wait a bit
         deadline = time.time() + 10
         while time.time() < deadline:
             if not self._is_running(pid):
                 break
             time.sleep(0.5)
-        # Force kill if still running
+        # Force kill if still running (process group first)
         if self._is_running(pid):
             try:
-                os.kill(pid, 9)
-            except Exception as e:
-                logger.warning(f"SIGKILL failed for {name} ({pid}): {e}")
+                os.killpg(pid, 9)
+            except Exception:
+                try:
+                    os.kill(pid, 9)
+                except Exception as e:
+                    logger.warning(f"SIGKILL failed for {name} ({pid}): {e}")
         try:
             pid_file.unlink(missing_ok=True)
         except Exception:

@@ -234,7 +234,7 @@ export function GlobalDataProvider({ children }) {
     // Set up optimized background refresh intervals for balanced performance
     refreshIntervals.current.servers = setInterval(() => {
       refreshDataInBackground('servers', `${API}/servers`, (data) => Array.isArray(data) ? data : []);
-    }, 20000);
+    }, 10000);
 
     refreshIntervals.current.dashboardData = setInterval(() => {
       refreshDataInBackground('dashboardData', `${API}/monitoring/dashboard-data`);
@@ -2989,6 +2989,7 @@ function App() {
     data: serversData,
     loading: serversLoading,
     error: serversError,
+    setData: setServersData,
   } = useFetch(isAuthenticated ? `${API}/servers` : null, [isAuthenticated]);
   // Server creation form state
   const [name, setName] = useState(
@@ -3092,6 +3093,17 @@ function App() {
       min_ram: minRam ? Number(minRam) : null,
       max_ram: maxRam ? Number(maxRam) : null,
     };
+    // Optimistic placeholder entry so the card appears immediately
+    const optimistic = {
+      id: `pending-${Date.now()}`,
+      name,
+      status: 'creating',
+      type: selectedType,
+      version,
+    };
+    setServersData && setServersData(prev => (Array.isArray(prev) ? [optimistic, ...prev] : [optimistic]));
+    gd && gd.__setGlobalData && gd.__setGlobalData(cur => ({ ...cur, servers: [optimistic, ...(cur.servers || [])] }));
+
     await fetch(`${API}/servers`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3105,6 +3117,8 @@ function App() {
       if (gd && gd.__setGlobalData) {
         gd.__setGlobalData(cur => ({ ...cur, servers: Array.isArray(updated) ? updated : [] }));
       }
+      // Also update local servers list used by this page immediately
+      setServersData && setServersData(Array.isArray(updated) ? updated : []);
     }
   }, [name, selectedType, version, loaderVersion, installerVersion, hostPort, minRam, maxRam, gd]);
 
