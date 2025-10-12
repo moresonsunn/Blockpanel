@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from database import get_db
 from models import User, ServerPerformance
 from auth import require_auth, require_admin, require_moderator, get_user_permissions, verify_token, get_user_by_username
-from docker_manager import DockerManager
+from runtime_adapter import get_runtime_manager_or_docker
 from fastapi.responses import StreamingResponse
 import asyncio
 import json
@@ -44,8 +44,14 @@ class AlertRule(BaseModel):
     is_active: bool
     created_at: Optional[datetime]
 
-def get_docker_manager() -> DockerManager:
-    return DockerManager()
+_manager_cache = None
+
+
+def get_docker_manager():
+    global _manager_cache
+    if _manager_cache is None:
+        _manager_cache = get_runtime_manager_or_docker()
+    return _manager_cache
 
 @router.get("/system-health", response_model=SystemHealth)
 async def get_system_health(

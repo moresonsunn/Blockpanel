@@ -10,7 +10,7 @@ from typing import Dict, Any
 from database import SessionLocal
 from models import ScheduledTask, BackupTask
 from backup_manager import create_backup
-from docker_manager import DockerManager
+from runtime_adapter import get_runtime_manager_or_docker
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +37,10 @@ class TaskScheduler:
             self.scheduler.shutdown()
             logger.info("Task scheduler stopped")
     
-    def get_docker_manager(self) -> DockerManager:
-        """Get or create Docker manager instance."""
+    def get_docker_manager(self):
+        """Get or create runtime manager instance."""
         if self.docker_manager is None:
-            self.docker_manager = DockerManager()
+            self.docker_manager = get_runtime_manager_or_docker()
         return self.docker_manager
     
     def load_scheduled_tasks(self):

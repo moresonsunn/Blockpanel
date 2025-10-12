@@ -7,7 +7,7 @@ from database import get_db
 from auth import require_auth, require_moderator
 from models import User
 from file_manager import upload_file as fm_upload_file, delete_path as fm_delete_path
-from docker_manager import DockerManager
+from runtime_adapter import get_runtime_manager_or_docker
 from config import SERVERS_ROOT
 
 router = APIRouter(prefix="/plugins", tags=["plugins"])
@@ -27,8 +27,14 @@ def _plugins_dir(server_name: str) -> Path:
     return pdir
 
 
-def _get_docker_manager() -> DockerManager:
-    return DockerManager()
+_manager_cache = None
+
+
+def _get_docker_manager():
+    global _manager_cache
+    if _manager_cache is None:
+        _manager_cache = get_runtime_manager_or_docker()
+    return _manager_cache
 
 
 @router.get("/{server_name}")

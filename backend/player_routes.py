@@ -7,7 +7,7 @@ from datetime import datetime
 from database import get_db
 from models import PlayerAction, User
 from auth import require_auth, require_moderator
-from docker_manager import DockerManager
+from runtime_adapter import get_runtime_manager_or_docker
 
 router = APIRouter(prefix="/players", tags=["player_management"])
 
@@ -29,9 +29,15 @@ class PlayerActionResponse(BaseModel):
     class Config:
         from_attributes = True
 
-def get_docker_manager() -> DockerManager:
-    """Get Docker manager instance."""
-    return DockerManager()
+_manager_cache = None
+
+
+def get_docker_manager():
+    """Get the active runtime manager (local or Docker)."""
+    global _manager_cache
+    if _manager_cache is None:
+        _manager_cache = get_runtime_manager_or_docker()
+    return _manager_cache
 
 @router.get("/{server_name}/actions", response_model=List[PlayerActionResponse])
 async def list_player_actions(

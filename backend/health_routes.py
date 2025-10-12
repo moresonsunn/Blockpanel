@@ -10,7 +10,7 @@ import os
 from database import get_db, engine, get_connection_pool_status, health_check_db
 from auth import require_auth, require_admin
 from models import User
-from docker_manager import DockerManager
+from runtime_adapter import get_runtime_manager_or_docker
 
 router = APIRouter(prefix="/health", tags=["health"])
 
@@ -57,8 +57,14 @@ class OverallHealth(BaseModel):
     docker: DockerHealth
     application: ApplicationHealth
 
-def get_docker_manager() -> DockerManager:
-    return DockerManager()
+_manager_cache = None
+
+
+def get_docker_manager():
+    global _manager_cache
+    if _manager_cache is None:
+        _manager_cache = get_runtime_manager_or_docker()
+    return _manager_cache
 
 @router.get("/system-info", response_model=SystemInfo)
 async def get_system_info():
@@ -155,21 +161,32 @@ async def get_docker_health():
     """Get Docker daemon health status."""
     try:
         docker_manager = get_docker_manager()
-        client = docker_manager.client
-        
+        client = getattr(docker_manager, "client", None)
+
+        # Local runtime mode does not expose a Docker client
+        if client is None:
+            return DockerHealth(
+                connected=True,
+                version="local-runtime",
+                containers_running=0,
+                containers_total=0,
+                images_count=0,
+                error=None
+            )
+
         # Get Docker version
         version_info = client.version()
         version = version_info.get('Version', 'Unknown')
-        
+
         # Count containers
         containers = client.containers.list(all=True)
         containers_total = len(containers)
-        containers_running = len([c for c in containers if c.status == 'running'])
-        
+        containers_running = len([c for c in containers if getattr(c, "status", None) == 'running'])
+
         # Count images
         images = client.images.list()
         images_count = len(images)
-        
+
         return DockerHealth(
             connected=True,
             version=version,
@@ -178,7 +195,7 @@ async def get_docker_health():
             images_count=images_count,
             error=None
         )
-        
+
     except Exception as e:
         return DockerHealth(
             connected=False,
@@ -278,8 +295,12 @@ async def get_quick_health():
     # Quick Docker test
     try:
         docker_manager = get_docker_manager()
-        docker_manager.client.ping()
-        docker_ok = True
+        client = getattr(docker_manager, "client", None)
+        if client is None:
+            docker_ok = True
+        else:
+            client.ping()
+            docker_ok = True
     except Exception:
         docker_ok = False
     

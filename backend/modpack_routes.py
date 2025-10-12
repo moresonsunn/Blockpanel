@@ -16,8 +16,7 @@ import os
 
 from auth import require_moderator
 from models import User
-from docker_manager import DockerManager
-from runtime_adapter import get_runtime_manager
+from runtime_adapter import get_runtime_manager_or_docker
 from config import SERVERS_ROOT
 
 router = APIRouter(prefix="/modpacks", tags=["modpacks"])
@@ -34,19 +33,8 @@ def _push_event(task_id: str, event):
         if event.get("type") in ("done", "error"):
             task["done"] = True
 
-_runtime_cache = None
-
-
-def get_docker_manager() -> DockerManager:
-    global _runtime_cache
-    if _runtime_cache is None:
-        adapter = None
-        try:
-            adapter = get_runtime_manager()
-        except Exception:
-            adapter = None
-        _runtime_cache = adapter or DockerManager()
-    return _runtime_cache
+def get_docker_manager():
+    return get_runtime_manager_or_docker()
 
 
 def _extract_modpack_metadata(base: Path) -> Dict[str, Any]:
@@ -936,7 +924,7 @@ async def install_modpack(req: InstallRequest, current_user: User = Depends(requ
             except Exception:
                 pass
 
-            dm = DockerManager()
+            dm = get_docker_manager()
             def normalize_ram(s: str) -> str:
                 s = str(s).upper()
                 if s.endswith("G") or s.endswith("M"):
@@ -969,7 +957,7 @@ async def install_modpack(req: InstallRequest, current_user: User = Depends(requ
                 min_ram_n = normalize_ram(min_ram)
                 max_ram_n = normalize_ram(max_ram)
 
-                _push_event(task_id, {"type": "progress", "step": "create", "message": "Creating server container", "progress": 85})
+                _push_event(task_id, {"type": "progress", "step": "create", "message": "Creating server", "progress": 85})
 
                 result = dm.create_server(
                     req.name,
@@ -1038,7 +1026,7 @@ async def install_modpack(req: InstallRequest, current_user: User = Depends(requ
 @router.get("/updates")
 async def list_updates():
     from catalog_routes import get_providers_live
-    dm = DockerManager()
+    dm = get_docker_manager()
     servers = dm.list_servers()
     updates = []
     providers = get_providers_live()
@@ -1070,7 +1058,7 @@ async def list_updates():
 async def update_modpack(server_name: str, provider: str, pack_id: str, version_id: str, current_user: User = Depends(require_moderator)):
     # Simplified update: stop, backup, apply new files (overrides+mods), restart
     from catalog_routes import get_providers_live
-    dm = DockerManager()
+    dm = get_docker_manager()
     providers = get_providers_live()
     # Find server container id
     target = None

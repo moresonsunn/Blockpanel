@@ -5,11 +5,11 @@ Provides easy access to AI error detection and auto-fix capabilities.
 """
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
 from ai_error_fixer import AIErrorFixer, start_ai_monitoring, stop_ai_monitoring, get_ai_status, manual_fix, upload_to_docker
+from runtime_adapter import get_runtime_manager_or_docker
 
 def print_status(status):
     """Print status information in a formatted way."""
@@ -125,10 +125,8 @@ def main():
                 print(f"❌ Build failed: {result.stderr}")
                 
         elif args.command == "restart":
-            print("🔄 Restarting all containers...")
-            from docker_manager import DockerManager
-            
-            docker_manager = DockerManager()
+            print("🔄 Restarting all servers...")
+            docker_manager = get_runtime_manager_or_docker()
             servers = docker_manager.list_servers()
             
             for server in servers:
@@ -143,7 +141,7 @@ def main():
                 except Exception as e:
                     print(f"  ❌ Failed to restart {name}: {e}")
             
-            print("✅ Container restart completed")
+            print("✅ Server restart completed")
             
         elif args.command == "cleanup":
             print("🧹 Cleaning up system...")

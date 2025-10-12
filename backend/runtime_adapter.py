@@ -306,7 +306,31 @@ class LocalAdapter:
         return int(preferred or start)
 
 
+_adapter_cache: Optional[Any] = None
+
+
 def get_runtime_manager():
     if os.getenv("RUNTIME_MODE", "docker").lower() == "local":
         return LocalAdapter()
     return None
+
+
+def get_runtime_manager_or_docker():
+    global _adapter_cache
+    if _adapter_cache is not None:
+        return _adapter_cache
+
+    adapter = None
+    try:
+        adapter = get_runtime_manager()
+    except Exception:
+        adapter = None
+
+    if adapter is not None:
+        _adapter_cache = adapter
+        return adapter
+
+    from docker_manager import DockerManager  # Local import to avoid circular dependency
+
+    _adapter_cache = DockerManager()
+    return _adapter_cache
