@@ -1,12 +1,47 @@
 import os
 from pathlib import Path
 from typing import Dict, List, Optional, Set
+import re
 import json
 import time
 import psutil
 
 from local_runtime import LocalRuntimeManager, MINECRAFT_PORT
 from config import SERVERS_ROOT
+
+
+_RAM_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([KMGTP]?)(?:I?B)?\s*$", re.IGNORECASE)
+
+
+def _parse_ram_to_mb(value: object, default_mb: float) -> float:
+    try:
+        if value is None:
+            return default_mb
+        if isinstance(value, (int, float)):
+            return float(value)
+        raw = str(value).strip()
+        if not raw:
+            return default_mb
+        m = _RAM_PATTERN.match(raw)
+        if not m:
+            return default_mb
+        number = float(m.group(1))
+        unit = (m.group(2) or '').upper()
+        factors = {
+            '': 1.0,
+            'K': 1.0 / 1024.0,
+            'M': 1.0,
+            'G': 1024.0,
+            'T': 1024.0 * 1024.0,
+            'P': 1024.0 * 1024.0 * 1024.0,
+        }
+        factor = factors.get(unit, 1.0)
+        mb_val = number * factor
+        if mb_val <= 0:
+            return default_mb
+        return mb_val
+    except Exception:
+        return default_mb
 
 
 class LocalAdapter:
@@ -104,17 +139,35 @@ class LocalAdapter:
         mem_usage_mb = 0.0
         mem_limit_mb = float(psutil.virtual_memory().total) / (1024 * 1024)
         mem_percent = 0.0
-        if pid:
+        net_rx_mb = 0.0
+        net_tx_mb = 0.0
+        try:
+            meta_path = (p / "server_meta.json")
+            if meta_path.exists():
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                mem_limit_mb = _parse_ram_to_mb(meta.get("max_ram_mb") or meta.get("max_ram"), mem_limit_mb)
+        except Exception:
+            pass
+
+        if pid and psutil.pid_exists(pid):
             try:
                 proc = psutil.Process(pid)
-                # cpu_percent with interval=0 gives last computed value; call twice for a fresh sample
-                proc.cpu_percent(interval=None)
-                time.sleep(0.05)
-                denom = psutil.cpu_count(logical=True) or 1
-                cpu_percent = proc.cpu_percent(interval=None) / float(denom)
-                mem = proc.memory_info().rss
-                mem_usage_mb = float(mem) / (1024 * 1024)
-                mem_percent = (mem_usage_mb / mem_limit_mb) * 100.0 if mem_limit_mb else 0.0
+                # sample CPU; psutil returns percentage of a single CPU * number of CPUs
+                cpu_percent = proc.cpu_percent(interval=0.15)
+                with proc.oneshot():
+                    mem = proc.memory_info().rss
+                    mem_usage_mb = float(mem) / (1024 * 1024)
+                    net_func = getattr(proc, "net_io_counters", None)
+                    if callable(net_func):
+                        try:
+                            counters = net_func()  # type: ignore[attr-defined]
+                            if counters:
+                                net_rx_mb = round(getattr(counters, "bytes_recv", 0) / (1024 * 1024), 2)
+                                net_tx_mb = round(getattr(counters, "bytes_sent", 0) / (1024 * 1024), 2)
+                        except Exception:
+                            pass
+                if mem_limit_mb:
+                    mem_percent = (mem_usage_mb / mem_limit_mb) * 100.0
             except Exception:
                 pass
         return {
@@ -123,8 +176,8 @@ class LocalAdapter:
             "memory_usage_mb": round(mem_usage_mb, 2),
             "memory_limit_mb": round(mem_limit_mb, 2),
             "memory_percent": round(mem_percent, 2),
-            "network_rx_mb": 0.0,
-            "network_tx_mb": 0.0,
+            "network_rx_mb": net_rx_mb,
+            "network_tx_mb": net_tx_mb,
         }
 
     def get_bulk_server_stats(self, ttl_seconds: int = 3) -> Dict:

@@ -17,6 +17,7 @@ import os
 from auth import require_moderator
 from models import User
 from docker_manager import DockerManager
+from runtime_adapter import get_runtime_manager
 from config import SERVERS_ROOT
 
 router = APIRouter(prefix="/modpacks", tags=["modpacks"])
@@ -33,8 +34,19 @@ def _push_event(task_id: str, event):
         if event.get("type") in ("done", "error"):
             task["done"] = True
 
+_runtime_cache = None
+
+
 def get_docker_manager() -> DockerManager:
-    return DockerManager()
+    global _runtime_cache
+    if _runtime_cache is None:
+        adapter = None
+        try:
+            adapter = get_runtime_manager()
+        except Exception:
+            adapter = None
+        _runtime_cache = adapter or DockerManager()
+    return _runtime_cache
 
 def _download_to(path: Path, url: str, headers: dict | None = None, timeout: int = 120):
     with requests.get(url, stream=True, timeout=timeout, headers=headers or {}) as r:

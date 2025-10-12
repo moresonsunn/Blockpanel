@@ -16,7 +16,7 @@
   "container_list": [
     {
     "name": "blockpanel",
-  "image": "moresonsun/blockpanel-unified:casaos-fix",
+  "image": "moresonsun/blockpanel-unified:latest",
       "ports": [
         "8000:8000",
         "25565:25565"

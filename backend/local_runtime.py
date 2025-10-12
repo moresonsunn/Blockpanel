@@ -4,6 +4,7 @@ import time
 import logging
 from pathlib import Path
 from typing import Optional, Dict, List
+import re
 
 from config import SERVERS_ROOT
 from download_manager import prepare_server_files
@@ -12,6 +13,47 @@ import json
 logger = logging.getLogger(__name__)
 
 MINECRAFT_PORT = 25565
+
+_RAM_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([KMGTP]?)(?:I?B)?\s*$", re.IGNORECASE)
+
+
+def _ram_to_mb(value: str | int | float, default_mb: int) -> int:
+    try:
+        if value is None:
+            return default_mb
+        if isinstance(value, (int, float)):
+            return max(int(float(value)), 0)
+        raw = str(value).strip()
+        if not raw:
+            return default_mb
+        m = _RAM_PATTERN.match(raw)
+        if not m:
+            return default_mb
+        number = float(m.group(1))
+        unit = (m.group(2) or '').upper()
+        multipliers = {
+            '': 1,  # assume value already in megabytes
+            'K': 1.0 / 1024.0,
+            'M': 1,
+            'G': 1024,
+            'T': 1024 * 1024,
+            'P': 1024 * 1024 * 1024,
+        }
+        factor = multipliers.get(unit, 1)
+        mb_val = int(round(number * factor))
+        if mb_val <= 0:
+            return default_mb
+        return mb_val
+    except Exception:
+        return default_mb
+
+
+def _format_ram(mb_value: int, prefer: str = 'G') -> str:
+    if mb_value <= 0:
+        return '512M'
+    if prefer.upper() == 'G' and mb_value % 1024 == 0:
+        return f"{mb_value // 1024}G"
+    return f"{mb_value}M"
 
 
 class LocalRuntimeManager:
@@ -131,6 +173,11 @@ class LocalRuntimeManager:
             loader_version=loader_version or "",
             installer_version=installer_version or "",
         )
+        min_mb = _ram_to_mb(min_ram, default_mb=1024)
+        max_mb = _ram_to_mb(max_ram, default_mb=2048)
+        # Ensure max >= min
+        if max_mb < min_mb:
+            max_mb = min_mb
         # Persist metadata for UI and management
         meta = {
             "name": name,
@@ -138,8 +185,10 @@ class LocalRuntimeManager:
             "version": version,
             "loader_version": loader_version or None,
             "installer_version": installer_version or None,
-            "min_ram": str(min_ram),
-            "max_ram": str(max_ram),
+            "min_ram": _format_ram(min_mb),
+            "max_ram": _format_ram(max_mb),
+            "min_ram_mb": min_mb,
+            "max_ram_mb": max_mb,
             "host_port": int(host_port or MINECRAFT_PORT),
             "created_at": int(time.time()),
         }
@@ -149,8 +198,8 @@ class LocalRuntimeManager:
             pass
         env = {
             "SERVER_DIR_NAME": name,
-            "MIN_RAM": str(min_ram),
-            "MAX_RAM": str(max_ram),
+            "MIN_RAM": meta["min_ram"],
+            "MAX_RAM": meta["max_ram"],
             "SERVER_PORT": str(host_port or MINECRAFT_PORT),
             "SERVER_TYPE": server_type,
             "SERVER_VERSION": version,
@@ -187,18 +236,22 @@ class LocalRuntimeManager:
                 meta["host_port"] = int(host_port)
             except Exception:
                 pass
-        if min_ram:
-            meta["min_ram"] = str(min_ram)
-        if max_ram:
-            meta["max_ram"] = str(max_ram)
+        min_mb = _ram_to_mb(min_ram, default_mb=int(meta.get("min_ram_mb") or 1024))
+        max_mb = _ram_to_mb(max_ram, default_mb=int(meta.get("max_ram_mb") or 2048))
+        if max_mb < min_mb:
+            max_mb = min_mb
+        meta["min_ram"] = _format_ram(min_mb)
+        meta["max_ram"] = _format_ram(max_mb)
+        meta["min_ram_mb"] = min_mb
+        meta["max_ram_mb"] = max_mb
         try:
             meta_path.write_text(json.dumps(meta), encoding="utf-8")
         except Exception:
             pass
         env = {
             "SERVER_DIR_NAME": name,
-            "MIN_RAM": str(min_ram),
-            "MAX_RAM": str(max_ram),
+            "MIN_RAM": meta["min_ram"],
+            "MAX_RAM": meta["max_ram"],
             "SERVER_PORT": str(host_port or MINECRAFT_PORT),
         }
         for k, v in (extra_env or {}).items():

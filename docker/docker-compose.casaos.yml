@@ -3,7 +3,7 @@
 
 services:
   blockpanel:
-    image: moresonsun/blockpanel-unified:casaos-fix
+    image: moresonsun/blockpanel-unified:latest
     container_name: blockpanel
     networks:
       - blockpanel_net

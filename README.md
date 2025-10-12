@@ -147,6 +147,14 @@ Frontend build-time override: set `REACT_APP_APP_NAME` to change displayed brand
 docker build -t blockpanel-unified:dev -f docker/controller-unified.Dockerfile .
 ```
 
+### Publishing the unified `latest` tag
+Runtime container launches default to the `moresonsun/blockpanel-unified:latest` image. Build and push that tag whenever you cut a release so modpack installs and containerized servers can start without manual rebuilds:
+```
+docker build -t moresonsun/blockpanel-unified:latest -f docker/controller-unified.Dockerfile .
+docker push moresonsun/blockpanel-unified:latest
+```
+If you publish additional versioned tags (for example `v0.1.1`), push them alongside `latest`, but keep `latest` updated to the newest stable build.
+
 ## Multi-Arch Notes
 The CI workflow uses `docker/setup-buildx-action` and `docker/build-push-action` to publish `linux/amd64, linux/arm64` manifests. Local multi-arch emulate build example:
 ```
