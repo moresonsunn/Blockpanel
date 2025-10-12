@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl
-from typing import Optional
+from typing import Optional, Dict, Any
 from pathlib import Path
 import tempfile
 import shutil
@@ -47,6 +47,67 @@ def get_docker_manager() -> DockerManager:
             adapter = None
         _runtime_cache = adapter or DockerManager()
     return _runtime_cache
+
+
+def _extract_modpack_metadata(base: Path) -> Dict[str, Any]:
+    """Best-effort detection of modpack metadata (loader, versions, etc.)."""
+    metadata: Dict[str, Any] = {}
+
+    def _load_json(candidate: Path) -> Dict[str, Any]:
+        try:
+            return json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _apply_modrinth(path: Path) -> None:
+        data = _load_json(path)
+        if not data:
+            return
+        idx = data.get("index") or data
+        deps = idx.get("dependencies") or {}
+        metadata.setdefault("type", idx.get("name") or data.get("name") or "Modpack")
+        metadata.setdefault("version", idx.get("version") or data.get("version") or data.get("version_id"))
+        metadata.setdefault("minecraft_version", deps.get("minecraft") or idx.get("game_version"))
+        for loader_key in ("fabric-loader", "quilt-loader", "forge", "neoforge"):
+            if loader_key in deps:
+                loader_name = loader_key.split("-")[0].replace("loader", "").strip("-")
+                metadata.setdefault("loader", loader_name or loader_key)
+                metadata.setdefault("loader_version", deps.get(loader_key))
+                break
+
+    def _apply_curseforge(path: Path) -> None:
+        data = _load_json(path)
+        if not data:
+            return
+        metadata.setdefault("type", data.get("name") or "Modpack")
+        metadata.setdefault("version", data.get("version"))
+        minecraft = data.get("minecraft") or {}
+        metadata.setdefault("minecraft_version", minecraft.get("version"))
+        loaders = minecraft.get("modLoaders") or []
+        if loaders:
+            loader_id = loaders[0].get("id") or ""
+            metadata.setdefault("loader", loader_id.split("-")[0])
+            metadata.setdefault("loader_version", loader_id.split("-")[-1])
+
+    candidates = [
+        base / "modrinth.index.json",
+        base / "manifest.json",
+    ]
+    for cand in candidates:
+        if cand.exists():
+            if cand.name == "modrinth.index.json":
+                _apply_modrinth(cand)
+            elif cand.name == "manifest.json":
+                _apply_curseforge(cand)
+
+    # If metadata still sparse, try one level deeper
+    if not metadata:
+        for child in base.iterdir():
+            if child.is_dir():
+                metadata = _extract_modpack_metadata(child)
+                if metadata:
+                    break
+    return metadata
 
 def _download_to(path: Path, url: str, headers: dict | None = None, timeout: int = 120):
     with requests.get(url, stream=True, timeout=timeout, headers=headers or {}) as r:
@@ -388,6 +449,7 @@ async def import_server_pack(
             return None
 
         src_dir = _single_top_level_dir(tmpdir) or tmpdir
+        pack_metadata = _extract_modpack_metadata(tmpdir)
         shutil.move(str(src_dir), str(target_dir))
 
         # Ensure EULA accepted
@@ -401,6 +463,22 @@ async def import_server_pack(
             min_ram=payload.min_ram or "2G",
             max_ram=payload.max_ram or "4G",
         )
+
+        if pack_metadata:
+            metadata_updates: Dict[str, Any] = {
+                "type": pack_metadata.get("type") or "Modpack",
+                "version": pack_metadata.get("version"),
+                "minecraft_version": pack_metadata.get("minecraft_version"),
+                "loader_version": pack_metadata.get("loader_version"),
+                "loader": pack_metadata.get("loader"),
+            }
+            runtime = get_runtime_manager()
+            if runtime and hasattr(runtime, "update_metadata"):
+                try:
+                    runtime.update_metadata(payload.server_name, **{k: v for k, v in metadata_updates.items() if v})
+                except Exception:
+                    pass
+
         return {"message": "Server pack imported", "server": result}
 
     except requests.RequestException as e:

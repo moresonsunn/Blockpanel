@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 import re
 import json
 import time
@@ -44,11 +44,22 @@ def _parse_ram_to_mb(value: object, default_mb: float) -> float:
         return default_mb
 
 
+def _gather_process_tree(pid: int) -> List[psutil.Process]:
+    procs: List[psutil.Process] = []
+    try:
+        root = psutil.Process(pid)
+    except Exception:
+        return procs
+    procs.append(root)
+    try:
+        procs.extend(root.children(recursive=True))
+    except Exception:
+        pass
+    return procs
+
+
 class LocalAdapter:
-    """
-    Adapter that exposes a DockerManager-like interface backed by LocalRuntimeManager.
-    Only implements methods used by the API; non-essential calls return defaults.
-    """
+    """DockerManager-compatible adapter for LocalRuntimeManager."""
 
     def __init__(self) -> None:
         self.local = LocalRuntimeManager()
@@ -56,12 +67,10 @@ class LocalAdapter:
     # --- Server lifecycle ---
     def list_servers(self) -> List[Dict]:
         items = self.local.list_servers()
-        # Normalize shape to match DockerManager.list_servers()
         for it in items:
             it.setdefault("labels", {})
             it.setdefault("mounts", [])
             it.setdefault("image", "local")
-            # Provide raw ports and port_mappings keys for UI helpers
             raw_ports = {f"{MINECRAFT_PORT}/tcp": None}
             it.setdefault("ports", raw_ports)
             it.setdefault("port_mappings", {f"{MINECRAFT_PORT}/tcp": {"host_port": None, "host_ip": None}})
@@ -111,7 +120,6 @@ class LocalAdapter:
         return self.local.stop_server(container_id)
 
     def start_server(self, container_id: str) -> Dict:
-        # Start by treating it as existing
         return self.local.create_server_from_existing(container_id)
 
     def restart_server(self, container_id: str) -> Dict:
@@ -122,12 +130,13 @@ class LocalAdapter:
         return self.local.stop_server(container_id)
 
     def delete_server(self, container_id: str) -> Dict:
-        # Local mode: just stop; keep files on disk like Docker version does
         return self.local.stop_server(container_id)
+
+    def update_metadata(self, container_id: str, **fields: Any) -> None:
+        self.local.update_metadata(container_id, **fields)
 
     # --- Info & metrics ---
     def get_server_stats(self, container_id: str) -> Dict:
-        # Approximate stats for local mode using psutil and PID file
         p = (SERVERS_ROOT / container_id).resolve()
         pid = None
         try:
@@ -135,12 +144,14 @@ class LocalAdapter:
             pid = int(pid_txt) if pid_txt else None
         except Exception:
             pid = None
+
         cpu_percent = 0.0
         mem_usage_mb = 0.0
         mem_limit_mb = float(psutil.virtual_memory().total) / (1024 * 1024)
         mem_percent = 0.0
         net_rx_mb = 0.0
         net_tx_mb = 0.0
+
         try:
             meta_path = (p / "server_meta.json")
             if meta_path.exists():
@@ -151,25 +162,52 @@ class LocalAdapter:
 
         if pid and psutil.pid_exists(pid):
             try:
-                proc = psutil.Process(pid)
-                # sample CPU; psutil returns percentage of a single CPU * number of CPUs
-                cpu_percent = proc.cpu_percent(interval=0.15)
-                with proc.oneshot():
-                    mem = proc.memory_info().rss
-                    mem_usage_mb = float(mem) / (1024 * 1024)
-                    net_func = getattr(proc, "net_io_counters", None)
+                procs = _gather_process_tree(pid)
+                if not procs:
+                    procs = [psutil.Process(pid)]
+                # Prime CPU samples
+                for pr in procs:
+                    try:
+                        pr.cpu_percent(interval=None)
+                    except Exception:
+                        continue
+                time.sleep(0.15)
+                total_cpu = 0.0
+                total_mem = 0
+                total_rx = 0
+                total_tx = 0
+                for pr in procs:
+                    try:
+                        total_cpu += pr.cpu_percent(interval=None)
+                    except Exception:
+                        pass
+                    try:
+                        total_mem += pr.memory_info().rss
+                    except Exception:
+                        pass
+                    net_func = getattr(pr, "net_io_counters", None)
                     if callable(net_func):
                         try:
                             counters = net_func()  # type: ignore[attr-defined]
                             if counters:
-                                net_rx_mb = round(getattr(counters, "bytes_recv", 0) / (1024 * 1024), 2)
-                                net_tx_mb = round(getattr(counters, "bytes_sent", 0) / (1024 * 1024), 2)
+                                total_rx += getattr(counters, "bytes_recv", 0)
+                                total_tx += getattr(counters, "bytes_sent", 0)
                         except Exception:
                             pass
+                mem_usage_mb = float(total_mem) / (1024 * 1024)
+                cpu_percent = total_cpu
+                if total_rx:
+                    net_rx_mb = round(total_rx / (1024 * 1024), 2)
+                if total_tx:
+                    net_tx_mb = round(total_tx / (1024 * 1024), 2)
                 if mem_limit_mb:
                     mem_percent = (mem_usage_mb / mem_limit_mb) * 100.0
             except Exception:
                 pass
+
+        if mem_limit_mb <= 0:
+            mem_limit_mb = max(mem_usage_mb, 1.0)
+
         return {
             "id": container_id,
             "cpu_percent": round(cpu_percent, 2),
@@ -181,34 +219,37 @@ class LocalAdapter:
         }
 
     def get_bulk_server_stats(self, ttl_seconds: int = 3) -> Dict:
-        items = {}
+        results: Dict[str, Dict] = {}
         for it in self.list_servers():
-            cid = it.get("id") or it.get("name")
-            if cid:
-                items[cid] = self.get_server_stats(cid)
-        return items
+            container_id = it.get("id") or it.get("name")
+            if not container_id:
+                continue
+            results[container_id] = self.get_server_stats(str(container_id))
+        return results
 
     def get_player_info(self, container_id: str) -> Dict:
         return {"online": 0, "max": 0, "names": []}
 
     def get_server_info(self, container_id: str) -> Dict:
-        # Enriched info for UI in local mode using metadata
         p = (SERVERS_ROOT / container_id).resolve()
         exists = p.exists()
-        meta = {}
+        meta: Dict[str, Any] = {}
         try:
             mp = p / "server_meta.json"
             if mp.exists():
                 meta = json.loads(mp.read_text(encoding="utf-8"))
         except Exception:
             meta = {}
+
         host_port = meta.get("host_port") or MINECRAFT_PORT
         server_type = meta.get("type")
         version = meta.get("version")
         created_at = meta.get("created_at")
-        # Infer java version from env file if present (best effort)
         java_version = meta.get("java_version", "unknown")
-        return {
+        minecraft_version = meta.get("minecraft_version") or meta.get("game_version")
+        loader_version = meta.get("loader_version")
+
+        info = {
             "id": container_id,
             "name": container_id,
             "status": "running",
@@ -216,14 +257,16 @@ class LocalAdapter:
             "version": version,
             "created_at": created_at,
             "java_version": java_version,
+            "minecraft_version": minecraft_version,
+            "loader_version": loader_version,
             "mounts": [],
             "ports": {f"{MINECRAFT_PORT}/tcp": None},
             "port_mappings": {f"{MINECRAFT_PORT}/tcp": {"host_port": host_port, "host_ip": None}},
             "exists": exists,
         }
+        return info
 
     def update_server_java_version(self, container_id: str, java_version: str) -> Dict:
-        # Not supported in local mode dynamically
         return {"id": container_id, "java_version": java_version}
 
     # --- Console/logs ---
@@ -242,12 +285,10 @@ class LocalAdapter:
         return self.get_server_logs(container_id, tail=tail)
 
     def send_command(self, container_id: str, command: str) -> Dict:
-        # Write command to FIFO console.in if present
         fifo_path = (SERVERS_ROOT / container_id / "console.in").resolve()
         try:
             if not fifo_path.exists():
                 return {"id": container_id, "ok": False, "error": "Console pipe not available"}
-            # Ensure command ends with newline
             data = (command or '').strip()
             if not data:
                 return {"id": container_id, "ok": False, "error": "Empty command"}
@@ -259,16 +300,13 @@ class LocalAdapter:
 
     # --- Ports helpers used by API ---
     def get_used_host_ports(self, only_minecraft: bool = True) -> Set[int]:
-        # No extra containers, assume none in use by us
         return set()
 
     def pick_available_port(self, preferred: Optional[int] = None, start: int = 25565, end: int = 25999) -> int:
-        # In local mode, ports are bound in-process; honor preferred or default
         return int(preferred or start)
 
 
 def get_runtime_manager():
-    """Factory that returns local adapter if RUNTIME_MODE=local, else None."""
     if os.getenv("RUNTIME_MODE", "docker").lower() == "local":
         return LocalAdapter()
     return None

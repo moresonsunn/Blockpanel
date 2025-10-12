@@ -3,7 +3,7 @@ import subprocess
 import time
 import logging
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 import re
 
 from config import SERVERS_ROOT
@@ -79,6 +79,37 @@ class LocalRuntimeManager:
 
     def _meta_file(self, name: str) -> Path:
         return self._server_dir(name) / "server_meta.json"
+
+    def _load_meta(self, name: str) -> Dict[str, Any]:
+        meta_path = self._meta_file(name)
+        if meta_path.exists():
+            try:
+                return json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                return {}
+        return {}
+
+    def _save_meta(self, name: str, meta: Dict[str, Any]) -> None:
+        try:
+            self._meta_file(name).write_text(json.dumps(meta), encoding="utf-8")
+        except Exception:
+            pass
+
+    def update_metadata(self, name: str, **fields: Any) -> None:
+        meta = self._load_meta(name)
+        if not meta:
+            meta = {"name": name, "created_at": int(time.time())}
+        changed = False
+        for key, value in fields.items():
+            if value is None:
+                continue
+            if meta.get(key) != value:
+                meta[key] = value
+                changed = True
+        if changed:
+            meta.setdefault("name", name)
+            meta.setdefault("created_at", int(time.time()))
+            self._save_meta(name, meta)
 
     def _is_running(self, pid: int) -> bool:
         try:
@@ -192,10 +223,7 @@ class LocalRuntimeManager:
             "host_port": int(host_port or MINECRAFT_PORT),
             "created_at": int(time.time()),
         }
-        try:
-            self._meta_file(name).write_text(json.dumps(meta), encoding="utf-8")
-        except Exception:
-            pass
+        self._save_meta(name, meta)
         env = {
             "SERVER_DIR_NAME": name,
             "MIN_RAM": meta["min_ram"],
@@ -219,13 +247,7 @@ class LocalRuntimeManager:
         if not srv_dir.exists() or not srv_dir.is_dir():
             raise RuntimeError(f"Server directory {srv_dir} does not exist")
         # Update or create metadata
-        meta_path = self._meta_file(name)
-        meta = {}
-        try:
-            if meta_path.exists():
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:
-            meta = {}
+        meta = self._load_meta(name)
         # Ensure defaults
         meta.setdefault("name", name)
         meta.setdefault("type", None)
@@ -244,10 +266,7 @@ class LocalRuntimeManager:
         meta["max_ram"] = _format_ram(max_mb)
         meta["min_ram_mb"] = min_mb
         meta["max_ram_mb"] = max_mb
-        try:
-            meta_path.write_text(json.dumps(meta), encoding="utf-8")
-        except Exception:
-            pass
+        self._save_meta(name, meta)
         env = {
             "SERVER_DIR_NAME": name,
             "MIN_RAM": meta["min_ram"],
