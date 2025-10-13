@@ -759,6 +759,9 @@ class DockerManager:
             "com.docker.compose.project": COMPOSE_PROJECT,
             "com.docker.compose.service": COMPOSE_RUNTIME_SERVICE,
             "com.docker.compose.version": "2",
+            # CasaOS grouping to avoid Legacy App classification
+            "io.casaos.app": CASAOS_APP_ID,
+            "io.casaos.managed": "true",
             # Optional: generic metadata that some dashboards honor
             "org.opencontainers.image.title": "BlockPanel Runtime",
             "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
@@ -901,6 +904,9 @@ class DockerManager:
             "com.docker.compose.project": COMPOSE_PROJECT,
             "com.docker.compose.service": COMPOSE_RUNTIME_SERVICE,
             "com.docker.compose.version": "2",
+            # CasaOS grouping to avoid Legacy App classification
+            "io.casaos.app": CASAOS_APP_ID,
+            "io.casaos.managed": "true",
             "org.opencontainers.image.title": "BlockPanel Runtime",
             "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
         }

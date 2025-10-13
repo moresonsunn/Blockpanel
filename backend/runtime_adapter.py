@@ -68,12 +68,33 @@ class LocalAdapter:
     def list_servers(self) -> List[Dict]:
         items = self.local.list_servers()
         for it in items:
+            name = it.get("name") or it.get("id")
             it.setdefault("labels", {})
             it.setdefault("mounts", [])
             it.setdefault("image", "local")
             raw_ports = {f"{MINECRAFT_PORT}/tcp": None}
             it.setdefault("ports", raw_ports)
             it.setdefault("port_mappings", {f"{MINECRAFT_PORT}/tcp": {"host_port": None, "host_ip": None}})
+            # Enrich labels from metadata so features like updates work in local mode
+            try:
+                if name:
+                    meta_path = (SERVERS_ROOT / str(name) / "server_meta.json")
+                    if meta_path.exists():
+                        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                        lbl = it.get("labels") or {}
+                        if isinstance(meta, dict):
+                            prov = meta.get("modpack_provider")
+                            pid = meta.get("modpack_id")
+                            ver = meta.get("modpack_version_id")
+                            if prov:
+                                lbl["mc.modpack.provider"] = str(prov)
+                            if pid:
+                                lbl["mc.modpack.id"] = str(pid)
+                            if ver:
+                                lbl["mc.modpack.version_id"] = str(ver)
+                        it["labels"] = lbl
+            except Exception:
+                pass
         return items
 
     def create_server(
@@ -86,8 +107,10 @@ class LocalAdapter:
         min_ram: str = "1G",
         max_ram: str = "2G",
         installer_version: Optional[str] = None,
+        extra_env: Optional[Dict[str, str]] = None,
+        extra_labels: Optional[Dict[str, str]] = None,
     ) -> Dict:
-        return self.local.create_server(
+        result = self.local.create_server(
             name,
             server_type,
             version,
@@ -97,6 +120,21 @@ class LocalAdapter:
             max_ram=max_ram,
             installer_version=installer_version,
         )
+        # Persist modpack metadata into local server_meta.json if provided via labels
+        try:
+            if extra_labels:
+                meta_updates: Dict[str, Any] = {}
+                if "mc.modpack.provider" in extra_labels:
+                    meta_updates["modpack_provider"] = extra_labels.get("mc.modpack.provider")
+                if "mc.modpack.id" in extra_labels:
+                    meta_updates["modpack_id"] = extra_labels.get("mc.modpack.id")
+                if "mc.modpack.version_id" in extra_labels:
+                    meta_updates["modpack_version_id"] = extra_labels.get("mc.modpack.version_id")
+                if meta_updates:
+                    self.local.update_metadata(name, **meta_updates)
+        except Exception:
+            pass
+        return result
 
     def create_server_from_existing(
         self,
@@ -107,7 +145,7 @@ class LocalAdapter:
         extra_env: Optional[Dict[str, str]] = None,
         extra_labels: Optional[Dict[str, str]] = None,
     ) -> Dict:
-        return self.local.create_server_from_existing(
+        result = self.local.create_server_from_existing(
             name,
             host_port=host_port,
             min_ram=min_ram,
@@ -115,6 +153,21 @@ class LocalAdapter:
             extra_env=extra_env,
             extra_labels=extra_labels,
         )
+        # Persist modpack metadata into local server_meta.json if provided via labels
+        try:
+            if extra_labels:
+                meta_updates: Dict[str, Any] = {}
+                if "mc.modpack.provider" in extra_labels:
+                    meta_updates["modpack_provider"] = extra_labels.get("mc.modpack.provider")
+                if "mc.modpack.id" in extra_labels:
+                    meta_updates["modpack_id"] = extra_labels.get("mc.modpack.id")
+                if "mc.modpack.version_id" in extra_labels:
+                    meta_updates["modpack_version_id"] = extra_labels.get("mc.modpack.version_id")
+                if meta_updates:
+                    self.local.update_metadata(name, **meta_updates)
+        except Exception:
+            pass
+        return result
 
     def stop_server(self, container_id: str) -> Dict:
         return self.local.stop_server(container_id)

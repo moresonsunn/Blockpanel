@@ -26,3 +26,38 @@ async def set_curseforge_key(payload: CurseForgeKey, current_user: User = Depend
     set_integration_key("curseforge", payload.api_key.strip())
     return {"ok": True}
 
+@router.get("/curseforge-test")
+async def test_curseforge_connectivity(current_user: User = Depends(require_admin)):
+    """Simple live test of the configured CurseForge API key.
+    Makes a small search request and returns status details to help diagnose issues.
+    """
+    import requests
+    key = get_integration_key("curseforge")
+    if not key:
+        return {"configured": False, "ok": False, "status": 400, "error": "CurseForge API key not configured"}
+    url = "https://api.curseforge.com/v1/mods/search"
+    params = {"gameId": 432, "classId": 4471, "pageSize": 1, "index": 0, "searchFilter": "all the mods"}
+    headers = {"x-api-key": key, "Accept": "application/json", "User-Agent": "minecraft-controller/1.0"}
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=10)
+        info = {
+            "configured": True,
+            "ok": r.ok,
+            "status": r.status_code,
+        }
+        if not r.ok:
+            # Try to extract error body
+            try:
+                info["error"] = r.json()
+            except Exception:
+                info["error_text"] = r.text[:500]
+        else:
+            try:
+                data = r.json().get("data", [])
+                info["sample_count"] = len(data)
+            except Exception:
+                info["sample_count"] = None
+        return info
+    except Exception as e:
+        return {"configured": True, "ok": False, "status": None, "error": str(e)}
+
