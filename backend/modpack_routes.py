@@ -460,7 +460,7 @@ async def import_server_pack(
                 "loader_version": pack_metadata.get("loader_version"),
                 "loader": pack_metadata.get("loader"),
             }
-            runtime = get_runtime_manager()
+            runtime = get_runtime_manager_or_docker()
             if runtime and hasattr(runtime, "update_metadata"):
                 try:
                     runtime.update_metadata(payload.server_name, **{k: v for k, v in metadata_updates.items() if v})
@@ -488,6 +488,10 @@ async def import_server_pack_upload(
     host_port: Optional[int] = Form(None),
     min_ram: str = Form("2G"),
     max_ram: str = Form("4G"),
+    # Optional overrides to influence Java/runtime selection
+    java_version_override: Optional[str] = Form(None),
+    server_type: Optional[str] = Form(None),
+    server_version: Optional[str] = Form(None),
     file: UploadFile | None = None,
     current_user: User = Depends(require_moderator),
 ):
@@ -558,11 +562,20 @@ async def import_server_pack_upload(
         except Exception:
             pass
 
+        extra_env: Dict[str, str] = {}
+        if java_version_override:
+            extra_env["JAVA_VERSION_OVERRIDE"] = str(java_version_override)
+        if server_type:
+            extra_env["SERVER_TYPE"] = str(server_type)
+        if server_version:
+            extra_env["SERVER_VERSION"] = str(server_version)
+
         result = dm.create_server_from_existing(
             name=server_name,
             host_port=host_port,
             min_ram=min_ram or "2G",
             max_ram=max_ram or "4G",
+            extra_env=extra_env or None,
         )
         return {"message": "Server pack imported", "server": result}
     except HTTPException:

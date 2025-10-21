@@ -538,7 +538,10 @@ if { [ "$SERVER_TYPE" = "forge" ] || [ "$SERVER_TYPE" = "neoforge" ]; }; then
     ln -sf "$JAVA_BIN" "$TMP_JAVA_DIR/java"
     export PATH="$TMP_JAVA_DIR:$PATH"
     echo "DEBUG: Overriding 'java' for run.sh with: $JAVA_BIN"
-    exec bash ./run.sh
+  # Create stdin FIFO bridge to allow external commands
+  mkfifo -m 600 console.in 2>/dev/null || true
+  # Pipe FIFO into run.sh so Java inherits stdin
+  tail -f -n +1 console.in | exec bash ./run.sh
   fi
 fi
 
@@ -587,7 +590,8 @@ if [ -f run.sh ]; then
   ln -sf "$JAVA_BIN" "$TMP_JAVA_DIR/java"
   export PATH="$TMP_JAVA_DIR:$PATH"
   echo "DEBUG: Overriding 'java' for run.sh with: $JAVA_BIN"
-  exec bash ./run.sh
+  mkfifo -m 600 console.in 2>/dev/null || true
+  tail -f -n +1 console.in | exec bash ./run.sh
 fi
 
 # For other server types

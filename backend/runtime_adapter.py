@@ -173,8 +173,9 @@ class LocalAdapter:
         return self.local.stop_server(container_id)
 
     def start_server(self, container_id: str) -> Dict:
-        # For local runtime, starting means spawn from existing folder
-        return self.local.create_server_from_existing(container_id)
+        # For local runtime, starting means spawn from existing folder.
+        # Pass None for RAM so LocalRuntimeManager preserves saved metadata values.
+        return self.local.create_server_from_existing(container_id, min_ram=None, max_ram=None)
 
     def restart_server(self, container_id: str) -> Dict:
         # Stop then start again from existing
@@ -182,7 +183,8 @@ class LocalAdapter:
             self.local.stop_server(container_id)
         except Exception:
             pass
-        return self.local.create_server_from_existing(container_id)
+        # Preserve previously configured RAM by passing None to defer to metadata
+        return self.local.create_server_from_existing(container_id, min_ram=None, max_ram=None)
 
     def kill_server(self, container_id: str) -> Dict:
         return self.local.stop_server(container_id)
