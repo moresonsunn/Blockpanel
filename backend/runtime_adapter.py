@@ -327,7 +327,52 @@ class LocalAdapter:
         return info
 
     def update_server_java_version(self, container_id: str, java_version: str) -> Dict:
-        return {"id": container_id, "java_version": java_version}
+        # Apply java version change for local runtime by persisting env overrides
+        try:
+            if java_version not in ("8", "11", "17", "21"):
+                raise ValueError(f"Invalid Java version: {java_version}")
+            java_bin = f"/usr/local/bin/java{java_version}"
+
+            # Persist env overrides to server metadata and restart the process
+            # Load existing metadata and merge
+            try:
+                meta_path = (SERVERS_ROOT / container_id / "server_meta.json")
+                meta = {}
+                if meta_path.exists():
+                    meta = json.loads(meta_path.read_text(encoding="utf-8") or "{}")
+            except Exception:
+                meta = {}
+
+            stored_overrides = meta.get("env_overrides") or {}
+            if not isinstance(stored_overrides, dict):
+                stored_overrides = {}
+            merged = {str(k): str(v) for k, v in stored_overrides.items() if v is not None}
+            merged["JAVA_VERSION"] = str(java_version)
+            merged["JAVA_BIN"] = str(java_bin)
+
+            # update metadata (this will persist merged env_overrides)
+            try:
+                self.local.update_metadata(container_id, env_overrides=merged)
+            except Exception:
+                pass
+
+            # Stop and restart the server so new env is applied
+            try:
+                self.local.stop_server(container_id)
+            except Exception:
+                pass
+            # Preserve configured RAM by deferring to metadata
+            result = self.local.create_server_from_existing(container_id, min_ram=None, max_ram=None)
+            return {
+                "success": True,
+                "message": f"Java version updated to {java_version} and server restarted",
+                "java_version": java_version,
+                "java_bin": java_bin,
+                "restarted": True,
+                "result": result,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e), "id": container_id}
 
     # --- Console/logs ---
     def get_server_logs(self, container_id: str, tail: int = 200) -> Dict:

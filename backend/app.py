@@ -4,7 +4,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional
 from docker_manager import DockerManager
-from runtime_adapter import get_runtime_manager
+from runtime_adapter import get_runtime_manager, get_runtime_manager_or_docker
 import server_providers  # noqa: F401 - ensure providers register
 from server_providers.providers import get_provider_names, get_provider
 from fastapi.staticfiles import StaticFiles
@@ -1047,26 +1047,28 @@ def get_server_config_bundle(name: str, container_id: str | None = Query(None)):
 def set_server_java_version(container_id: str, request: dict = Body(...)):
     """Set the Java version for a server."""
     try:
-        docker_manager = get_docker_manager()
-        
-        # Extract java_version from request
+        # Use the runtime manager abstraction (local or docker) to perform the update
+        rm = get_runtime_manager_or_docker()
         java_version = request.get("java_version")
         if not java_version:
             raise HTTPException(status_code=400, detail="java_version is required")
-        
-        # Validate Java version
         if java_version not in ["8", "11", "17", "21"]:
             raise HTTPException(status_code=400, detail="Invalid Java version. Must be 8, 11, 17, or 21")
-        
-        # Update container environment variables
-        result = docker_manager.update_server_java_version(container_id, java_version)
-        
+
+        result = rm.update_server_java_version(container_id, java_version)
+        if isinstance(result, dict) and result.get("success") is False:
+            raise HTTPException(status_code=500, detail=result.get("error") or "Unknown error")
+
+        # Normalize response
         return {
             "success": True,
             "message": f"Java version updated to {java_version}",
             "java_version": java_version,
-            "java_bin": f"/usr/local/bin/java{java_version}"
+            "java_bin": f"/usr/local/bin/java{java_version}",
+            "result": result,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update Java version: {e}")
 

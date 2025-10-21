@@ -1237,60 +1237,90 @@ function AdvancedUserManagementPageImpl() {
         <AuditTab auditLogs={safeAuditLogs} />
       )}
 
-      {/* Create User Modal */}
-      <CreateUserModal 
-        show={showCreateUser}
-        onClose={() => setShowCreateUser(false)}
-        newUser={newUser}
-        setNewUser={setNewUser}
-        roles={safeRoles}
-        onSubmit={createUser}
-      />
-      
-      
-      {/* Permission Matrix removed per request */}
-    </div>
-  );
-}
-
-// Monitoring Dashboard - INSTANT with preloaded data
-function MonitoringPageImpl() {
-  // Get all data instantly from global store
-  const globalData = useGlobalData();
-  const { systemHealth, dashboardData, alerts, isInitialized } = globalData;
-  
-  // Function to refresh monitoring data
-  const refreshMonitoringData = async () => {
-    try {
-      const refresher = globalData.__refreshBG;
-      if (refresher) {
-        refresher('systemHealth', `${API}/monitoring/system-health`);
-        refresher('dashboardData', `${API}/monitoring/dashboard-data`);
-        refresher('alerts', `${API}/monitoring/alerts`, (d) => d.alerts || []);
-      }
-    } catch (error) {
-      console.error('Failed to refresh monitoring data:', error);
-    }
-  };
-  
-  // Always show data - no loading states needed!
-
-  return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3">
-            <FaChartLine className="text-brand-500" /> Server Status
-          </h1>
-          <p className="text-white/70 mt-2">Monitor your servers and system performance</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={refreshMonitoringData}
-            className="bg-brand-500 hover:bg-brand-600 px-4 py-2 rounded-lg flex items-center gap-2"
-          >
-            <FaSync /> Refresh
-          </button>
+      {/* Import from local ZIP */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-4">Import Local Server Pack (.zip)</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Server Name</label>
+            <input value={serverName} onChange={e=>setServerName(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Host Port (optional)</label>
+            <input value={hostPort} onChange={e=>setHostPort(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="e.g. 25565" />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm text-white/70 mb-1">Select ZIP file</label>
+            <input type="file" accept=".zip" onChange={(e)=> setZipFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)} className="w-full text-sm text-white" />
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Min RAM</label>
+            <input value={minRam} onChange={e=>setMinRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Max RAM</label>
+            <input value={maxRam} onChange={e=>setMaxRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Java Version (override)</label>
+            <select value={javaOverride}
+                    onChange={e=>setJavaOverride(e.target.value)}
+                    className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white"
+                    style={{ backgroundColor: '#1f2937' }}>
+              <option value="" style={{ backgroundColor: '#1f2937' }}>Auto</option>
+              <option value="8" style={{ backgroundColor: '#1f2937' }}>Java 8</option>
+              <option value="17" style={{ backgroundColor: '#1f2937' }}>Java 17</option>
+              <option value="21" style={{ backgroundColor: '#1f2937' }}>Java 21</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Loader (hint)</label>
+            <select value={serverType}
+                    onChange={e=>setServerType(e.target.value)}
+                    className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white"
+                    style={{ backgroundColor: '#1f2937' }}>
+              <option value="" style={{ backgroundColor: '#1f2937' }}>Auto</option>
+              <option value="forge" style={{ backgroundColor: '#1f2937' }}>Forge</option>
+              <option value="neoforge" style={{ backgroundColor: '#1f2937' }}>NeoForge</option>
+              <option value="fabric" style={{ backgroundColor: '#1f2937' }}>Fabric</option>
+              <option value="paper" style={{ backgroundColor: '#1f2937' }}>Paper</option>
+              <option value="purpur" style={{ backgroundColor: '#1f2937' }}>Purpur</option>
+              <option value="vanilla" style={{ backgroundColor: '#1f2937' }}>Vanilla</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Minecraft Version (hint)</label>
+            <input value={serverVersion}
+                   onChange={e=>setServerVersion(e.target.value)}
+                   placeholder="e.g. 1.20.1"
+                   className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
+          </div>
+          <div className="md:col-span-2 flex items-center gap-3">
+            <button disabled={busy || !zipFile} onClick={async ()=>{
+              setBusy(true);
+              setMsg('');
+              try {
+                const fd = new FormData();
+                fd.append('server_name', serverName);
+                if (hostPort) fd.append('host_port', hostPort);
+                fd.append('min_ram', minRam);
+                fd.append('max_ram', maxRam);
+                if (javaOverride) fd.append('java_version_override', javaOverride);
+                if (serverType) fd.append('server_type', serverType);
+                if (serverVersion) fd.append('server_version', serverVersion);
+                if (zipFile) fd.append('file', zipFile);
+                const r = await fetch(`${API}/modpacks/import-upload`, { method: 'POST', body: fd });
+                const d = await r.json().catch(()=>({}));
+                if (!r.ok) throw new Error(d?.detail || `HTTP ${r.status}`);
+                setMsg('Server pack uploaded and container started. Go to Servers to see it.');
+              } catch (e) {
+                setMsg(`Error: ${e.message || e}`);
+              } finally {
+                setBusy(false);
+              }
+            }} className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded">{busy ? 'Uploading…' : 'Import ZIP'}</button>
+            {msg && <div className="text-sm text-white/70">{msg}</div>}
+          </div>
         </div>
       </div>
 
@@ -2499,6 +2529,9 @@ function TemplatesPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [zipFile, setZipFile] = useState(null);
+  const [javaOverride, setJavaOverride] = useState('');
+  const [serverType, setServerType] = useState('');
+  const [serverVersion, setServerVersion] = useState('');
 
   // Catalog (remote providers)
   const [providers, setProviders] = useState([{ id: 'modrinth', name: 'Modrinth' }]);
@@ -2638,7 +2671,10 @@ function TemplatesPage() {
         server_pack_url: url,
         host_port: hostPort ? Number(hostPort) : null,
         min_ram: minRam,
-        max_ram: maxRam
+        max_ram: maxRam,
+        java_version_override: javaOverride,
+        server_type: serverType,
+        server_version: serverVersion
       };
       const r = await fetch(`${API}/modpacks/import`, {
         method: 'POST',
@@ -2687,6 +2723,40 @@ function TemplatesPage() {
             <label className="block text-sm text-white/70 mb-1">Max RAM</label>
             <input value={maxRam} onChange={e=>setMaxRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
           </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Java Version (override)</label>
+            <select value={javaOverride}
+                    onChange={e=>setJavaOverride(e.target.value)}
+                    className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white"
+                    style={{ backgroundColor: '#1f2937' }}>
+              <option value="" style={{ backgroundColor: '#1f2937' }}>Auto</option>
+              <option value="8" style={{ backgroundColor: '#1f2937' }}>Java 8</option>
+              <option value="17" style={{ backgroundColor: '#1f2937' }}>Java 17</option>
+              <option value="21" style={{ backgroundColor: '#1f2937' }}>Java 21</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Loader (hint)</label>
+            <select value={serverType}
+                    onChange={e=>setServerType(e.target.value)}
+                    className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white"
+                    style={{ backgroundColor: '#1f2937' }}>
+              <option value="" style={{ backgroundColor: '#1f2937' }}>Auto</option>
+              <option value="forge" style={{ backgroundColor: '#1f2937' }}>Forge</option>
+              <option value="neoforge" style={{ backgroundColor: '#1f2937' }}>NeoForge</option>
+              <option value="fabric" style={{ backgroundColor: '#1f2937' }}>Fabric</option>
+              <option value="paper" style={{ backgroundColor: '#1f2937' }}>Paper</option>
+              <option value="purpur" style={{ backgroundColor: '#1f2937' }}>Purpur</option>
+              <option value="vanilla" style={{ backgroundColor: '#1f2937' }}>Vanilla</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-white/70 mb-1">Minecraft Version (hint)</label>
+            <input value={serverVersion}
+                   onChange={e=>setServerVersion(e.target.value)}
+                   placeholder="e.g. 1.20.1"
+                   className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
+          </div>
           <div className="md:col-span-2 flex items-center gap-3">
             <button disabled={busy} className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded">{busy ? 'Importing...' : 'Import Server Pack'}</button>
             {msg && <div className="text-sm text-white/70">{msg}</div>}
@@ -2728,6 +2798,9 @@ function TemplatesPage() {
                 if (hostPort) fd.append('host_port', hostPort);
                 fd.append('min_ram', minRam);
                 fd.append('max_ram', maxRam);
+                if (javaOverride) fd.append('java_version_override', javaOverride);
+                if (serverType) fd.append('server_type', serverType);
+                if (serverVersion) fd.append('server_version', serverVersion);
                 if (zipFile) fd.append('file', zipFile);
                 const r = await fetch(`${API}/modpacks/import-upload`, { method: 'POST', body: fd });
                 const d = await r.json().catch(()=>({}));
