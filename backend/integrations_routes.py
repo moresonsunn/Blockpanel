@@ -5,6 +5,7 @@ from typing import Any, Dict
 from auth import require_admin
 from models import User
 from integrations_store import get_integration_key, set_integration_key
+from integrations_store import STORE_PATH
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
@@ -46,11 +47,17 @@ async def test_curseforge_connectivity(current_user: User = Depends(require_admi
             "status": r.status_code,
         }
         if not r.ok:
-            # Try to extract error body
+            # Try to extract error body and include response headers for diagnostics
             try:
                 info["error"] = r.json()
             except Exception:
-                info["error_text"] = r.text[:500]
+                info["error_text"] = (r.text or '')[:500]
+            try:
+                # Include a truncated set of response headers to surface hints (rate limits, messages)
+                hdrs = {k: (v if len(v) < 200 else v[:200] + '...') for k, v in r.headers.items()} if r.headers else {}
+                info["response_headers"] = hdrs
+            except Exception:
+                pass
         else:
             try:
                 data = r.json().get("data", [])
@@ -60,4 +67,24 @@ async def test_curseforge_connectivity(current_user: User = Depends(require_admi
         return info
     except Exception as e:
         return {"configured": True, "ok": False, "status": None, "error": str(e)}
+
+
+@router.get("/curseforge-info")
+async def curseforge_info(current_user: User = Depends(require_admin)):
+    """Return non-sensitive diagnostics about the stored CurseForge API key and storage path.
+    Does NOT return the full key. Helps verify the backend is reading the same store file.
+    """
+    key = get_integration_key("curseforge")
+    configured = bool(key)
+    masked = None
+    if configured:
+        # show only last 4 chars and length
+        masked = f"{'*' * max(0, len(key) - 4)}{key[-4:]}"
+    try:
+        path = str(STORE_PATH)
+        exists = STORE_PATH.exists()
+    except Exception:
+        path = '/data/servers/integrations.json'
+        exists = False
+    return {"configured": configured, "key_masked": masked, "store_path": path, "store_exists": exists}
 

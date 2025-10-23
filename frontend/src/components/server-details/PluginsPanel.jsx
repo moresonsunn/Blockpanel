@@ -3,6 +3,7 @@ import { FaUpload } from 'react-icons/fa';
 import { API, getStoredToken } from '../../lib/api';
 
 export default function PluginsPanel({ serverName }) {
+  const sName = serverName || '';
   const [plugins, setPlugins] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -12,7 +13,8 @@ export default function PluginsPanel({ serverName }) {
   async function refresh() {
     setLoading(true); setError('');
     try {
-      const r = await fetch(`${API}/plugins/${encodeURIComponent(serverName)}`);
+  if (!sName) { setPlugins([]); return; }
+  const r = await fetch(`${API}/plugins/${encodeURIComponent(sName)}`);
       const d = await r.json();
       setPlugins(d.plugins || []);
     } catch (e) { setError(String(e)); } finally { setLoading(false); }
@@ -26,8 +28,9 @@ export default function PluginsPanel({ serverName }) {
     setUploading(true); setUploadPct(0);
     try {
       const token = getStoredToken();
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${API}/plugins/${encodeURIComponent(serverName)}/upload`, true);
+  if (!sName) return;
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `${API}/plugins/${encodeURIComponent(sName)}/upload`, true);
       if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
       xhr.upload.onprogress = (ev) => {
         if (ev.lengthComputable) setUploadPct(Math.round((ev.loaded/ev.total)*100));
@@ -43,10 +46,11 @@ export default function PluginsPanel({ serverName }) {
     }
   }
 
-  async function reloadPlugins() { await fetch(`${API}/plugins/${encodeURIComponent(serverName)}/reload`, { method: 'POST' }); }
+  async function reloadPlugins() { if (!sName) return; await fetch(`${API}/plugins/${encodeURIComponent(sName)}/reload`, { method: 'POST' }); }
 
   async function remove(name) {
-    await fetch(`${API}/plugins/${encodeURIComponent(serverName)}/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!sName) return;
+    await fetch(`${API}/plugins/${encodeURIComponent(sName)}/${encodeURIComponent(name)}`, { method: 'DELETE' });
     await refresh();
   }
 

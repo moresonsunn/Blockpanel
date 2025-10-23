@@ -3,6 +3,7 @@ import { FaUpload } from 'react-icons/fa';
 import { API, getStoredToken } from '../../lib/api';
 
 export default function WorldsPanel({ serverName }) {
+  const sName = serverName || '';
   const [worlds, setWorlds] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -12,7 +13,8 @@ export default function WorldsPanel({ serverName }) {
   async function refresh() {
     setLoading(true); setError('');
     try {
-      const r = await fetch(`${API}/worlds/${encodeURIComponent(serverName)}`);
+  if (!sName) { setWorlds([]); return; }
+  const r = await fetch(`${API}/worlds/${encodeURIComponent(sName)}`);
       const d = await r.json();
       setWorlds(d.worlds || []);
     } catch (e) { setError(String(e)); } finally { setLoading(false); }
@@ -25,8 +27,9 @@ export default function WorldsPanel({ serverName }) {
     setUploading(true); setUploadPct(0);
     try {
       const token = getStoredToken();
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${API}/worlds/${encodeURIComponent(serverName)}/upload?world_name=world`, true);
+  if (!sName) return;
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `${API}/worlds/${encodeURIComponent(sName)}/upload?world_name=world`, true);
       if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
       xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) setUploadPct(Math.round((ev.loaded/ev.total)*100)); };
       xhr.onload = async () => { await refresh(); };
@@ -38,10 +41,12 @@ export default function WorldsPanel({ serverName }) {
   }
 
   function download(worldName) {
-    window.location.href = `${API}/worlds/${encodeURIComponent(serverName)}/download?world=${encodeURIComponent(worldName)}`;
+  if (!sName) return;
+  window.location.href = `${API}/worlds/${encodeURIComponent(sName)}/download?world=${encodeURIComponent(worldName)}`;
   }
   async function backup(worldName) {
-    await fetch(`${API}/worlds/${encodeURIComponent(serverName)}/backup?world=${encodeURIComponent(worldName)}&compression=zip`, { method: 'POST' });
+  if (!sName) return;
+  await fetch(`${API}/worlds/${encodeURIComponent(sName)}/backup?world=${encodeURIComponent(worldName)}&compression=zip`, { method: 'POST' });
   }
 
   return (

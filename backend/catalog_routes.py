@@ -3,9 +3,15 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Any, Dict, List, Optional
 import time
 
+import logging
 from modpack_providers.modrinth import ModrinthProvider
 from modpack_providers.curseforge import CurseForgeProvider
 from integrations_store import get_integration_key
+
+log = logging.getLogger(__name__)
+
+# Track provider instantiation errors so the UI can surface diagnostics
+_PROVIDER_ERRORS: Dict[str, str] = {}
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -21,9 +27,15 @@ def get_providers_live() -> Dict[str, Any]:
     if cf_key:
         try:
             prov["curseforge"] = CurseForgeProvider(cf_key)
-        except Exception:
-            # Ignore bad keys
-            pass
+            # Clear any previous error
+            _PROVIDER_ERRORS.pop("curseforge", None)
+        except Exception as e:
+            # Record the error so list_providers can show diagnostics
+            log.exception("Failed to instantiate CurseForgeProvider")
+            _PROVIDER_ERRORS["curseforge"] = str(e)
+    else:
+        # No key configured: clear any previous error
+        _PROVIDER_ERRORS.pop("curseforge", None)
     return prov
 
 def _cache_get(key: str):
@@ -44,7 +56,7 @@ async def list_providers():
     items = [
         {"id": "all", "name": "All", "configured": True, "requires_key": False},
         {"id": "modrinth", "name": "Modrinth", "configured": True, "requires_key": False},
-        {"id": "curseforge", "name": "CurseForge", "configured": bool(cf_key), "requires_key": True},
+        {"id": "curseforge", "name": "CurseForge", "configured": bool(cf_key), "requires_key": True, "error": _PROVIDER_ERRORS.get("curseforge")},
     ]
     return {"providers": items}
 

@@ -3,6 +3,8 @@ import { FaFolder, FaUpload, FaSave, FaEdit, FaTimes, FaCheck, FaBan, FaArrowUp,
 import { API, getStoredToken } from '../../lib/api';
 
 export default function FilesPanelWrapper({ serverName, initialItems = null, isBlockedFile, onEditStart, onBlockedFileError }) {
+  // Defensive alias to avoid accidental ReferenceError when prop is missing
+  const sName = serverName || '';
   const [path, setPath] = useState('.');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -29,8 +31,8 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
 
   useEffect(() => {
     // clear cache when server changes
-    cacheRef.current = {};
-    const key = `${serverName}::.`;
+  cacheRef.current = {};
+  const key = `${sName}::.`;
     if (Array.isArray(initialItems) && initialItems.length) {
       // hydrate immediately for instant render
       cacheRef.current[key] = { items: initialItems, ts: Date.now(), etag: undefined };
@@ -44,7 +46,7 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
   }, [serverName, initialItems]);
 
   async function loadDir(p = path, { force = false } = {}) {
-    const key = `${serverName}::${p}`;
+    const key = `${sName}::${p}`;
     setErr('');
     const cached = cacheRef.current[key];
 
@@ -65,8 +67,15 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
     const attempt = async () => {
       const headers = {};
       if (cached && force && cached.etag) headers['If-None-Match'] = cached.etag;
+      if (!sName) {
+        // No serverName provided; treat as empty folder
+        cacheRef.current[key] = { items: [], ts: Date.now() };
+        setItems([]);
+        setPath(p);
+        return;
+      }
       const r = await withTimeout(
-        fetch(`${API}/servers/${encodeURIComponent(serverName)}/files?path=${encodeURIComponent(p)}`, { signal: abortController.signal, headers }),
+        fetch(`${API}/servers/${encodeURIComponent(sName)}/files?path=${encodeURIComponent(p)}`, { signal: abortController.signal, headers }),
         8000,
         abortController
       );
@@ -113,8 +122,9 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
       return;
     }
     const filePath = path === '.' ? name : `${path}/${name}`;
+    if (!sName) { setBlockedFileErrorLocal('Server name missing'); onBlockedFileError?.('Server name missing'); return; }
     const r = await fetch(
-      `${API}/servers/${encodeURIComponent(serverName)}/file?path=${encodeURIComponent(filePath)}`
+      `${API}/servers/${encodeURIComponent(sName)}/file?path=${encodeURIComponent(filePath)}`
     );
     const d = await r.json();
     if (d && d.error) {
@@ -140,10 +150,11 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
     // Optimistic remove from current list
     setItems(prev => prev.filter(it => it.name !== name));
     // Bust cache for this directory to avoid stale 304
-    try { delete cacheRef.current[`${serverName}::${path}`]; } catch {}
+    try { delete cacheRef.current[`${sName}::${path}`]; } catch {}
     try {
+      if (!sName) throw new Error('Server name missing');
       const r = await fetch(
-        `${API}/servers/${encodeURIComponent(serverName)}/file?path=${encodeURIComponent(p)}`,
+        `${API}/servers/${encodeURIComponent(sName)}/file?path=${encodeURIComponent(p)}`,
         { method: 'DELETE' }
       );
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -159,14 +170,15 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
     const newName = renameValue && renameValue.trim();
     if (!newName || newName === originalName) { setRenameTarget(null); return; }
     const dest = path === '.' ? newName : `${path}/${newName}`;
-    await fetch(`${API}/servers/${encodeURIComponent(serverName)}/rename`, {
+    if (!sName) throw new Error('Server name missing');
+    await fetch(`${API}/servers/${encodeURIComponent(sName)}/rename`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ src: p, dest })
     });
     setRenameTarget(null);
     setRenameValue('');
-    try { delete cacheRef.current[`${serverName}::${path}`]; } catch {}
+    try { delete cacheRef.current[`${sName}::${path}`]; } catch {}
     loadDir(path, { force: true });
   }
   function startRename(name) {
@@ -180,8 +192,9 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
 
   async function zipItem(name) {
     const p = path === '.' ? name : `${path}/${name}`;
-    try { delete cacheRef.current[`${serverName}::${path}`]; } catch {}
-    await fetch(`${API}/servers/${encodeURIComponent(serverName)}/zip`, {
+    try { delete cacheRef.current[`${sName}::${path}`]; } catch {}
+    if (!sName) throw new Error('Server name missing');
+    await fetch(`${API}/servers/${encodeURIComponent(sName)}/zip`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: p })
@@ -195,8 +208,9 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
     const destInput = window.prompt('Unzip destination folder (relative to current path):', defaultDest);
     const destRel = destInput && destInput.trim() ? destInput.trim() : defaultDest;
     const dest = path === '.' ? destRel : `${path}/${destRel}`;
-    try { delete cacheRef.current[`${serverName}::${path}`]; } catch {}
-    await fetch(`${API}/servers/${encodeURIComponent(serverName)}/unzip`, {
+    try { delete cacheRef.current[`${sName}::${path}`]; } catch {}
+    if (!sName) throw new Error('Server name missing');
+    await fetch(`${API}/servers/${encodeURIComponent(sName)}/unzip`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: p, dest })
@@ -206,7 +220,8 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
 
   async function downloadItem(name, isDir) {
     const p = path === '.' ? name : `${path}/${name}`;
-    const url = `${API}/servers/${encodeURIComponent(serverName)}/download?path=${encodeURIComponent(p)}`;
+  if (!sName) { alert('Server name missing'); return; }
+  const url = `${API}/servers/${encodeURIComponent(sName)}/download?path=${encodeURIComponent(p)}`;
     try {
       const token = getStoredToken();
       const r = await fetch(url, { headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
@@ -229,8 +244,9 @@ export default function FilesPanelWrapper({ serverName, initialItems = null, isB
     const folder = window.prompt('New folder name');
     if (!folder) return;
     const p = path === '.' ? folder : `${path}/${folder}`;
-    try { delete cacheRef.current[`${serverName}::${path}`]; } catch {}
-    await fetch(`${API}/servers/${encodeURIComponent(serverName)}/mkdir`, {
+    try { delete cacheRef.current[`${sName}::${path}`]; } catch {}
+    if (!sName) throw new Error('Server name missing');
+    await fetch(`${API}/servers/${encodeURIComponent(sName)}/mkdir`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: p })

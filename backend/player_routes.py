@@ -501,11 +501,32 @@ async def get_online_players(
             )
         
         # Send list command
-        result = docker_manager.send_command(container_id, "list")
-        
-        # Parse the result to extract player names
-        # This is a simplified implementation - in practice, you'd parse the server logs
-        return {"players": [], "count": 0, "message": "Use server logs to see current players"}
+        # Prefer authoritative player info from the runtime manager (RCON-backed)
+        try:
+            info = docker_manager.get_player_info(container_id)
+            names = info.get('names') or []
+            online = info.get('online') or 0
+            maxp = info.get('max') or info.get('max_players') or 0
+            method = info.get('method') or 'none'
+            return {"players": names, "count": online, "max": maxp, "method": method}
+        except Exception:
+            # Fallback: attempt to send a 'list' command via the manager which may write to console
+            result = docker_manager.send_command(container_id, "list")
+            # Best-effort: parse the result if available
+            try:
+                text = result if isinstance(result, str) else (result.get('output') if isinstance(result, dict) else '')
+                import re as _re
+                m = _re.search(r"There are\s+(\d+)\s+of a max of\s+(\d+)\s+players online", str(text))
+                if not m:
+                    m = _re.search(r"(\d+)\s*/\s*(\d+)\s*players? online", str(text))
+                names = []
+                online = int(m.group(1)) if m else 0
+                maxp = int(m.group(2)) if m else 0
+            except Exception:
+                names = []
+                online = 0
+                maxp = 0
+            return {"players": names, "count": online, "max": maxp}
         
     except Exception as e:
         raise HTTPException(

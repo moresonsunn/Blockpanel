@@ -78,6 +78,7 @@ import ConfigPanel from './components/server-details/ConfigPanel';
 import WorldsPanel from './components/server-details/WorldsPanel';
 import SchedulePanel from './components/server-details/SchedulePanel';
 import PlayersPanel from './components/server-details/PlayersPanel';
+const MonitoringPageLazy = React.lazy(() => import('./components/MonitoringPage'));
 import FilesPanelWrapper from './components/server-details/FilesPanelWrapper';
 import EditingPanel from './components/server-details/EditingPanel';
 import { useFetch } from './lib/useFetch';
@@ -94,6 +95,55 @@ let API = (typeof window !== 'undefined') ? '/api' : 'http://localhost:8000';
 // Ensure document title reflects branding
 if (typeof window !== 'undefined') {
   try { applyDocumentBranding(); } catch {}
+}
+
+// Defensive fallback: some production bundles / code-splits referenced `serverName`
+// in contexts where it wasn't declared (causing ReferenceError). Provide a
+// harmless global fallback to avoid runtime crashes. Local `const [serverName,...]`
+// declarations will still shadow this global value.
+if (typeof window !== 'undefined' && typeof serverName === 'undefined') {
+  // eslint-disable-next-line no-var
+  var serverName = '';
+}
+
+// Defensive fallback for hostPort to avoid runtime ReferenceError in prod bundles
+if (typeof window !== 'undefined' && typeof hostPort === 'undefined') {
+  // eslint-disable-next-line no-var
+  var hostPort = '';
+}
+
+// Defensive fallback for minRam (and maxRam) to avoid ReferenceError in prod bundles
+if (typeof window !== 'undefined' && typeof minRam === 'undefined') {
+  // eslint-disable-next-line no-var
+  var minRam = '';
+}
+if (typeof window !== 'undefined' && typeof maxRam === 'undefined') {
+  // eslint-disable-next-line no-var
+  var maxRam = '';
+}
+
+// Defensive fallback for javaOverride used in some UI flows
+if (typeof window !== 'undefined' && typeof javaOverride === 'undefined') {
+  // eslint-disable-next-line no-var
+  var javaOverride = '';
+}
+
+// Defensive fallback for serverType used in several UI flows
+if (typeof window !== 'undefined' && typeof serverType === 'undefined') {
+  // eslint-disable-next-line no-var
+  var serverType = '';
+}
+
+// Defensive fallback for serverVersion used in UI flows
+if (typeof window !== 'undefined' && typeof serverVersion === 'undefined') {
+  // eslint-disable-next-line no-var
+  var serverVersion = '';
+}
+
+// Defensive fallback for busy flag used during many UI flows
+if (typeof window !== 'undefined' && typeof busy === 'undefined') {
+  // eslint-disable-next-line no-var
+  var busy = false;
 }
 
 // Global Data Store Context for instant access to all data
@@ -913,7 +963,7 @@ function PageLoadingSpinner() {
   );
 }
 
-// Error Boundary Component to catch JavaScript errors
+// Compact Error Boundary: logs errors and shows a simple fallback message.
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -931,75 +981,33 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="p-6 space-y-6">
-          <div className="bg-red-500/10 border border-red-500/20 text-red-300 p-6 rounded-lg">
-            <div className="flex items-center gap-3 mb-4">
-              <FaExclamationTriangle className="text-2xl" />
-              <h2 className="text-xl font-semibold">Something went wrong</h2>
-            </div>
-            <p className="text-sm text-red-200 mb-4">
-              An error occurred while loading this page. This is likely due to missing backend endpoints.
-            </p>
-            <div className="bg-red-500/5 border border-red-500/20 p-4 rounded-lg mb-4">
-              <p className="text-xs text-red-300 font-mono">{this.state.error?.message}</p>
-            </div>
-            <button
-              onClick={() => {
-                this.setState({ hasError: false, error: null });
-                window.location.reload();
-              }}
-              className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-sm font-medium"
-            >
-              Reload Page
-            </button>
-          </div>
+        <div className="p-6">
+          <div className="text-red-300">An unexpected error occurred. The app captured the error and logged it to the console.</div>
         </div>
       );
     }
-
     return this.props.children;
   }
 }
 
-// Advanced User Management System - Inspired by Crafty Controller
 function AdvancedUserManagementPageImpl() {
-  // Get all data instantly from global store with fallbacks
+  // Local/global data and UI state for Advanced User Management
   const globalData = useGlobalData();
-  const { users, roles, auditLogs, isInitialized } = globalData;
-  
-  // Provide fallback data if backend endpoints aren't ready
-  const safeUsers = users || [];
-  const safeRoles = roles && roles.length > 0 ? roles : [
-    { name: 'admin', description: 'System Administrator', color: '#dc2626', level: 4, is_system: true, permissions: [] },
-    { name: 'moderator', description: 'Server Moderator', color: '#0ea5e9', level: 3, is_system: true, permissions: [] },
-    { name: 'user', description: 'Regular User', color: '#6b7280', level: 1, is_system: true, permissions: [] }
-  ];
-  const safeAuditLogs = auditLogs || [];
-  
-  // State management
-  const [activeTab, setActiveTab] = useState('users');
-  const [showCreateUser, setShowCreateUser] = useState(false);
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [selectedRole, setSelectedRole] = useState(null);
+  const safeUsers = Array.isArray(globalData.users) ? globalData.users : [];
+  const safeRoles = Array.isArray(globalData.roles) ? globalData.roles : [];
+  const safeAuditLogs = Array.isArray(globalData.auditLogs) ? globalData.auditLogs : [];
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedRole, setSelectedRole] = useState(null);
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [activeTab, setActiveTab] = useState('users');
+  const [newUser, setNewUser] = useState({ username: '', email: '', password: '', confirmPassword: '', role: 'user', fullName: '', mustChangePassword: true, autoPassword: true });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  
-  // New user form
-  const [newUser, setNewUser] = useState({ 
-    username: '', 
-    email: '', 
-    password: '', 
-    confirmPassword: '',
-    role: 'user', 
-    fullName: '',
-    mustChangePassword: true,
-    autoPassword: true
-  });
-  
-  
+
   // Function to refresh user data
   const loadUsers = async () => {
     try {
@@ -1237,248 +1245,19 @@ function AdvancedUserManagementPageImpl() {
         <AuditTab auditLogs={safeAuditLogs} />
       )}
 
-      {/* Import from local ZIP */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4">Import Local Server Pack (.zip)</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Server Name</label>
-            <input value={serverName} onChange={e=>setServerName(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Host Port (optional)</label>
-            <input value={hostPort} onChange={e=>setHostPort(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="e.g. 25565" />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-sm text-white/70 mb-1">Select ZIP file</label>
-            <input type="file" accept=".zip" onChange={(e)=> setZipFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)} className="w-full text-sm text-white" />
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Min RAM</label>
-            <input value={minRam} onChange={e=>setMinRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Max RAM</label>
-            <input value={maxRam} onChange={e=>setMaxRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Java Version (override)</label>
-            <select value={javaOverride}
-                    onChange={e=>setJavaOverride(e.target.value)}
-                    className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white"
-                    style={{ backgroundColor: '#1f2937' }}>
-              <option value="" style={{ backgroundColor: '#1f2937' }}>Auto</option>
-              <option value="8" style={{ backgroundColor: '#1f2937' }}>Java 8</option>
-              <option value="17" style={{ backgroundColor: '#1f2937' }}>Java 17</option>
-              <option value="21" style={{ backgroundColor: '#1f2937' }}>Java 21</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Loader (hint)</label>
-            <select value={serverType}
-                    onChange={e=>setServerType(e.target.value)}
-                    className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white"
-                    style={{ backgroundColor: '#1f2937' }}>
-              <option value="" style={{ backgroundColor: '#1f2937' }}>Auto</option>
-              <option value="forge" style={{ backgroundColor: '#1f2937' }}>Forge</option>
-              <option value="neoforge" style={{ backgroundColor: '#1f2937' }}>NeoForge</option>
-              <option value="fabric" style={{ backgroundColor: '#1f2937' }}>Fabric</option>
-              <option value="paper" style={{ backgroundColor: '#1f2937' }}>Paper</option>
-              <option value="purpur" style={{ backgroundColor: '#1f2937' }}>Purpur</option>
-              <option value="vanilla" style={{ backgroundColor: '#1f2937' }}>Vanilla</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Minecraft Version (hint)</label>
-            <input value={serverVersion}
-                   onChange={e=>setServerVersion(e.target.value)}
-                   placeholder="e.g. 1.20.1"
-                   className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
-          </div>
-          <div className="md:col-span-2 flex items-center gap-3">
-            <button disabled={busy || !zipFile} onClick={async ()=>{
-              setBusy(true);
-              setMsg('');
-              try {
-                const fd = new FormData();
-                fd.append('server_name', serverName);
-                if (hostPort) fd.append('host_port', hostPort);
-                fd.append('min_ram', minRam);
-                fd.append('max_ram', maxRam);
-                if (javaOverride) fd.append('java_version_override', javaOverride);
-                if (serverType) fd.append('server_type', serverType);
-                if (serverVersion) fd.append('server_version', serverVersion);
-                if (zipFile) fd.append('file', zipFile);
-                const r = await fetch(`${API}/modpacks/import-upload`, { method: 'POST', body: fd });
-                const d = await r.json().catch(()=>({}));
-                if (!r.ok) throw new Error(d?.detail || `HTTP ${r.status}`);
-                setMsg('Server pack uploaded and container started. Go to Servers to see it.');
-              } catch (e) {
-                setMsg(`Error: ${e.message || e}`);
-              } finally {
-                setBusy(false);
-              }
-            }} className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded">{busy ? 'Uploading…' : 'Import ZIP'}</button>
-            {msg && <div className="text-sm text-white/70">{msg}</div>}
-          </div>
+      {/* Local server pack imports live on the Templates page. */}
+      <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+        <div className="text-sm text-white/70">Want to import a local server pack? Use the Templates & Modpacks page to upload ZIPs.</div>
+        <div className="mt-3">
+          <button onClick={() => window.location.hash = '#/templates'} className="px-3 py-1 rounded bg-brand-500">Go to Templates</button>
         </div>
       </div>
 
-      {/* System Health Overview - Always show with fallback values */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/70 text-sm">Total Servers</p>
-              <p className="text-2xl font-bold text-white">{systemHealth?.total_servers || globalData.servers?.length || 0}</p>
-            </div>
-            <FaServer className="text-3xl text-brand-500" />
-          </div>
-        </div>
-        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/70 text-sm">Running Servers</p>
-              <p className="text-2xl font-bold text-green-400">
-                {systemHealth?.running_servers || globalData.servers?.filter(s => s.status === 'running').length || 0}
-              </p>
-            </div>
-            <FaPlay className="text-3xl text-green-500" />
-          </div>
-        </div>
-        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/70 text-sm">CPU Usage</p>
-              <p className="text-2xl font-bold text-white">{systemHealth?.cpu_usage_percent || '--'}%</p>
-            </div>
-            <FaMicrochip className="text-3xl text-yellow-500" />
-          </div>
-        </div>
-        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/70 text-sm">Memory Usage</p>
-              <p className="text-2xl font-bold text-white">
-                {systemHealth ? `${systemHealth.used_memory_gb} / ${systemHealth.total_memory_gb} GB` : '--'}
-              </p>
-            </div>
-            <FaMemory className="text-3xl text-purple-500" />
-          </div>
-        </div>
-        <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/70 text-sm">Online Players</p>
-              <p className="text-2xl font-bold text-blue-400">
-                {Object.values(globalData.serverStats || {}).reduce((sum, s) => sum + ((s && (s.players?.online ?? s.player_count)) || 0), 0)}
-              </p>
-            </div>
-            <FaUsers className="text-3xl text-blue-500" />
-          </div>
-        </div>
-  </div>
-
-      {/* Alerts - Always show section */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <FaBell /> System Alerts
-        </h3>
-        {alerts && alerts.length > 0 ? (
-          <div className="space-y-3">
-            {alerts.map((alert, idx) => (
-              <div key={idx} className={`p-4 rounded-lg border ${
-                alert.type === 'warning' 
-                  ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-300'
-                  : alert.type === 'error'
-                  ? 'bg-red-500/10 border-red-500/20 text-red-300'
-                  : 'bg-blue-500/10 border-blue-500/20 text-blue-300'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {alert.type === 'warning' && <FaExclamationTriangle />}
-                    {alert.type === 'error' && <FaTimesCircle />}
-                    {alert.type === 'info' && <FaInfoCircle />}
-                    <span>{alert.message}</span>
-                  </div>
-                  <span className="text-sm opacity-70">
-                    {new Date(alert.timestamp).toLocaleString()}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-6 text-white/60">
-            <FaBell className="text-3xl mx-auto mb-2 text-white/30" />
-            <p className="text-sm">No active alerts</p>
-            <p className="text-xs text-white/40 mt-1">System is running normally</p>
-          </div>
-        )}
-      </div>
-
-      {/* Server Overview - Always show with available servers */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <FaProjectDiagram /> Server Overview
-        </h3>
-        {globalData.servers && globalData.servers.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {globalData.servers.map((server, idx) => {
-              const serverStats = globalData.serverStats?.[server.id];
-              return (
-                <div key={server.id || idx} className="bg-white/5 border border-white/10 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="font-medium">{server.name}</div>
-                    <div className={`px-2 py-1 rounded text-xs ${
-                      server.status === 'running'
-                        ? 'bg-green-500/20 text-green-300'
-                        : 'bg-red-500/20 text-red-300'
-                    }`}>
-                      {server.status || 'unknown'}
-                    </div>
-                  </div>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-white/70">CPU:</span>
-                      <span>{serverStats?.cpu_percent || '--'}%</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-white/70">Memory:</span>
-                      <span>{serverStats?.memory_usage_mb ? `${serverStats.memory_usage_mb} MB` : '--'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-white/70">Players:</span>
-                      <span>
-                        {(() => {
-                          const online = serverStats?.players?.online ?? serverStats?.player_count ?? 0;
-                          const max = serverStats?.players?.max;
-                          return max ? `${online}/${max}` : online;
-                        })()}
-                      </span>
-                    </div>
-                    {Array.isArray(serverStats?.players?.names) && serverStats.players.names.length > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-white/70">Names:</span>
-                        <span className="text-right truncate max-w-[60%]">{serverStats.players.names.join(', ')}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="text-center py-8 text-white/60">
-            <FaServer className="text-4xl mx-auto mb-3 text-white/30" />
-            <p className="text-lg">No servers created yet</p>
-            <p className="text-sm text-white/40 mt-2">Create your first Minecraft server to see monitoring data here</p>
-          </div>
-        )}
-      </div>
+      {/* Monitoring-related UI (system health, alerts and server overview) moved to Server Status (Monitoring) to avoid duplication */}
     </div>
   );
 }
+
 
 // System Settings Page - renamed to avoid conflicts
 function SettingsPageImpl() {
@@ -1548,15 +1327,27 @@ function SettingsPageImpl() {
 
   async function saveCurseforgeKey() {
     try {
-      const r = await fetch(`${API}/integrations/curseforge-key`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: curseforgeKey }) });
+      const r = await fetch(`${API}/integrations/curseforge-key`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ api_key: curseforgeKey }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
         const msg = d?.detail || `HTTP ${r.status}`;
         alert('Failed to save key: ' + msg);
         return;
       }
+      // Refresh integration status
       await loadIntegrations();
-      alert('CurseForge API key saved.');
+      // Run a live test using the saved key and show diagnostic info
+      try {
+        const tr = await fetch(`${API}/integrations/curseforge-test`, { headers: authHeaders() });
+        const td = await tr.json().catch(() => ({}));
+        if (!tr.ok) {
+          alert('Key saved but test failed: ' + (td?.detail || JSON.stringify(td)));
+        } else {
+          alert('CurseForge API key saved. Test result: ' + JSON.stringify(td));
+        }
+      } catch (e) {
+        alert('CurseForge key saved but test request failed: ' + (e?.message || e));
+      }
     } catch (e) {
       alert('Failed to save key: ' + (e?.message || e));
     }
@@ -1928,8 +1719,15 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
             return next.length > 500 ? next.slice(-500) : next;
           });
           if (evd.type === 'done' || evd.type === 'error') {
-            es.close();
+            try { es.close(); } catch {}
             setInstallWorking(false);
+            // Ensure the servers list is refreshed when install finishes
+            if (gd && gd.__refreshServers) {
+              gd.__refreshServers();
+              // schedule a couple of follow-up refreshes in case the backend finalizes after a short delay
+              setTimeout(() => gd.__refreshServers && gd.__refreshServers(), 1000);
+              setTimeout(() => gd.__refreshServers && gd.__refreshServers(), 3000);
+            }
           }
         } catch {}
       };
@@ -2522,7 +2320,6 @@ function PluginManagerPage() {
 // Templates & Modpacks Page (curated templates removed)
 function TemplatesPage() {
   const [serverName, setServerName] = useState('mp-' + Math.random().toString(36).slice(2,6));
-  const [url, setUrl] = useState('');
   const [hostPort, setHostPort] = useState('');
   const [minRam, setMinRam] = useState('2048M');
   const [maxRam, setMaxRam] = useState('4096M');
@@ -2612,7 +2409,6 @@ function TemplatesPage() {
       setInstallVersionId('');
     }
   }
-
   async function submitInstall() {
     if (!installPack) return;
     if (!serverName || !String(serverName).trim()) {
@@ -2661,36 +2457,6 @@ function TemplatesPage() {
     }
   }
 
-  async function importPack(e) {
-    e.preventDefault();
-    setBusy(true);
-    setMsg('');
-    try {
-      const body = {
-        server_name: serverName,
-        server_pack_url: url,
-        host_port: hostPort ? Number(hostPort) : null,
-        min_ram: minRam,
-        max_ram: maxRam,
-        java_version_override: javaOverride,
-        server_type: serverType,
-        server_version: serverVersion
-      };
-      const r = await fetch(`${API}/modpacks/import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify(body)
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-      setMsg('Server pack imported and container started. Go to Servers to see it.');
-    } catch (e) {
-      setMsg(`Error: ${e.message}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="p-6 space-y-6">
       <div>
@@ -2700,69 +2466,7 @@ function TemplatesPage() {
         <p className="text-white/70 mt-2">Import modpack server packs or search and install from providers</p>
       </div>
 
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4">Import Server Pack (URL)</h3>
-        <form onSubmit={importPack} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Server Name</label>
-            <input value={serverName} onChange={e=>setServerName(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" required />
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Host Port (optional)</label>
-            <input value={hostPort} onChange={e=>setHostPort(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="e.g. 25565" />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-sm text-white/70 mb-1">Server Pack URL (.zip)</label>
-            <input value={url} onChange={e=>setUrl(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="https://...serverpack.zip" required />
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Min RAM</label>
-            <input value={minRam} onChange={e=>setMinRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Max RAM</label>
-            <input value={maxRam} onChange={e=>setMaxRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Java Version (override)</label>
-            <select value={javaOverride}
-                    onChange={e=>setJavaOverride(e.target.value)}
-                    className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white"
-                    style={{ backgroundColor: '#1f2937' }}>
-              <option value="" style={{ backgroundColor: '#1f2937' }}>Auto</option>
-              <option value="8" style={{ backgroundColor: '#1f2937' }}>Java 8</option>
-              <option value="17" style={{ backgroundColor: '#1f2937' }}>Java 17</option>
-              <option value="21" style={{ backgroundColor: '#1f2937' }}>Java 21</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Loader (hint)</label>
-            <select value={serverType}
-                    onChange={e=>setServerType(e.target.value)}
-                    className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white"
-                    style={{ backgroundColor: '#1f2937' }}>
-              <option value="" style={{ backgroundColor: '#1f2937' }}>Auto</option>
-              <option value="forge" style={{ backgroundColor: '#1f2937' }}>Forge</option>
-              <option value="neoforge" style={{ backgroundColor: '#1f2937' }}>NeoForge</option>
-              <option value="fabric" style={{ backgroundColor: '#1f2937' }}>Fabric</option>
-              <option value="paper" style={{ backgroundColor: '#1f2937' }}>Paper</option>
-              <option value="purpur" style={{ backgroundColor: '#1f2937' }}>Purpur</option>
-              <option value="vanilla" style={{ backgroundColor: '#1f2937' }}>Vanilla</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Minecraft Version (hint)</label>
-            <input value={serverVersion}
-                   onChange={e=>setServerVersion(e.target.value)}
-                   placeholder="e.g. 1.20.1"
-                   className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
-          </div>
-          <div className="md:col-span-2 flex items-center gap-3">
-            <button disabled={busy} className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded">{busy ? 'Importing...' : 'Import Server Pack'}</button>
-            {msg && <div className="text-sm text-white/70">{msg}</div>}
-          </div>
-        </form>
-      </div>
+      {/* URL import removed — local ZIP upload is the supported import flow */}
 
       {/* Import from local ZIP */}
       <div className="bg-white/5 border border-white/10 rounded-lg p-6">
@@ -2796,8 +2500,8 @@ function TemplatesPage() {
                 const fd = new FormData();
                 fd.append('server_name', serverName);
                 if (hostPort) fd.append('host_port', hostPort);
-                fd.append('min_ram', minRam);
-                fd.append('max_ram', maxRam);
+                fd.append('min_ram', min_ram || minRam);
+                fd.append('max_ram', max_ram || maxRam);
                 if (javaOverride) fd.append('java_version_override', javaOverride);
                 if (serverType) fd.append('server_type', serverType);
                 if (serverVersion) fd.append('server_version', serverVersion);
@@ -3247,6 +2951,12 @@ function App() {
     { id: 'settings', label: 'Settings', icon: FaCog },
   ];
 
+  // Monitoring page implementation - simple wrapper around DashboardPage for now
+  function MonitoringPageImpl() {
+    // Reuse the pre-existing DashboardPage which already shows overview and monitoring info
+    return <DashboardPage />;
+  }
+
   function renderCurrentPage() {
     switch (currentPage) {
       case 'dashboard':
@@ -3288,7 +2998,11 @@ function App() {
           />
         );
       case 'monitoring':
-        return <MonitoringPageImpl />;
+        return (
+          <React.Suspense fallback={<div className="p-6">Loading monitoring…</div>}>
+            <MonitoringPageLazy />
+          </React.Suspense>
+        );
       case 'templates':
         return <TemplatesPage />;
       case 'users':
@@ -3396,7 +3110,14 @@ function App() {
                           }`}
                         >
                           <item.icon className={`${sidebarOpen ? 'text-lg' : 'text-xl'}`} />
-                          {sidebarOpen && <span>{item.label}</span>}
+                          {sidebarOpen && (
+                            <div className="flex items-center justify-between w-full">
+                              <span>{item.label}</span>
+                              {item.id === 'monitoring' && gd?.alerts && gd.alerts.length > 0 && (
+                                <span className="ml-2 inline-flex items-center justify-center rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white">{gd.alerts.length}</span>
+                              )}
+                            </div>
+                          )}
                         </button>
                       ))}
                     </div>

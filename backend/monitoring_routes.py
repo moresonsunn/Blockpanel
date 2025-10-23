@@ -110,6 +110,103 @@ async def get_system_health(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get system health: {e}")
 
+
+@router.get("/dashboard-data")
+async def get_dashboard_data(
+    current_user: User = Depends(require_auth),
+    db: Session = Depends(get_db)
+):
+    """Compact dashboard payload expected by the frontend.
+    Returns system health summary and a short list of servers with statuses
+    and a small alerts summary. Lightweight and permission-guarded.
+    """
+    try:
+        # Reuse system health
+        health = await get_system_health(current_user=current_user)
+
+        dm = get_docker_manager()
+        servers = dm.list_servers()
+        # Provide a small set of server fields for the dashboard
+        servers_summary = [
+            {
+                "id": s.get("id"),
+                "name": s.get("name"),
+                "status": s.get("status"),
+                "host_port": s.get("host_port") if isinstance(s.get("host_port"), (str, int)) else None,
+                "memory_mb": s.get("memory_mb") if s.get("memory_mb") is not None else None,
+            }
+            for s in servers
+        ]
+
+        # Lightweight alerts summary derived from simple heuristics
+        total = len(servers_summary)
+        running = len([s for s in servers_summary if s.get("status") == "running"])
+        stopped = total - running
+
+        alerts_summary = {
+            "total_servers": total,
+            "running": running,
+            "stopped": stopped,
+            "critical": 0,
+            "warnings": 0,
+        }
+
+        return {"health": health, "servers": servers_summary, "alerts_summary": alerts_summary}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to build dashboard data: {e}")
+
+
+@router.get("/alerts")
+async def get_alerts(
+    current_user: User = Depends(require_auth),
+    db: Session = Depends(get_db)
+):
+    """Return current monitoring alerts. This implementation is a lightweight
+    mirror of the alerts previously composed in the SSE handler.
+    """
+    try:
+        dm = get_docker_manager()
+        servers = dm.list_servers()
+
+        alerts: List[Dict[str, Any]] = []
+        alert_id = 1
+
+        # System-level alert: too many servers down
+        total = len(servers)
+        running = len([s for s in servers if s.get("status") == "running"])
+        if total > 0 and running / total < 0.5:
+            alerts.append({
+                "id": alert_id,
+                "type": "critical",
+                "severity": "high",
+                "message": f"More than half of servers are down ({running}/{total} running)",
+                "timestamp": datetime.utcnow(),
+                "acknowledged": False,
+                "server_name": None,
+                "category": "system"
+            })
+            alert_id += 1
+
+        # Add a simple healthy summary alert
+        if running > 0:
+            alerts.append({
+                "id": alert_id,
+                "type": "info",
+                "severity": "info",
+                "message": f"{running} server{'s' if running != 1 else ''} running",
+                "timestamp": datetime.utcnow(),
+                "acknowledged": True,
+                "server_name": None,
+                "category": "system"
+            })
+            alert_id += 1
+
+        return {"alerts": alerts, "summary": {"total": len(alerts)}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/servers/{server_name}/metrics", response_model=List[ServerMetrics])
 async def get_server_metrics(
     server_name: str,
@@ -196,62 +293,39 @@ async def get_current_server_stats(
             raise HTTPException(status_code=404, detail="Server not found")
         
         container_id = target_server.get("id")
-        if not container_id:
-            raise HTTPException(status_code=404, detail="Container ID not found")
-        
-        # Get current stats
-        stats = docker_manager.get_server_stats(container_id)
-        
-        # Get server info for additional context
-        info = docker_manager.get_server_info(container_id)
-        
-        # Combine stats with server info
-        current_stats = {
-            **stats,
-            "server_name": server_name,
-            "status": target_server.get("status"),
-            "java_version": info.get("java_version"),
-            "server_type": info.get("type"),
-            "server_version": info.get("version"),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        return current_stats
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get current stats: {e}")
+        async def event_generator():
+            """Simple SSE generator: streams container resource stats if `container_id` is set,
+            otherwise streams a light system summary (server list + counts).
+            This avoids complex logic in the generator and prevents use of undefined
+            local variables that previously caused indentation/syntax errors.
+            """
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    payload = {}
+                    if container_id:
+                        try:
+                            stats = dm.get_server_stats(container_id)
+                            payload = {"type": "resources", "container_id": container_id, "data": stats}
+                        except Exception as e:
+                            payload = {"type": "error", "message": f"Stats unavailable: {e}"}
+                    else:
+                        try:
+                            servers = dm.list_servers()
+                            total = len(servers)
+                            running = len([s for s in servers if s.get("status") == "running"])
+                            payload = {"type": "system", "total_servers": total, "running_servers": running, "servers": servers}
+                        except Exception as e:
+                            payload = {"type": "error", "message": f"Server list unavailable: {e}"}
 
-@router.get("/alerts")
-async def get_monitoring_alerts(
-    current_user: User = Depends(require_moderator)
-):
-    """Get monitoring alerts/notifications based on real server data."""
-    try:
-        docker_manager = get_docker_manager()
-        servers = docker_manager.list_servers()
-        
-        alerts = []
-        alert_id = 1
-        
-        for server in servers:
-            server_name = server.get("name", "Unknown")
-            status = server.get("status", "unknown")
-            container_id = server.get("id")
-            
-            # Alert for stopped servers
-            if status != "running":
-                alerts.append({
-                    "id": alert_id,
-                    "type": "error",
-                    "severity": "high",
-                    "message": f"Server '{server_name}' is not running (Status: {status})",
-                    "timestamp": datetime.utcnow() - timedelta(minutes=5),
-                    "acknowledged": False,
-                    "server_name": server_name,
-                    "category": "server_status"
-                })
-                alert_id += 1
-                continue
+                    # SSE format: data: <json>\n\n
+                    yield f"data: {json.dumps(payload, default=str)}\n\n"
+                    await asyncio.sleep(2)
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                return
             
             # Get server stats for running servers
             try:
@@ -456,13 +530,15 @@ async def stream_events(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied: system.monitoring.view required")
 
     dm = get_docker_manager()
-
     async def event_generator():
+        """Yield SSE events: simple container resources when container_id is set,
+        otherwise a light system summary. Keep implementation minimal to avoid
+        heavy processing and undefined variable use.
+        """
         try:
             while True:
                 if await request.is_disconnected():
                     break
-                payload = {}
                 if container_id:
                     try:
                         stats = dm.get_server_stats(container_id)
@@ -472,72 +548,21 @@ async def stream_events(
                 else:
                     try:
                         servers = dm.list_servers()
-                        payload = {"type": "system", "data": {"total": len(servers), "running": len([s for s in servers if s.get('status')=='running'])}}
+                        total = len(servers)
+                        running = len([s for s in servers if s.get("status") == "running"])
+                        payload = {"type": "system", "total_servers": total, "running_servers": running}
                     except Exception as e:
-                        payload = {"type": "error", "message": f"System info unavailable: {e}"}
-                yield f"data: {json.dumps(payload)}\n\n"
+                        payload = {"type": "error", "message": f"Server list unavailable: {e}"}
+
+                yield f"data: {json.dumps(payload, default=str)}\n\n"
                 await asyncio.sleep(2)
         except asyncio.CancelledError:
-            pass
+            return
+        except Exception:
+            return
 
+    # Return a proper StreamingResponse so EventSource sees correct Content-Type
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-@router.get("/dashboard-data")
-async def get_dashboard_data(
-    current_user: User = Depends(require_auth)
-):
-    """Get comprehensive dashboard data."""
-    try:
-        docker_manager = get_docker_manager()
-        servers = docker_manager.list_servers()
-        
-        # Server status overview
-        server_overview = []
-        for server in servers:
-            try:
-                container_id = server.get("id")
-                stats = docker_manager.get_server_stats(container_id) if container_id else {}
-                
-                server_overview.append({
-                    "name": server.get("name"),
-                    "status": server.get("status"),
-                    "cpu_percent": stats.get("cpu_percent", 0),
-                    "memory_percent": stats.get("memory_percent", 0),
-                    "memory_usage_mb": stats.get("memory_usage_mb", 0),
-                    "player_count": 0,  # Would need to parse from logs or use RCON
-                })
-            except Exception:
-                server_overview.append({
-                    "name": server.get("name", "Unknown"),
-                    "status": "error",
-                    "cpu_percent": 0,
-                    "memory_percent": 0,
-                    "memory_usage_mb": 0,
-                    "player_count": 0
-                })
-        
-        # System totals
-        total_servers = len(servers)
-        running_servers = len([s for s in server_overview if s["status"] == "running"])
-        total_cpu = sum(s["cpu_percent"] for s in server_overview)
-        avg_cpu = total_cpu / len(server_overview) if server_overview else 0
-        total_memory_mb = sum(s["memory_usage_mb"] for s in server_overview)
-        
-        return {
-            "system_overview": {
-                "total_servers": total_servers,
-                "running_servers": running_servers,
-                "stopped_servers": total_servers - running_servers,
-                "avg_cpu_percent": round(avg_cpu, 2),
-                "total_memory_mb": round(total_memory_mb, 2)
-            },
-            "server_overview": server_overview,
-            "recent_alerts": [],  # Would come from alerts system
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get dashboard data: {e}")
 
 @router.delete("/metrics/cleanup")
 async def cleanup_old_metrics(

@@ -347,12 +347,17 @@ class LocalAdapter:
             if not isinstance(stored_overrides, dict):
                 stored_overrides = {}
             merged = {str(k): str(v) for k, v in stored_overrides.items() if v is not None}
+            # Persist both override-style keys and legacy keys for compatibility
+            merged["JAVA_VERSION_OVERRIDE"] = str(java_version)
+            merged["JAVA_BIN_OVERRIDE"] = str(java_bin)
             merged["JAVA_VERSION"] = str(java_version)
             merged["JAVA_BIN"] = str(java_bin)
 
             # update metadata (this will persist merged env_overrides)
             try:
-                self.local.update_metadata(container_id, env_overrides=merged)
+                # Persist env_overrides under metadata so create_server_from_existing applies them
+                # Also persist top-level java_version for UI visibility
+                self.local.update_metadata(container_id, env_overrides=merged, java_version=str(java_version))
             except Exception:
                 pass
 

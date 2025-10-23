@@ -288,7 +288,33 @@ async def get_quick_health():
     """Get a quick health check (no authentication required)."""
     try:
         # Quick database test using health check function
+        from database import DATABASE_URL, init_db
         db_ok = health_check_db()
+        # If DB is sqlite and health check failed, attempt to auto-create directory and initialize DB once.
+        if not db_ok and isinstance(DATABASE_URL, str) and DATABASE_URL.startswith('sqlite'):
+            try:
+                # Extract path part after sqlite:// (support sqlite:/// and sqlite:////)
+                path_part = DATABASE_URL.split('sqlite:')[-1]
+                # Trim leading slashes to form absolute path correctly
+                sqlite_path = path_part
+                # Some variants are sqlite:////absolute/path -> keep leading /
+                if sqlite_path.startswith(':///'):
+                    sqlite_path = sqlite_path[2:]
+                # Ensure directory exists
+                db_file = sqlite_path
+                db_dir = os.path.dirname(db_file)
+                if db_dir and not os.path.exists(db_dir):
+                    os.makedirs(db_dir, exist_ok=True)
+                # Try to initialize DB tables (safe to call even if already present)
+                try:
+                    init_db()
+                except Exception:
+                    # ignore initialization errors here; we'll re-check health below
+                    pass
+                # Re-run health check
+                db_ok = health_check_db()
+            except Exception:
+                db_ok = False
     except Exception:
         db_ok = False
     
@@ -312,7 +338,8 @@ async def get_quick_health():
     disk_ok = (disk.used / disk.total) < 0.95
     
     overall_status = "ok" if all([db_ok, docker_ok, memory_ok, disk_ok]) else "error"
-    
+
+    # Provide diagnostic details to help with container health debugging
     return {
         "status": overall_status,
         "timestamp": datetime.utcnow().isoformat(),
@@ -321,5 +348,8 @@ async def get_quick_health():
             "docker": docker_ok,
             "memory": memory_ok,
             "disk": disk_ok
+        },
+        "diagnostic": {
+            "database_url": str(globals().get('DATABASE_URL', 'unknown')) if 'DATABASE_URL' in globals() else None,
         }
     }

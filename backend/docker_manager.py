@@ -2,6 +2,7 @@ import os
 import re
 import shlex
 import docker
+import json
 from pathlib import Path
 from typing import Optional, List, Dict
 from config import SERVERS_ROOT, SERVERS_HOST_ROOT, SERVERS_VOLUME_NAME
@@ -431,6 +432,11 @@ class DockerManager:
                 if env_var.startswith("JAVA_VERSION="):
                     java_version = env_var.split("=", 1)[1]
                 elif env_var.startswith("JAVA_BIN="):
+                    java_bin = env_var.split("=", 1)[1]
+                elif env_var.startswith("JAVA_VERSION_OVERRIDE="):
+                    # Prefer explicit override variable when present
+                    java_version = env_var.split("=", 1)[1]
+                elif env_var.startswith("JAVA_BIN_OVERRIDE="):
                     java_bin = env_var.split("=", 1)[1]
             
             # Override with label if present
@@ -921,10 +927,78 @@ class DockerManager:
             run_kwargs = {}
             if (
                 os.getenv("BLOCKPANEL_UNIFIED_IMAGE")
-                or "blockpanel-unified" in RUNTIME_IMAGE.lower()
+                or (RUNTIME_IMAGE and "blockpanel-unified" in RUNTIME_IMAGE.lower())
                 or os.getenv("BLOCKPANEL_RUNTIME_IMAGE", "").lower().endswith("blockpanel-unified")
             ):
                 run_kwargs["entrypoint"] = ["/usr/local/bin/runtime-entrypoint.sh"]
+
+            # Load existing metadata (if any) and merge extra_env to build env_overrides
+            meta_path = SERVERS_ROOT / name / "server_meta.json"
+            meta = {}
+            if meta_path.exists():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8") or "{}")
+                except Exception:
+                    meta = {}
+
+            stored_overrides = meta.get("env_overrides") or {}
+            if not isinstance(stored_overrides, dict):
+                stored_overrides = {}
+            merged_env = {**stored_overrides}
+            try:
+                for k, v in (extra_env or {}).items():
+                    if v is None:
+                        continue
+                    merged_env[str(k)] = str(v)
+            except Exception:
+                pass
+
+            # Determine numeric RAM values if provided (best-effort parsing)
+            def _parse_mb(s):
+                try:
+                    if isinstance(s, str) and re.search(r"\d", s):
+                        return int(re.sub(r"[^0-9]", "", s))
+                except Exception:
+                    return None
+                return None
+
+            min_mb = _parse_mb(min_ram) or meta.get("min_ram_mb")
+            max_mb = _parse_mb(max_ram) or meta.get("max_ram_mb")
+
+            # Compute top-level java_version
+            java_ver = merged_env.get("JAVA_VERSION_OVERRIDE") or merged_env.get("JAVA_VERSION") or meta.get("java_version")
+
+            # Persist merged metadata so UI/LocalAdapter can read it immediately
+            new_meta = dict(meta or {})
+            new_meta.setdefault("name", name)
+            if selected_host_port is not None:
+                new_meta["host_port"] = int(selected_host_port)
+            if min_mb is not None:
+                new_meta["min_ram"] = f"{min_mb}M"
+                new_meta["min_ram_mb"] = int(min_mb)
+            if max_mb is not None:
+                new_meta["max_ram"] = f"{max_mb}M"
+                new_meta["max_ram_mb"] = int(max_mb)
+            if merged_env:
+                new_meta["env_overrides"] = merged_env
+            if java_ver:
+                new_meta["java_version"] = str(java_ver)
+            try:
+                (SERVERS_ROOT / name).mkdir(parents=True, exist_ok=True)
+                meta_path.write_text(json.dumps(new_meta), encoding="utf-8")
+            except Exception:
+                pass
+
+            # Reflect java override in container labels for quick discovery
+            try:
+                if merged_env:
+                    jver = merged_env.get("JAVA_VERSION_OVERRIDE") or merged_env.get("JAVA_VERSION")
+                    if jver:
+                        labels["mc.java_version"] = str(jver)
+                        labels["mc.java_bin"] = merged_env.get("JAVA_BIN_OVERRIDE") or merged_env.get("JAVA_BIN") or f"/usr/local/bin/java{jver}"
+            except Exception:
+                pass
+
             container = self.client.containers.run(
                 RUNTIME_IMAGE,
                 name=name,
@@ -1282,63 +1356,144 @@ class DockerManager:
         return stats
 
     def get_player_info(self, container_id: str) -> dict:
-        """
-        Retrieve player info using RCON only to avoid spamming the console.
-        If RCON is not enabled or fails, return zeros without attempting console-based fallbacks.
-        Returns a dict: { 'online': int, 'max': int, 'names': list[str] }
+        """Retrieve player info using mcstatus first, then RCON, then fallbacks.
+
+        Returns a dict: { 'online': int, 'max': int, 'names': list[str], 'method': str }
+        method will be one of: 'mcstatus', 'rcon', 'attach_socket', 'stdin', 'logs', 'none'
         """
         try:
             container = self.client.containers.get(container_id)
             env_vars = container.attrs.get("Config", {}).get("Env", [])
             env_dict = dict(var.split("=", 1) for var in env_vars if "=" in var)
 
-            from mcrcon import MCRcon
-            rcon_enabled = env_dict.get("ENABLE_RCON", "false").lower() == "true"
-            rcon_password = env_dict.get("RCON_PASSWORD", "")
-            rcon_port_env = env_dict.get("RCON_PORT", "25575")
+            network_settings = container.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}
 
-            # Determine mapped host port for RCON
-            rcon_port = None
-            network_settings = container.attrs.get("NetworkSettings", {}).get("Ports", {})
-            for port, mappings in (network_settings or {}).items():
-                # Look for mapping that contains the RCON port or default 25575
-                if port.endswith("/tcp") and (port.startswith(str(rcon_port_env)) or port.startswith("25575")):
-                    if mappings and isinstance(mappings, list) and len(mappings) > 0:
-                        rcon_port = int(mappings[0].get("HostPort")) if mappings[0].get("HostPort") else None
-                        break
-
-            if not (rcon_enabled and rcon_password and rcon_port):
-                return {"online": 0, "max": 0, "names": []}
-
-            # Query using RCON (does not spam console)
-            output = ""
+            # --- 1️⃣ Try mcstatus JavaServer.status on mapped Minecraft port (non-intrusive) ---
             try:
-                with MCRcon("localhost", rcon_password, port=rcon_port, timeout=2) as mcr:
-                    output = mcr.command("list") or ""
-            except Exception as rcon_err:
-                logger.debug(f"RCON list failed for {container_id}: {rcon_err}")
-                return {"online": 0, "max": 0, "names": []}
+                primary = network_settings.get('25565/tcp') if isinstance(network_settings, dict) else None
+                host_port = None
+                if primary and isinstance(primary, list) and primary and primary[0].get('HostPort'):
+                    try:
+                        host_port = int(primary[0]['HostPort'])
+                    except Exception:
+                        host_port = primary[0].get('HostPort')
 
-            text = str(output)
-            online = 0
-            maxp = 0
-            names: List[str] = []
-            import re as _re
-            m = _re.search(r"There are\s+(\d+)\s+of a max of\s+(\d+)\s+players online", text)
-            if not m:
-                m = _re.search(r"(\d+)\s*/\s*(\d+)\s*players? online", text)
-            if m:
-                online = int(m.group(1))
-                maxp = int(m.group(2))
-                colon_idx = text.find(":")
-                if colon_idx != -1 and colon_idx + 1 < len(text):
-                    names_str = text[colon_idx + 1:].strip()
-                    if names_str:
-                        names = [n.strip() for n in names_str.split(",") if n.strip()]
-            return {"online": online, "max": maxp, "names": names}
+                if host_port:
+                    try:
+                        from mcstatus import JavaServer
+                        server = JavaServer('localhost', port=host_port)
+                        status = server.status(timeout=2)
+                        online = getattr(status.players, 'online', 0) if status and getattr(status, 'players', None) else 0
+                        names = []
+                        sample = getattr(status.players, 'sample', None) if status and getattr(status, 'players', None) else None
+                        if sample:
+                            names = [p.name if hasattr(p, 'name') else (p.get('name') if isinstance(p, dict) else None) for p in sample]
+                            names = [n for n in names if n]
+                        return {"online": online, "max": getattr(status.players, 'max', 0) if status and getattr(status, 'players', None) else 0, "names": names, "method": "mcstatus"}
+                    except Exception as mc_err:
+                        logger.debug(f"mcstatus query failed for container {container_id}: {mc_err}")
+                        # fallthrough to RCON/other methods
+                        pass
+            except Exception:
+                pass
+
+            # --- 2️⃣ Try RCON if enabled ---
+            try:
+                from mcrcon import MCRcon
+                rcon_enabled = env_dict.get("ENABLE_RCON", "false").lower() == "true"
+                rcon_password = env_dict.get("RCON_PASSWORD", "")
+                rcon_port_env = env_dict.get("RCON_PORT", "25575")
+
+                rcon_port = None
+                for port, mappings in (network_settings or {}).items():
+                    if port.endswith("/tcp") and (port.startswith(str(rcon_port_env)) or port.startswith("25575")):
+                        if mappings and isinstance(mappings, list) and len(mappings) > 0:
+                            rcon_port = int(mappings[0].get("HostPort")) if mappings[0].get("HostPort") else None
+                            break
+
+                if rcon_enabled and rcon_password and rcon_port:
+                    try:
+                        with MCRcon("localhost", rcon_password, port=rcon_port, timeout=2) as mcr:
+                            output = mcr.command("list") or ""
+                            text = str(output)
+                            online = 0
+                            maxp = 0
+                            names: List[str] = []
+                            import re as _re
+                            m = _re.search(r"There are\s+(\d+)\s+of a max of\s+(\d+)\s+players online", text)
+                            if not m:
+                                m = _re.search(r"(\d+)\s*/\s*(\d+)\s*players? online", text)
+                            if m:
+                                online = int(m.group(1))
+                                maxp = int(m.group(2))
+                                colon_idx = text.find(":")
+                                if colon_idx != -1 and colon_idx + 1 < len(text):
+                                    names_str = text[colon_idx + 1:].strip()
+                                    if names_str:
+                                        names = [n.strip() for n in names_str.split(",") if n.strip()]
+                            return {"online": online, "max": maxp, "names": names, "method": "rcon"}
+                    except Exception as rcon_err:
+                        logger.debug(f"RCON list failed for {container_id}: {rcon_err}")
+                        # fallthrough
+                        pass
+            except Exception:
+                # mcrcon not available or other error
+                pass
+
+            # --- 3️⃣ Try non-RCON console methods (attach_socket / stdin) for a 'list' command ---
+            try:
+                # attach_socket attempt
+                try:
+                    sock = container.attach_socket(params={
+                        "stdin": True,
+                        "stdout": True,
+                        "stderr": True,
+                        "stream": True
+                    })
+                    sock._sock.setblocking(True)
+                    cmd_with_newline = "list\n"
+                    sock._sock.send(cmd_with_newline.encode("utf-8"))
+                    time.sleep(0.2)
+                    try:
+                        output = sock._sock.recv(4096).decode(errors="ignore")
+                    except Exception:
+                        output = ""
+                    sock.close()
+                    text = str(output)
+                    import re as _re2
+                    m = _re2.search(r"There are\s+(\d+)\s+of a max of\s+(\d+)\s+players online", text)
+                    if not m:
+                        m = _re2.search(r"(\d+)\s*/\s*(\d+)\s*players? online", text)
+                    if m:
+                        online = int(m.group(1))
+                        maxp = int(m.group(2))
+                        colon_idx = text.find(":")
+                        names = []
+                        if colon_idx != -1 and colon_idx + 1 < len(text):
+                            names_str = text[colon_idx + 1:].strip()
+                            if names_str:
+                                names = [n.strip() for n in names_str.split(",") if n.strip()]
+                        return {"online": online, "max": maxp, "names": names, "method": "attach_socket"}
+                except Exception:
+                    pass
+
+                # stdin fallback
+                try:
+                    safe_command = "list\n"
+                    exec_cmd = ["sh", "-c", f'echo {shlex.quote(safe_command)} > /proc/1/fd/0']
+                    exit_code, output = container.exec_run(exec_cmd)
+                    if exit_code == 0:
+                        return {"online": 0, "max": 0, "names": [], "method": "stdin"}
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+            # --- 4️⃣ If nothing worked, return none/empty ---
+            return {"online": 0, "max": 0, "names": [], "method": "none"}
         except Exception as e:
-            logger.warning(f"Failed to get player info (RCON) for container {container_id}: {e}")
-            return {"online": 0, "max": 0, "names": []}
+            logger.warning(f"Failed to get player info for container {container_id}: {e}")
+            return {"online": 0, "max": 0, "names": [], "method": "error"}
 
     def get_server_terminal(self, container_id: str, tail: int = 100) -> dict:
         """
@@ -1393,25 +1548,48 @@ class DockerManager:
             if not java_bin_updated:
                 new_env_vars.append(f"JAVA_BIN=/usr/local/bin/java{java_version}")
             
-            # Update container labels (environment variables require container restart)
+            # Update container labels (keep labels up-to-date)
             current_labels = (container.attrs.get("Config", {}) or {}).get("Labels", {}) or {}
             current_labels["mc.java_version"] = java_version
             current_labels["mc.java_bin"] = f"/usr/local/bin/java{java_version}"
             current_labels["mc.env.JAVA_VERSION"] = java_version
             current_labels["mc.env.JAVA_BIN"] = f"/usr/local/bin/java{java_version}"
-            
-            # Update container configuration with new labels
-            container.update(labels=current_labels)
-            
-            logger.info(f"Updated Java version to {java_version} for container {container_id}")
-            
-            return {
-                "success": True,
-                "message": f"Java version updated to {java_version}. Container restart required to apply changes.",
-                "java_version": java_version,
-                "java_bin": f"/usr/local/bin/java{java_version}",
-                "restart_required": True
-            }
+
+            try:
+                container.update(labels=current_labels)
+            except Exception:
+                # Non-fatal: continue to recreate below
+                pass
+
+            # Now recreate the container with the updated environment so the change actually takes effect
+            try:
+                env_overrides = {
+                    # Override-style names expected by runtime-entrypoint
+                    "JAVA_VERSION_OVERRIDE": java_version,
+                    "JAVA_BIN_OVERRIDE": f"/usr/local/bin/java{java_version}",
+                    # Also include legacy names for backward compatibility
+                    "JAVA_VERSION": java_version,
+                    "JAVA_BIN": f"/usr/local/bin/java{java_version}",
+                }
+                recreate_result = self.recreate_server_with_env(container_id, env_overrides=env_overrides)
+                logger.info(f"Recreated container {container_id} to apply Java version {java_version}")
+                return {
+                    "success": True,
+                    "message": f"Java version updated to {java_version} and container recreated.",
+                    "java_version": java_version,
+                    "java_bin": f"/usr/local/bin/java{java_version}",
+                    "recreate_result": recreate_result,
+                }
+            except Exception as e:
+                logger.error(f"Failed to recreate container {container_id} after updating Java env: {e}")
+                return {
+                    "success": False,
+                    "message": f"Labels updated but recreate failed: {e}. Container restart may be required.",
+                    "error": str(e),
+                    "java_version": java_version,
+                    "java_bin": f"/usr/local/bin/java{java_version}",
+                    "restart_required": True,
+                }
             
         except docker.errors.NotFound:
             logger.error(f"Container {container_id} not found when updating Java version")

@@ -12,6 +12,7 @@ export default function ConfigPanel({ server, onRestart }) {
   const [error, setError] = useState(null);
   const [currentVersion, setCurrentVersion] = useState(null);
   const [updating, setUpdating] = useState(false);
+  const [selectedJava, setSelectedJava] = useState(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
 
   const [propsLoading, setPropsLoading] = useState(false);
@@ -270,16 +271,34 @@ export default function ConfigPanel({ server, onRestart }) {
       const response = await fetch(`${API}/servers/${server.id}/java-version`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ java_version: version }) });
       if (!response.ok) { const errorData = await response.json(); throw new Error(errorData.detail || `HTTP ${response.status}`); }
       const data = await response.json();
-      setCurrentVersion(data.java_version);
+      // Re-query server info to confirm persisted value (handles recreate flows)
+      try {
+        const infoResp = await fetch(`${API}/servers/${server.id}/info`);
+        if (infoResp.ok) {
+          const info = await infoResp.json();
+          if (info && info.java_version) setCurrentVersion(info.java_version);
+        } else {
+          // fallback to returned value
+          if (data && data.java_version) setCurrentVersion(data.java_version);
+        }
+      } catch (e) {
+        if (data && data.java_version) setCurrentVersion(data.java_version);
+      }
       alert(`Java version updated to ${data.java_version}`);
     } catch (e) { setError(e.message); } finally { setUpdating(false); }
+  }
+
+  // Helper used by the small 'Change Java' control below
+  async function applySelectedJava() {
+    if (!selectedJava) return alert('Select a Java version first');
+    await updateJavaVersion(selectedJava);
   }
 
   if (loading) return (<div className="p-4 bg-black/20 rounded-lg"><div className="text-sm text-white/70">Loading Java version information...</div></div>);
   if (error) return (<div className="p-4 bg-black/20 rounded-lg"><div className="text-sm text-red-400">Error: {error}</div></div>);
 
   return (
-    <div className="p-4 bg-black/20 rounded-lg">
+    <div className="p-4 bg-black/20 rounded-lg" style={{ minHeight: 500, minWidth: 1043.02 }}>
       <div className="flex items-center justify-between mb-4">
         <div className="text-lg font-semibold text-white">Server Configuration</div>
         <div className="flex items-center gap-2">
@@ -302,113 +321,135 @@ export default function ConfigPanel({ server, onRestart }) {
         {eulaError && <div className="text-xs text-red-400 mt-2">{eulaError}</div>}
       </div>
 
-      {/* Java Section */}
-      <div className="mb-6">
-        <div className="text-sm text-white/70 mb-2">Java Version</div>
-        <div className="text-xs text-white/50 mb-3">Current version: <span className="text-green-400">{currentVersion}</span></div>
-        <div className="grid grid-cols-2 gap-3">
-          {javaVersions?.map((javaInfo) => (
-            <button key={javaInfo.version} onClick={() => updateJavaVersion(javaInfo.version)} disabled={updating || currentVersion === javaInfo.version}
-              className={`p-3 rounded-lg border transition ${currentVersion === javaInfo.version ? 'bg-brand-500 border-brand-400 text-white' : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10 hover:text-white'} ${updating ? 'opacity-50 cursor-not-allowed' : ''}`}>
-              <div className="font-semibold">{javaInfo.name}</div>
-              <div className="text-xs opacity-70">{javaInfo.description}</div>
-            </button>
-          ))}
-        </div>
-        {updating && (<div className="text-sm text-yellow-400 mt-2">Updating Java version...</div>)}
-        {currentVersion && (
-          <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-            <div className="text-sm text-blue-300 mb-2">💡 Tip</div>
-            <div className="text-xs text-blue-200">After changing the Java version, restart the server for the changes to take effect.</div>
-            {onRestart && (
-              <button onClick={() => onRestart(server.id)} className="mt-2 px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded transition">Restart Server</button>
+      {/* Two-column layout: left = Java/EULA/Icon, right = Quick Settings */}
+      <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          {/* Java Section (compact) */}
+          <div className="mb-4">
+            <div className="text-sm text-white/70 mb-2">Java Version</div>
+            <div className="text-xs text-white/50 mb-2">Current version: <span className="text-green-400">{currentVersion}</span></div>
+            <div className="grid grid-cols-2 gap-3">
+              {javaVersions?.map((javaInfo) => (
+                <button key={javaInfo.version} onClick={() => updateJavaVersion(javaInfo.version)} disabled={updating || currentVersion === javaInfo.version}
+                  className={`p-3 rounded-lg border transition text-left ${currentVersion === javaInfo.version ? 'bg-brand-500 border-brand-400 text-white' : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10 hover:text-white'} ${updating ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                  <div className="font-semibold">{javaInfo.name}</div>
+                  <div className="text-xs opacity-70">{javaInfo.description}</div>
+                </button>
+              ))}
+            </div>
+            {updating && (<div className="text-sm text-yellow-400 mt-2">Updating Java version...</div>)}
+            {currentVersion && (
+              <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                <div className="text-sm text-blue-300 mb-2">💡 Tip</div>
+                <div className="text-xs text-blue-200">After changing the Java version, restart the server for the changes to take effect.</div>
+                {onRestart && (
+                  <button onClick={() => onRestart(server.id)} className="mt-2 px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded transition">Restart Server</button>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
 
-      {/* Server Icon Upload */}
-      <div className="border-t border-white/10 pt-4 mt-6">
-        <div className="text-sm text-white/70 mb-3">Server Icon</div>
-        <div className="flex items-center gap-3">
-          <label className="rounded bg-brand-500 hover:bg-brand-400 px-3 py-1.5 cursor-pointer inline-flex items-center gap-2 text-sm">
-            Upload server-icon.png
-            <input type="file" className="hidden" accept="image/png" onChange={handleIconUpload} />
-          </label>
-          {iconUploading && <span className="text-white/60 text-sm">Uploading…</span>}
-          {iconMessage && <span className="text-white/60 text-sm">{iconMessage}</span>}
-        </div>
-      </div>
+          {/* EULA Section (left) */}
+          <div className="mb-4 p-3 bg-white/5 border border-white/10 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm text-white/70">EULA Acceptance</div>
+                <div className="text-xs text-white/50">You must accept the Minecraft EULA to run the server</div>
+              </div>
+              <label className="inline-flex items-center gap-2 text-sm text-white/80">
+                <input type="checkbox" checked={!!eulaAccepted} disabled={eulaLoading} onChange={(e) => saveEula(e.target.checked)} />
+                Accept EULA
+              </label>
+            </div>
+            {eulaError && <div className="text-xs text-red-400 mt-2">{eulaError}</div>}
+          </div>
 
-      {/* Quick Properties */}
-      <div className="border-t border-white/10 pt-4 mt-6">
-        <div className="text-sm text-white/70 mb-3">Quick Settings (server.properties)</div>
-        {propsError && <div className="text-xs text-red-400 mb-2">{propsError}</div>}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs text-white/60 mb-1">Max Players</label>
-            <input value={propsData.max_players} onChange={e=>setPropsData({...propsData, max_players: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="20" />
-          </div>
-          <div>
-            <label className="block text-xs text-white/60 mb-1">Online Mode</label>
-            <select value={propsData.online_mode} onChange={e=>setPropsData({...propsData, online_mode: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
-              <option value="true" style={{ backgroundColor: '#1f2937' }}>true</option>
-              <option value="false" style={{ backgroundColor: '#1f2937' }}>false</option>
-            </select>
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-xs text-white/60 mb-1">MOTD</label>
-            <input value={propsData.motd} onChange={e=>setPropsData({...propsData, motd: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="A Minecraft Server" />
-          </div>
-          <div>
-            <label className="block text-xs text-white/60 mb-1">Difficulty</label>
-            <select value={propsData.difficulty} onChange={e=>setPropsData({...propsData, difficulty: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
-              <option value="peaceful" style={{ backgroundColor: '#1f2937' }}>peaceful</option>
-              <option value="easy" style={{ backgroundColor: '#1f2937' }}>easy</option>
-              <option value="normal" style={{ backgroundColor: '#1f2937' }}>normal</option>
-              <option value="hard" style={{ backgroundColor: '#1f2937' }}>hard</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-white/60 mb-1">Whitelist Enabled</label>
-            <select value={propsData.white_list} onChange={e=>setPropsData({...propsData, white_list: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
-              <option value="true" style={{ backgroundColor: '#1f2937' }}>true</option>
-              <option value="false" style={{ backgroundColor: '#1f2937' }}>false</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-white/60 mb-1">PVP Enabled</label>
-            <select value={propsData.pvp} onChange={e=>setPropsData({...propsData, pvp: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
-              <option value="true" style={{ backgroundColor: '#1f2937' }}>true</option>
-              <option value="false" style={{ backgroundColor: '#1f2937' }}>false</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-white/60 mb-1">Allow Nether</label>
-            <select value={propsData.allow_nether} onChange={e=>setPropsData({...propsData, allow_nether: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
-              <option value="true" style={{ backgroundColor: '#1f2937' }}>true</option>
-              <option value="false" style={{ backgroundColor: '#1f2937' }}>false</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-white/60 mb-1">Enable Command Blocks</label>
-            <select value={propsData.enable_command_block} onChange={e=>setPropsData({...propsData, enable_command_block: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
-              <option value="true" style={{ backgroundColor: '#1f2937' }}>true</option>
-              <option value="false" style={{ backgroundColor: '#1f2937' }}>false</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-white/60 mb-1">View Distance</label>
-            <input type="number" min={2} max={32} value={propsData.view_distance} onChange={e=>setPropsData({...propsData, view_distance: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="10" />
-          </div>
-          <div>
-            <label className="block text-xs text-white/60 mb-1">Simulation Distance</label>
-            <input type="number" min={2} max={32} value={propsData.simulation_distance} onChange={e=>setPropsData({...propsData, simulation_distance: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="10" />
+          {/* Server Icon Upload (left) */}
+          <div className="mb-4">
+            <div className="text-sm text-white/70 mb-2">Server Icon</div>
+            <div className="flex items-center gap-3">
+              <label className="rounded bg-brand-500 hover:bg-brand-400 px-3 py-1.5 cursor-pointer inline-flex items-center gap-2 text-sm">
+                Upload server-icon.png
+                <input type="file" className="hidden" accept="image/png" onChange={handleIconUpload} />
+              </label>
+              {iconUploading && <span className="text-white/60 text-sm">Uploading…</span>}
+              {iconMessage && <span className="text-white/60 text-sm">{iconMessage}</span>}
+            </div>
           </div>
         </div>
-        <div className="mt-3 flex items-center gap-2">
-          <button onClick={saveProps} disabled={propsLoading} className="px-3 py-1.5 bg-brand-500 hover:bg-brand-400 rounded text-sm disabled:opacity-50">{propsLoading ? 'Saving…' : 'Save server.properties'}</button>
-          {onRestart && <button onClick={() => onRestart(server.id)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-sm">Restart Server</button>}
+
+        <div>
+          {/* Quick Settings (right) */}
+          <div className="border-t border-white/10 pt-4 mt-0">
+            <div className="text-sm text-white/70 mb-3">Quick Settings (server.properties)</div>
+            {propsError && <div className="text-xs text-red-400 mb-2">{propsError}</div>}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-white/60 mb-1">Max Players</label>
+                <input value={propsData.max_players} onChange={e=>setPropsData({...propsData, max_players: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="20" />
+              </div>
+              <div>
+                <label className="block text-xs text-white/60 mb-1">Online Mode</label>
+                <select value={propsData.online_mode} onChange={e=>setPropsData({...propsData, online_mode: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
+                  <option value="true" style={{ backgroundColor: '#1f2937' }}>true</option>
+                  <option value="false" style={{ backgroundColor: '#1f2937' }}>false</option>
+                </select>
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs text-white/60 mb-1">MOTD</label>
+                <input value={propsData.motd} onChange={e=>setPropsData({...propsData, motd: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="A Minecraft Server" />
+              </div>
+              <div>
+                <label className="block text-xs text-white/60 mb-1">Difficulty</label>
+                <select value={propsData.difficulty} onChange={e=>setPropsData({...propsData, difficulty: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
+                  <option value="peaceful" style={{ backgroundColor: '#1f2937' }}>peaceful</option>
+                  <option value="easy" style={{ backgroundColor: '#1f2937' }}>easy</option>
+                  <option value="normal" style={{ backgroundColor: '#1f2937' }}>normal</option>
+                  <option value="hard" style={{ backgroundColor: '#1f2937' }}>hard</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-white/60 mb-1">Whitelist Enabled</label>
+                <select value={propsData.white_list} onChange={e=>setPropsData({...propsData, white_list: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
+                  <option value="true" style={{ backgroundColor: '#1f2937' }}>true</option>
+                  <option value="false" style={{ backgroundColor: '#1f2937' }}>false</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-white/60 mb-1">PVP Enabled</label>
+                <select value={propsData.pvp} onChange={e=>setPropsData({...propsData, pvp: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
+                  <option value="true" style={{ backgroundColor: '#1f2937' }}>true</option>
+                  <option value="false" style={{ backgroundColor: '#1f2937' }}>false</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-white/60 mb-1">Allow Nether</label>
+                <select value={propsData.allow_nether} onChange={e=>setPropsData({...propsData, allow_nether: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
+                  <option value="true" style={{ backgroundColor: '#1f2937' }}>true</option>
+                  <option value="false" style={{ backgroundColor: '#1f2937' }}>false</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-white/60 mb-1">Enable Command Blocks</label>
+                <select value={propsData.enable_command_block} onChange={e=>setPropsData({...propsData, enable_command_block: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" style={{ backgroundColor: '#1f2937' }}>
+                  <option value="true" style={{ backgroundColor: '#1f2937' }}>true</option>
+                  <option value="false" style={{ backgroundColor: '#1f2937' }}>false</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-white/60 mb-1">View Distance</label>
+                <input type="number" min={2} max={32} value={propsData.view_distance} onChange={e=>setPropsData({...propsData, view_distance: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="10" />
+              </div>
+              <div>
+                <label className="block text-xs text-white/60 mb-1">Simulation Distance</label>
+                <input type="number" min={2} max={32} value={propsData.simulation_distance} onChange={e=>setPropsData({...propsData, simulation_distance: e.target.value})} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="10" />
+              </div>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <button onClick={saveProps} disabled={propsLoading} className="px-3 py-1.5 bg-brand-500 hover:bg-brand-400 rounded text-sm disabled:opacity-50">{propsLoading ? 'Saving…' : 'Save server.properties'}</button>
+              {onRestart && <button onClick={() => onRestart(server.id)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-sm">Restart Server</button>}
+            </div>
+          </div>
         </div>
       </div>
     </div>
