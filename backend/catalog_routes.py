@@ -84,12 +84,24 @@ async def search_catalog(
             s0 = (s or "").lower()
             s0 = _re.sub(r"[^a-z0-9]+", " ", s0)
             return " ".join(s0.split())
+        def _acronym(s: str) -> str:
+            """Compute a simple acronym preserving trailing digits (e.g., 'All the Mods 10' -> 'atm10')."""
+            s0 = (s or "").lower()
+            s0 = _re.sub(r"[^a-z0-9]+", " ", s0)
+            parts = [p for p in s0.split() if p]
+            # Gather letters from first char of alphabetic tokens; append any numeric token as-is
+            letters = [p[0] for p in parts if p and p[0].isalpha()]
+            digits = "".join([p for p in parts if p.isdigit()])
+            return ("".join(letters) + digits).strip()
         qn = _norm(q or "")
+        qa = _acronym(q or "") if (q or "").strip() else ""
         def score(item: Dict[str, Any]) -> float:
             name = str(item.get("name") or "")
             slug = str(item.get("slug") or "")
             nn = _norm(name)
             ns = _norm(slug)
+            an = _acronym(name)
+            asg = _acronym(slug)
             s = 0.0
             if qn:
                 if nn == qn or ns == qn:
@@ -98,6 +110,17 @@ async def search_catalog(
                     s += 2500.0
                 elif qn in nn or qn in ns:
                     s += 1000.0
+            # Acronym-based boosting (helps queries like 'ATM10' or 'AOF5')
+            if qa:
+                if qa == an or qa == asg:
+                    s += 9000.0
+                elif an.startswith(qa) or asg.startswith(qa):
+                    s += 2200.0
+                elif qa in an or qa in asg:
+                    s += 800.0
+            # Alias boost if this item came from an alias-expanded query
+            if item.get("_alias_match"):
+                s += 3000.0
             dl = float(item.get("downloads") or 0)
             s += min(dl / 1000.0, 1000.0)
             upd = item.get("updated")
@@ -135,6 +158,31 @@ async def search_catalog(
                         if not chunk:
                             break
                         all_results.extend(chunk)
+                    # Acronym alias expansion for popular modpacks (e.g., ATM10 -> All the Mods 10)
+                    import re as _re_alias
+                    alias_patterns = [
+                        (r"^atm(\d+)$", "All the Mods {num}"),
+                        (r"^aof(\d+)$", "All of Fabric {num}"),
+                    ]
+                    q_clean = (q or "").strip().lower()
+                    for pat, template in alias_patterns:
+                        try:
+                            comp = _re_alias.compile(pat)
+                            m = comp.match(q_clean)
+                        except Exception:
+                            m = None
+                        if m:
+                            num = m.group(1)
+                            phrase = template.format(num=num)
+                            try:
+                                # fetch first page for phrase
+                                alias_chunk = cf.search(phrase, mc_version=mc_version, loader=loader, limit=50, offset=0)
+                                # Tag alias boost for scoring (lightweight adjustment by inflating downloads temporarily)
+                                for it in alias_chunk:
+                                    it.setdefault("_alias_match", True)
+                                all_results.extend(alias_chunk)
+                            except Exception:
+                                pass
                 except Exception:
                     pass
             # Deduplicate by provider+id
@@ -166,6 +214,29 @@ async def search_catalog(
                         acc.extend(chunk)
                     except Exception:
                         break
+                # Alias expansion for single-provider curseforge searches
+                import re as _re_alias2
+                alias_patterns = [
+                    (r"^atm(\d+)$", "All the Mods {num}"),
+                    (r"^aof(\d+)$", "All of Fabric {num}"),
+                ]
+                q_clean = (q or "").strip().lower()
+                for pat, template in alias_patterns:
+                    try:
+                        comp = _re_alias2.compile(pat)
+                        m = comp.match(q_clean)
+                    except Exception:
+                        m = None
+                    if m:
+                        num = m.group(1)
+                        phrase = template.format(num=num)
+                        try:
+                            alias_chunk = p.search(phrase, mc_version=mc_version, loader=loader, limit=50, offset=0)
+                            for it in alias_chunk:
+                                it.setdefault("_alias_match", True)
+                            acc.extend(alias_chunk)
+                        except Exception:
+                            pass
                 # If a query is provided, try to pull additional pages until we include an exact normalized match
                 # so it can be ranked onto earlier pages. Cap the extra pages to protect performance.
                 if (q or "").strip():
@@ -174,10 +245,21 @@ async def search_catalog(
                         s0 = (s or "").lower()
                         s0 = _re.sub(r"[^a-z0-9]+", " ", s0)
                         return " ".join(s0.split())
+                    def _acronym(s: str) -> str:
+                        s0 = (s or "").lower()
+                        s0 = _re.sub(r"[^a-z0-9]+", " ", s0)
+                        parts = [p for p in s0.split() if p]
+                        letters = [p[0] for p in parts if p and p[0].isalpha()]
+                        digits = "".join([p for p in parts if p.isdigit()])
+                        return ("".join(letters) + digits).strip()
                     qn = _norm(q)
+                    qa = _acronym(q)
                     def _has_exact(items: List[Dict[str, Any]]) -> bool:
                         for it in items:
                             if _norm(str(it.get("name") or "")) == qn or _norm(str(it.get("slug") or "")) == qn:
+                                return True
+                            # Treat acronym match as exact for prefetch purposes
+                            if qa and (_acronym(str(it.get("name") or "")) == qa or _acronym(str(it.get("slug") or "")) == qa):
                                 return True
                         return False
                     if not _has_exact(acc):

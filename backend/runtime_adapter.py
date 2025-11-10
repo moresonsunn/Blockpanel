@@ -417,6 +417,79 @@ class LocalAdapter:
         except Exception as e:
             return {"id": container_id, "ok": False, "error": str(e)}
 
+    # --- Rename server support (parity with DockerManager.rename_server) ---
+    def rename_server(self, old_name: str, new_name: str) -> Dict:
+        """Rename a local-runtime server directory and restart under the new name.
+
+        Steps:
+        - Stop any running local process for old_name (best-effort)
+        - Rename directory SERVERS_ROOT/old_name -> SERVERS_ROOT/new_name
+        - Update server_meta.json (name + previous_names)
+        - Recreate the local server process preserving RAM and env_overrides
+        """
+        old_dir = (SERVERS_ROOT / old_name).resolve()
+        new_dir = (SERVERS_ROOT / new_name).resolve()
+        if not old_dir.exists() or not old_dir.is_dir():
+            return {"ok": False, "error": f"Server directory {old_dir} not found"}
+        if new_dir.exists():
+            return {"ok": False, "error": f"Target directory {new_dir} already exists"}
+
+        # Stop old process (ignore errors)
+        try:
+            self.local.stop_server(old_name)
+        except Exception:
+            pass
+
+        # Read metadata to preserve RAM and env
+        meta_path = old_dir / "server_meta.json"
+        meta = {}
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8") or "{}")
+            except Exception:
+                meta = {}
+        try:
+            _min_mb = meta.get("min_ram_mb")
+            min_ram = meta.get("min_ram") or (f"{int(_min_mb)}M" if isinstance(_min_mb, (int, float, str)) and str(_min_mb).isdigit() else None)
+        except Exception:
+            min_ram = meta.get("min_ram")
+        try:
+            _max_mb = meta.get("max_ram_mb")
+            max_ram = meta.get("max_ram") or (f"{int(_max_mb)}M" if isinstance(_max_mb, (int, float, str)) and str(_max_mb).isdigit() else None)
+        except Exception:
+            max_ram = meta.get("max_ram")
+        env_overrides = meta.get("env_overrides") if isinstance(meta.get("env_overrides"), dict) else {}
+
+        # Rename directory
+        old_dir.rename(new_dir)
+
+        # Update metadata name/history
+        try:
+            new_meta = dict(meta or {})
+            prev = new_meta.get("previous_names") or []
+            if isinstance(prev, list):
+                if old_name not in prev:
+                    prev.append(old_name)
+                new_meta["previous_names"] = prev
+            new_meta["name"] = new_name
+            (new_dir / "server_meta.json").write_text(json.dumps(new_meta), encoding="utf-8")
+        except Exception:
+            pass
+
+        # Recreate under new name preserving RAM/env (allow LocalRuntimeManager to infer defaults if None)
+        try:
+            result = self.local.create_server_from_existing(
+                new_name,
+                host_port=None,
+                min_ram=min_ram,
+                max_ram=max_ram,
+                extra_env=env_overrides or None,
+            )
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+        return {"ok": True, "old_name": old_name, "new_name": new_name, "result": result}
+
     # --- Ports helpers used by API ---
     def get_used_host_ports(self, only_minecraft: bool = True) -> Set[int]:
         return set()
