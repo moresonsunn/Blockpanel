@@ -4,8 +4,8 @@ import { API } from '../../lib/api';
 export default function PlayersPanel({ serverId, serverName }) {
   // Defensive: normalize serverName to avoid ReferenceError if caller omits prop
   const sName = serverName || '';
-  const [players, setPlayers] = useState([]);
-  const [inferred, setInferred] = useState([]);
+  const [online, setOnline] = useState([]);
+  const [offline, setOffline] = useState([]);
   const [method, setMethod] = useState('');
   const [loading, setLoading] = useState(true);
   const [playerName, setPlayerName] = useState('');
@@ -15,63 +15,35 @@ export default function PlayersPanel({ serverId, serverName }) {
   });
   const avatarCache = useRef({});
 
-  async function fetchOnline() {
+  async function fetchRoster() {
     try {
   if (!sName) { setPlayers([]); setMethod('missing'); return; }
-  const r = await fetch(`${API}/players/${encodeURIComponent(sName)}/online`);
+  const r = await fetch(`${API}/players/${encodeURIComponent(sName)}/roster`);
       if (!r.ok) {
-        setPlayers([]);
+        setOnline([]);
+        setOffline([]);
         setMethod('error');
         return;
       }
       const d = await r.json();
       if (d && typeof d === 'object') {
-        setPlayers(Array.isArray(d.players) ? d.players : []);
+        setOnline(Array.isArray(d.online) ? d.online : []);
+        setOffline(Array.isArray(d.offline) ? d.offline : []);
         setMethod(d.method || 'unknown');
       }
     } catch (e) {
-      setPlayers([]);
+      setOnline([]);
+      setOffline([]);
       setMethod('error');
     } finally {
       setLoading(false);
     }
   }
 
-  async function fetchFallbackLogs() {
-    try {
-  // logs are keyed by container id; serverId may be used instead of name
-  const lr = await fetch(`${API}/servers/${serverId}/logs?tail=400`);
-      if (!lr.ok) return;
-      const ld = await lr.json();
-      const text = ld.logs || '';
-      const lines = text.split(/\r?\n/).reverse();
-      const seen = new Set();
-      const inferredList = [];
-      for (const line of lines) {
-        if (!line) continue;
-        const m = line.match(/([A-Za-z0-9_\-]+) joined the game/i) || line.match(/([A-Za-z0-9_\-]+) logged in/i);
-        if (m && m[1]) {
-          const n = m[1];
-          if (!seen.has(n)) { seen.add(n); inferredList.push(n); }
-        }
-        if (inferredList.length >= 30) break;
-      }
-      setInferred(inferredList.reverse());
-    } catch (e) {
-      setInferred([]);
-    }
-  }
-
   useEffect(() => {
     let active = true;
     async function load() {
-      await fetchOnline();
-      if (!active) return;
-      if (players.length === 0) {
-        await fetchFallbackLogs();
-      } else {
-        setInferred([]);
-      }
+      await fetchRoster();
     }
     load();
     const itv = setInterval(load, 3000);
@@ -99,7 +71,7 @@ export default function PlayersPanel({ serverId, serverName }) {
   useEffect(() => {
     let canceled = false;
     (async () => {
-      const all = [...players, ...inferred];
+      const all = [...online, ...offline.map(o => o.name)];
       for (const p of all) {
         if (canceled) return;
         if (!avatarCache.current[p]) {
@@ -108,7 +80,7 @@ export default function PlayersPanel({ serverId, serverName }) {
       }
     })();
     return () => { canceled = true; };
-  }, [players, inferred]);
+  }, [online, offline]);
 
   async function call(endpoint, method = 'POST', body = null) {
   if (!sName) return;
@@ -125,7 +97,7 @@ export default function PlayersPanel({ serverId, serverName }) {
   await fetch(`${API}/players/${encodeURIComponent(sName)}/${action}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ player_name: player, action_type: action, reason: reasonArg })
       });
-      await fetchOnline();
+      await fetchRoster();
     } catch (e) {
       console.error('action error', e);
     }
@@ -135,7 +107,7 @@ export default function PlayersPanel({ serverId, serverName }) {
     try {
   if (!sName) return;
   await fetch(`${API}/players/${encodeURIComponent(sName)}/op/${encodeURIComponent(player)}`, { method: 'DELETE' });
-      await fetchOnline();
+      await fetchRoster();
     } catch (e) { console.error(e); }
   }
 
@@ -155,19 +127,12 @@ export default function PlayersPanel({ serverId, serverName }) {
       </div>
 
       <div>
-        <div className="text-xs text-white/60 mb-2">Online Players {players.length > 0 ? `(${players.length})` : (inferred.length ? `(inferred ${inferred.length})` : '')} {method ? ` — ${method}` : ''}</div>
+        <div className="text-xs text-white/60 mb-2">Online Players {online.length > 0 ? `(${online.length})` : ''} {method ? ` — ${method}` : ''}</div>
         {loading ? <div className="text-xs text-white/50">Loading…</div> : null}
 
-        {!rconHintDismissed && players.length === 0 && inferred.length > 0 && (
-          <div className="mb-3 p-3 bg-yellow-900/20 border border-yellow-800 rounded flex items-start justify-between">
-            <div className="text-sm text-yellow-200">Your server does not expose an authoritative player list. Enable RCON (ENABLE_RCON=true and set RCON_PASSWORD) and map the RCON port to let Blockpanel manage players reliably.</div>
-            <button onClick={() => { try { localStorage.setItem('rcon_hint_dismissed','1'); } catch {} setRconHintDismissed(true); }} className="ml-3 px-2 py-1 bg-yellow-800 rounded text-sm">Dismiss</button>
-          </div>
-        )}
-
-        {players.length > 0 ? (
+        {online.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {players.map(p => (
+            {online.map(p => (
               <div key={p} className="bg-white/5 border border-white/10 rounded p-3 flex items-center justify-between hover:shadow-lg transition">
                 <div className="flex items-center gap-3">
                   {avatarCache.current[p] ? (
@@ -190,23 +155,34 @@ export default function PlayersPanel({ serverId, serverName }) {
               </div>
             ))}
           </div>
-        ) : inferred.length > 0 ? (
+        ) : (
+          <div className="text-xs text-white/50">No players online.</div>
+        )}
+      </div>
+
+      <div className="pt-4">
+        <div className="text-xs text-white/60 mb-2">Offline Players {offline.length ? `(${offline.length})` : ''}</div>
+        {offline.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {inferred.map(p => (
-              <div key={p} className="bg-white/3 border border-white/6 rounded p-3 flex items-center justify-between opacity-90">
+            {offline.map(o => (
+              <div key={o.name} className="bg-white/3 border border-white/6 rounded p-3 flex items-center justify-between opacity-90">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-gray-600 flex items-center justify-center text-base font-semibold text-white">{p.slice(0,1).toUpperCase()}</div>
+                  {avatarCache.current[o.name] ? (
+                    <img src={avatarCache.current[o.name]} alt={o.name} className="w-10 h-10 rounded-full" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-sm font-semibold text-white">{o.name.slice(0,1).toUpperCase()}</div>
+                  )}
                   <div>
-                    <div className="text-sm text-white">{p}</div>
-                    <div className="text-xs text-white/50">(inferred)</div>
+                    <div className="text-sm text-white">{o.name}</div>
+                    <div className="text-xs text-white/50">{o.last_seen ? new Date(o.last_seen * 1000).toLocaleString() : 'seen recently'}</div>
                   </div>
                 </div>
-                <div className="text-xs text-white/40">from logs</div>
+                <div className="text-xs text-white/40">offline</div>
               </div>
             ))}
           </div>
         ) : (
-          <div className="text-xs text-white/50">No players online.</div>
+          <div className="text-xs text-white/50">No known offline players yet.</div>
         )}
       </div>
 

@@ -8,6 +8,8 @@ from database import get_db
 from models import PlayerAction, User
 from auth import require_auth, require_moderator
 from runtime_adapter import get_runtime_manager_or_docker
+from config import SERVERS_ROOT
+import os, json, re, gzip, datetime as _dt
 
 router = APIRouter(prefix="/players", tags=["player_management"])
 
@@ -38,6 +40,154 @@ def get_docker_manager():
     if _manager_cache is None:
         _manager_cache = get_runtime_manager_or_docker()
     return _manager_cache
+
+
+def _server_dir(server_name: str):
+    try:
+        p = (SERVERS_ROOT / server_name).resolve()
+        if str(p).startswith(str(SERVERS_ROOT.resolve())):
+            return p
+    except Exception:
+        pass
+    return None
+
+def _parse_log_timestamp(line: str, fallback_date: _dt.date | None) -> int | None:
+    """Extract a timestamp (epoch seconds) from a log line if possible.
+    Supports patterns like '2025-11-10 12:34:56' or '[12:34:56]'.
+    """
+    try:
+        m = re.search(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})", line)
+        if m:
+            ts = f"{m.group(1)} {m.group(2)}"
+            dt = _dt.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+            return int(dt.replace(tzinfo=_dt.timezone.utc).timestamp())
+        m2 = re.search(r"\[(\d{2}:\d{2}:\d{2})\]", line)
+        if m2 and fallback_date:
+            ts = f"{fallback_date.isoformat()} {m2.group(1)}"
+            dt = _dt.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+            return int(dt.replace(tzinfo=_dt.timezone.utc).timestamp())
+    except Exception:
+        return None
+    return None
+
+def _collect_history(server_name: str, limit_files: int = 6, limit_lines: int = 8000) -> dict[str, dict]:
+    """Scan recent logs and usercache.json to build {name: {last_seen, sources}}.
+    Returns a map keyed by lowercase name.
+    """
+    base = _server_dir(server_name)
+    hist: dict[str, dict] = {}
+    if not base:
+        return hist
+    # 1) usercache.json
+    try:
+        uc = base / "usercache.json"
+        if uc.exists():
+            data = json.loads(uc.read_text(encoding="utf-8", errors="ignore") or "[]")
+            for ent in data or []:
+                name = (ent.get("name") or "").strip()
+                if not name:
+                    continue
+                k = name.lower()
+                rec = hist.setdefault(k, {"name": name, "last_seen": None, "sources": set()})
+                rec["sources"].add("usercache")
+    except Exception:
+        pass
+    # 2) logs: latest.log and logs/*.log(.gz)
+    try:
+        candidates = []
+        latest = base / "logs" / "latest.log"
+        if latest.exists():
+            candidates.append(latest)
+        logs_dir = base / "logs"
+        if logs_dir.exists() and logs_dir.is_dir():
+            for p in logs_dir.iterdir():
+                if p.name == "latest.log":
+                    continue
+                if p.suffix in (".log", ".gz"):
+                    candidates.append(p)
+        # sort by mtime desc and cap
+        candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+        candidates = candidates[:limit_files]
+        total_lines = 0
+        joined_re = re.compile(r"([A-Za-z0-9_\-]{2,16}) (joined the game|logged in)", re.IGNORECASE)
+        left_re = re.compile(r"([A-Za-z0-9_\-]{2,16}) (left the game|logged out)", re.IGNORECASE)
+        for p in candidates:
+            try:
+                fallback_date = _dt.date.fromtimestamp(p.stat().st_mtime)
+            except Exception:
+                fallback_date = None
+            # open file (support gz)
+            lines: list[str] = []
+            try:
+                if p.suffix == ".gz":
+                    with gzip.open(p, "rt", encoding="utf-8", errors="ignore") as f:
+                        lines = f.readlines()
+                else:
+                    with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                        lines = f.readlines()
+            except Exception:
+                continue
+            # iterate from end for recency
+            for line in reversed(lines):
+                if total_lines >= limit_lines:
+                    break
+                total_lines += 1
+                m = joined_re.search(line) or left_re.search(line)
+                if not m:
+                    continue
+                name = m.group(1)
+                k = name.lower()
+                ts = _parse_log_timestamp(line, fallback_date)
+                rec = hist.setdefault(k, {"name": name, "last_seen": None, "sources": set()})
+                if ts and (rec["last_seen"] is None or int(ts) > int(rec["last_seen"])):
+                    rec["last_seen"] = int(ts)
+                rec["sources"].add("logs")
+    except Exception:
+        pass
+    # finalize sets to lists
+    for v in hist.values():
+        if isinstance(v.get("sources"), set):
+            v["sources"] = sorted(list(v["sources"]))
+    return hist
+
+@router.get("/{server_name}/roster")
+async def get_player_roster(server_name: str, current_user: User = Depends(require_auth)):
+    """Return online and offline players with last_seen.
+    online: list of names (authoritative if available)
+    offline: list of {name, last_seen} sorted by recency
+    """
+    # online via runtime manager (mcstatus/RCON/etc.)
+    online_names: list[str] = []
+    method = None
+    try:
+        dm = get_docker_manager()
+        servers = dm.list_servers()
+        target = next((s for s in servers if s.get("name") == server_name), None)
+        if not target:
+            raise HTTPException(status_code=404, detail="Server not found")
+        cid = target.get("id")
+        if not cid:
+            raise HTTPException(status_code=400, detail="Server container not found")
+        info = dm.get_player_info(cid)
+        online_names = [n for n in (info.get("names") or []) if isinstance(n, str)]
+        method = info.get("method") or "unknown"
+    except HTTPException:
+        raise
+    except Exception:
+        online_names = []
+        method = "error"
+
+    # history from logs/usercache
+    hist = _collect_history(server_name)
+    online_set = {n.lower() for n in online_names}
+    offline: list[dict] = []
+    for k, rec in hist.items():
+        if k in online_set:
+            continue
+        offline.append({"name": rec.get("name"), "last_seen": rec.get("last_seen")})
+    # sort by last_seen desc (unknown last)
+    offline.sort(key=lambda x: (x.get("last_seen") or 0), reverse=True)
+    return {"online": online_names, "offline": offline, "method": method}
 
 @router.get("/{server_name}/actions", response_model=List[PlayerActionResponse])
 async def list_player_actions(
@@ -158,8 +308,12 @@ async def remove_from_whitelist(
         ).first()
         
         if player_action:
-            player_action.is_active = False
-            db.commit()
+            try:
+                # SQLAlchemy model attribute assignment guarded for linters
+                setattr(player_action, 'is_active', False)
+                db.commit()
+            except Exception:
+                pass
         
         return {"message": f"Player {player_name} removed from whitelist"}
         
@@ -278,8 +432,11 @@ async def unban_player(
         ).first()
         
         if player_action:
-            player_action.is_active = False
-            db.commit()
+            try:
+                setattr(player_action, 'is_active', False)
+                db.commit()
+            except Exception:
+                pass
         
         return {"message": f"Player {player_name} unbanned"}
         
@@ -459,8 +616,11 @@ async def deop_player(
         ).first()
         
         if player_action:
-            player_action.is_active = False
-            db.commit()
+            try:
+                setattr(player_action, 'is_active', False)
+                db.commit()
+            except Exception:
+                pass
         
         return {"message": f"Player {player_name} de-opped"}
         
