@@ -54,8 +54,8 @@ Info "Repository: $repo | Tag: $Tag | Short: $shortSha | Date: $dateTag"
 # Login if token provided (skip if already logged in)
 try {
   $loggedIn = docker info 2>$null | Select-String -Pattern 'Username:' -ErrorAction SilentlyContinue
-} catch {}
-if (-not $loggedIn) {
+} catch { $loggedIn = $null }
+if (-not $loggedIn -or $loggedIn -eq '') {
   if ($env:DOCKERHUB_USERNAME -and $env:DOCKERHUB_TOKEN) {
     Step "Docker login ($($env:DOCKERHUB_USERNAME))"
     $env:DOCKERHUB_TOKEN | docker login -u $env:DOCKERHUB_USERNAME --password-stdin | Out-Null
@@ -76,21 +76,23 @@ if (-not $existing) {
 docker buildx inspect --bootstrap | Out-Null
 
 Step 'Build & push multi-arch image'
-$args = @(
+$buildArgs = @(
   'buildx','build',
   '--platform','linux/amd64,linux/arm64',
   '-f','docker/controller-unified.Dockerfile',
-  '-t',"$repo:latest",
-  '-t',"$repo:$Tag",
-  '-t',"$repo:$shortSha",
-  '-t',"$repo:$dateTag",
+  '-t',"${repo}:latest",
+  '-t',"${repo}:$Tag",
+  '-t',"${repo}:$shortSha",
+  '-t',"${repo}:$dateTag",
   '--build-arg',"APP_VERSION=$Tag",
   '--build-arg',"GIT_COMMIT=$fullSha",
   '--push','.'
 )
-& docker @args
+& docker @buildArgs
+if ($LASTEXITCODE -ne 0) { Fail "Buildx build failed (exit code $LASTEXITCODE). Not pushing tags." }
 
 Step 'Inspect primary tag'
-docker buildx imagetools inspect $repo:$Tag | Select-String -Pattern 'Digest:' -Context 0,0
+docker buildx imagetools inspect ${repo}:$Tag | Select-String -Pattern 'Digest:' -Context 0,0 2>$null
+if ($LASTEXITCODE -ne 0) { Write-Warn "Unable to inspect image digest for ${repo}:$Tag (may not have pushed)." }
 
 Write-Host "\nSUCCESS: Pushed $repo (tags: latest,$Tag,$shortSha,$dateTag)" -ForegroundColor Green

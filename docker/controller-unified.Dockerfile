@@ -10,7 +10,8 @@ COPY frontend ./
 RUN npm run build
 
 # Base: start from OpenJDK 21 (includes Java 21)
-FROM openjdk:21-jdk-slim AS unified
+# Use Eclipse Temurin as official OpenJDK base to ensure tag stability across arches
+FROM eclipse-temurin:21-jdk-jammy AS unified
 WORKDIR /app
 
 ARG APP_VERSION=dev
@@ -23,9 +24,9 @@ LABEL org.opencontainers.image.title="BlockPanel Unified" \
       org.opencontainers.image.source="https://github.com/moresonsun/Minecraft-Controller" \
       org.opencontainers.image.licenses="MIT"
 
-# System deps (python, build basics, curl, wget, unzip, etc.)
+# System deps (minimal headless set to reduce multi-arch emulation issues)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-venv python3-dev gcc curl wget unzip bash ca-certificates fontconfig libfreetype6 libxi6 libxrender1 libxext6 \
+    python3 python3-pip python3-venv python3-dev gcc curl wget unzip bash ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Multi-Java toolchain (8, 11, 17 already added manually like runtime image)

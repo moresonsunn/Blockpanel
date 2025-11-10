@@ -127,16 +127,43 @@ def download_file(url: str, dest: Path, min_size: int = 1024 * 100, max_retries:
     return False
 
 def get_paper_download_url(version: str) -> Optional[str]:
-    # PaperMC API: https://papermc.io/api/v2/projects/paper
+    """Resolve latest Paper build download URL with validation.
+
+    New API structure:
+      GET /v2/projects/paper/versions/{version} => { builds: [build_numbers...] }
+      GET /v2/projects/paper/versions/{version}/builds/{build} => downloads.application.name
+
+    Returns full download URL or None if unavailable.
+    """
+    base = "https://api.papermc.io/v2/projects/paper"
     try:
-        resp = requests.get(f"https://api.papermc.io/v2/projects/paper/versions/{version}", timeout=10)
-        resp.raise_for_status()
-        builds = resp.json().get("builds", [])
-        if not builds:
+        # If version is blank, fetch project info and pick latest version
+        if not version:
+            proj = requests.get(base, timeout=15)
+            proj.raise_for_status()
+            versions = proj.json().get("versions") or []
+            if not versions:
+                logger.warning("Paper project returned no versions")
+                return None
+            version = versions[-1]
+
+        v = requests.get(f"{base}/versions/{version}", timeout=15)
+        if v.status_code == 404:
+            logger.warning(f"Paper version {version} not found (404)")
             return None
-        latest_build = builds[-1]
-        jar_name = f"paper-{version}-{latest_build}.jar"
-        url = f"https://api.papermc.io/v2/projects/paper/versions/{version}/builds/{latest_build}/downloads/{jar_name}"
+        v.raise_for_status()
+        data = v.json()
+        builds = data.get("builds") or []
+        if not builds:
+            logger.warning(f"No builds listed for Paper {version}")
+            return None
+        latest = builds[-1]
+        b = requests.get(f"{base}/versions/{version}/builds/{latest}", timeout=15)
+        b.raise_for_status()
+        bdata = b.json()
+        downloads = (bdata.get("downloads") or {}).get("application") or {}
+        jar_name = downloads.get("name") or f"paper-{version}-{latest}.jar"
+        url = f"{base}/versions/{version}/builds/{latest}/downloads/{jar_name}"
         return url
     except Exception as e:
         logger.warning(f"Failed to get PaperMC download url for {version}: {e}")
@@ -967,6 +994,23 @@ class DockerManager:
 
             # Compute top-level java_version
             java_ver = merged_env.get("JAVA_VERSION_OVERRIDE") or merged_env.get("JAVA_VERSION") or meta.get("java_version")
+
+            # Attempt an auto-repair of a missing/corrupt server.jar when we have enough context
+            try:
+                jar_path = server_dir / "server.jar"
+                min_jar_size = 1024 * 100
+                # Only attempt repair if we have explicit overrides or detected metadata
+                st = (merged_env.get("SERVER_TYPE") or meta.get("detected_type") or meta.get("server_type") or "").strip()
+                sv = (merged_env.get("SERVER_VERSION") or meta.get("detected_version") or meta.get("server_version") or meta.get("version") or "").strip()
+                loader_ver = (merged_env.get("FABRIC_LOADER_VERSION") or merged_env.get("LOADER_VERSION") or meta.get("loader_version") or "").strip()
+                if st and sv and ((not jar_path.exists()) or jar_path.stat().st_size < min_jar_size):
+                    logger.warning(f"server.jar missing/too small for {name}; attempting auto-repair using {st} {sv}...")
+                    try:
+                        fix_server_jar(server_dir, st, sv, loader_version=loader_ver or None)
+                    except Exception as rep_err:
+                        logger.error(f"Auto-repair failed for {name}: {rep_err}")
+            except Exception as auto_rep_err:
+                logger.warning(f"Auto-repair check failed for {name}: {auto_rep_err}")
 
             # Persist merged metadata so UI/LocalAdapter can read it immediately
             new_meta = dict(meta or {})

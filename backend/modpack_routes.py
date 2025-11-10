@@ -570,6 +570,70 @@ async def import_server_pack_upload(
         if server_version:
             extra_env["SERVER_VERSION"] = str(server_version)
 
+        # Detect metadata (type, version, port) from extracted files before container start
+        def detect_imported_server_info(root: Path) -> dict:
+            info: dict[str, str | int | None] = {
+                "detected_type": None,
+                "detected_version": None,
+                "detected_port": None,
+            }
+            try:
+                # server.properties port
+                props_file = root / "server.properties"
+                if props_file.exists():
+                    try:
+                        for line in props_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                            if line.strip().startswith("server-port="):
+                                port_val = line.split("=",1)[1].strip()
+                                if port_val.isdigit():
+                                    info["detected_port"] = int(port_val)
+                                break
+                    except Exception:
+                        pass
+                # Jar inspection
+                jar_files = [p.name for p in root.glob("*.jar") if p.is_file()]
+                # Prefer server.jar if large enough
+                server_jar = root / "server.jar"
+                if server_jar.exists() and server_jar.stat().st_size > 50_000:
+                    jar_files.insert(0, server_jar.name)
+                # Pattern maps
+                import re
+                patterns = [
+                    ("paper", re.compile(r"paper-(?P<ver>\d+(?:\.\d+)+)-\d+\.jar", re.IGNORECASE)),
+                    ("purpur", re.compile(r"purpur-(?P<ver>\d+(?:\.\d+)+)-\d+\.jar", re.IGNORECASE)),
+                    ("fabric", re.compile(r"fabric-server-launch\.jar", re.IGNORECASE)),
+                    ("neoforge", re.compile(r"neoforge-(?P<ver>\d+(?:\.\d+)+).*(?:installer|universal)?\.jar", re.IGNORECASE)),
+                    ("forge", re.compile(r"forge-(?P<ver>\d+(?:\.\d+)+).*(?:installer|universal)?\.jar", re.IGNORECASE)),
+                ]
+                for jf in jar_files:
+                    lower = jf.lower()
+                    for t, rgx in patterns:
+                        m = rgx.search(lower)
+                        if m:
+                            info["detected_type"] = t
+                            ver = m.groupdict().get("ver")
+                            if ver:
+                                info["detected_version"] = ver
+                            break
+                    if info["detected_type"]:
+                        break
+                # Fallback: if no type matched but a reasonably sized server.jar exists -> vanilla
+                if not info["detected_type"] and server_jar.exists() and server_jar.stat().st_size > 50_000:
+                    info["detected_type"] = "vanilla"
+            except Exception:
+                pass
+            return info
+
+        detected = detect_imported_server_info(target_dir)
+        # Merge detected info into env if user did not provide them
+        if not server_type and detected.get("detected_type"):
+            extra_env["SERVER_TYPE"] = str(detected["detected_type"])
+        if not server_version and detected.get("detected_version"):
+            extra_env["SERVER_VERSION"] = str(detected["detected_version"])
+        # Override host_port if not provided but detected port present
+        if host_port is None and isinstance(detected.get("detected_port"), int):
+            host_port = int(detected["detected_port"])  # Will be passed through create
+
         result = dm.create_server_from_existing(
             name=server_name,
             host_port=host_port,
@@ -577,7 +641,23 @@ async def import_server_pack_upload(
             max_ram=max_ram or "4G",
             extra_env=extra_env or None,
         )
-        return {"message": "Server pack imported", "server": result}
+
+        # Update server_meta.json with detection results
+        try:
+            meta_path = target_dir / "server_meta.json"
+            meta = {}
+            if meta_path.exists():
+                meta = json.loads(meta_path.read_text(encoding="utf-8", errors="ignore"))
+            meta.update({
+                "detected_type": detected.get("detected_type"),
+                "detected_version": detected.get("detected_version"),
+                "detected_port": detected.get("detected_port"),
+            })
+            meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+        return {"message": "Server pack imported", "server": result, "detected": detected}
     except HTTPException:
         raise
     except zipfile.BadZipFile:

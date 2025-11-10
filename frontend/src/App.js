@@ -1,4 +1,33 @@
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense, useCallback, createContext, useContext } from 'react';
+// RAM sanitizer utility (lightweight – placed here to avoid new import churn). If this grows, move to utils.
+function normalizeRamInput(value, { defaultUnit = 'M', clampMin = 16, clampMax = 1048576 } = {}) {
+  // Accept examples: 2048, 2048M, 2G, 2GB, 2 g, 1.5G, 1536m, 1t, 1TB
+  if (value == null) return '';
+  let raw = String(value).trim();
+  if (!raw) return '';
+  // Replace common separators
+  raw = raw.replace(/[, ]+/g, '');
+  // If pure number, assume already in MB
+  const pureNumber = /^\d+(?:\.\d+)?$/.test(raw);
+  let num = 0;
+  let unit = defaultUnit;
+  if (pureNumber) {
+    num = parseFloat(raw);
+  } else {
+    const m = raw.match(/^(\d+(?:\.\d+)?)([kmgtp]?)(?:i?b?)$/i); // supports k,m,g,t,p (and optional b / ib) – future-proof
+    if (!m) return ''; // invalid pattern
+    num = parseFloat(m[1]);
+    unit = m[2] ? m[2].toUpperCase() : defaultUnit.toUpperCase();
+  }
+  if (!isFinite(num) || num <= 0) return '';
+  // Convert to MB (binary-ish assumption: 1G = 1024M, etc.)
+  const factorMap = { K: 1/1024, M: 1, G: 1024, T: 1024*1024, P: 1024*1024*1024 };
+  const factor = factorMap[unit] || 1;
+  let mb = num * factor;
+  // Clamp & round
+  mb = Math.round(Math.min(Math.max(mb, clampMin), clampMax));
+  return mb + 'M';
+}
 import { APP_NAME, applyDocumentBranding } from './branding';
 import {
   FaServer,
@@ -1689,6 +1718,13 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
       setInstallEvents((prev) => [...prev, { type: 'error', message: 'Server name is required' }]);
       return;
     }
+    // Normalize RAM inputs to backend-expected format (e.g., 2048M)
+    const normMin = normalizeRamInput(minRam);
+    const normMax = normalizeRamInput(maxRam);
+    if (!normMin || !normMax) {
+      setInstallEvents((prev) => [...prev, { type: 'error', message: 'Please enter valid RAM values (examples: 2048M, 2G, or raw MB like 2048).' }]);
+      return;
+    }
     setInstallWorking(true);
     setInstallEvents([{ type: 'progress', message: 'Submitting install task...' }]);
     try {
@@ -1698,8 +1734,8 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
         version_id: installVersionId ? String(installVersionId) : null,
         name: String(serverName).trim(),
         host_port: hostPort ? Number(hostPort) : null,
-        min_ram: minRam,
-        max_ram: maxRam,
+        min_ram: normMin,
+        max_ram: normMax,
       };
       const r = await fetch(`${API}/modpacks/install`, {
         method: 'POST',
@@ -1878,11 +1914,13 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-white/60 mb-1">Min RAM</label>
-                    <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={minRam} onChange={e=>setMinRam(e.target.value)} />
+                    <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={minRam} onChange={e=>setMinRam(e.target.value)} onBlur={()=>{ const v = normalizeRamInput(minRam); if (v) setMinRam(v); }} />
+                    <div className="text-[11px] text-white/50 mt-1">Accepts 2048M, 2G, or raw MB.</div>
                   </div>
                   <div>
                     <label className="block text-xs text-white/60 mb-1">Max RAM</label>
-                    <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={maxRam} onChange={e=>setMaxRam(e.target.value)} />
+                    <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={maxRam} onChange={e=>setMaxRam(e.target.value)} onBlur={()=>{ const v = normalizeRamInput(maxRam); if (v) setMaxRam(v); }} />
+                    <div className="text-[11px] text-white/50 mt-1">Accepts 4096M, 4G, or raw MB.</div>
                   </div>
                 </div>
                 <div className="md:col-span-2 flex items-center gap-2 mt-2">
@@ -2486,22 +2524,32 @@ function TemplatesPage() {
           </div>
           <div>
             <label className="block text-sm text-white/70 mb-1">Min RAM</label>
-            <input value={minRam} onChange={e=>setMinRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
+            <input value={minRam} onChange={e=>setMinRam(e.target.value)} onBlur={()=>{ const v = normalizeRamInput(minRam); if (v) setMinRam(v); }} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" aria-describedby="zip-min-ram-help" />
+            <div id="zip-min-ram-help" className="text-[11px] text-white/50 mt-1">Formats: 2048M, 2G, 2048.</div>
           </div>
           <div>
             <label className="block text-sm text-white/70 mb-1">Max RAM</label>
-            <input value={maxRam} onChange={e=>setMaxRam(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
+            <input value={maxRam} onChange={e=>setMaxRam(e.target.value)} onBlur={()=>{ const v = normalizeRamInput(maxRam); if (v) setMaxRam(v); }} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" aria-describedby="zip-max-ram-help" />
+            <div id="zip-max-ram-help" className="text-[11px] text-white/50 mt-1">Formats: 4096M, 4G, 4096.</div>
           </div>
           <div className="md:col-span-2 flex items-center gap-3">
             <button disabled={busy || !zipFile} onClick={async ()=>{
               setBusy(true);
               setMsg('');
               try {
+                // Normalize RAM before upload
+                const normMin = normalizeRamInput(minRam);
+                const normMax = normalizeRamInput(maxRam);
+                if (!normMin || !normMax) {
+                  setMsg('Invalid RAM values. Examples: 2048M, 2G, 2048');
+                  setBusy(false);
+                  return;
+                }
                 const fd = new FormData();
                 fd.append('server_name', serverName);
                 if (hostPort) fd.append('host_port', hostPort);
-                fd.append('min_ram', min_ram || minRam);
-                fd.append('max_ram', max_ram || maxRam);
+                fd.append('min_ram', normMin);
+                fd.append('max_ram', normMax);
                 if (javaOverride) fd.append('java_version_override', javaOverride);
                 if (serverType) fd.append('server_type', serverType);
                 if (serverVersion) fd.append('server_version', serverVersion);
@@ -2515,7 +2563,10 @@ function TemplatesPage() {
               } finally {
                 setBusy(false);
               }
-            }} className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded">{busy ? 'Uploading…' : 'Import ZIP'}</button>
+            }} className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded flex items-center gap-2" aria-busy={busy} aria-live="polite">
+              {busy && <span className="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full" aria-hidden="true"></span>}
+              {busy ? 'Uploading…' : 'Import ZIP'}
+            </button>
             {msg && <div className="text-sm text-white/70">{msg}</div>}
           </div>
         </div>
@@ -2678,7 +2729,23 @@ function App() {
   
   // Main navigation state
   const [currentPage, setCurrentPage] = useState('dashboard');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Initialize sidebar open state based on screen width (closed on small screens)
+  const initialSidebarOpen = (typeof window !== 'undefined') ? window.innerWidth >= 768 : true;
+  const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
+  const [isMobile, setIsMobile] = useState((typeof window !== 'undefined') ? window.innerWidth < 768 : false);
+
+  // Update isMobile on resize and auto-close sidebar on mobile
+  useEffect(() => {
+    function handleResize() {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) setSidebarOpen(false);
+    }
+    try {
+      window.addEventListener('resize', handleResize);
+    } catch (e) {}
+    return () => { try { window.removeEventListener('resize', handleResize); } catch {} };
+  }, []);
 
   // Validate token and fetch current user
   useEffect(() => {
@@ -3083,78 +3150,96 @@ function App() {
   return (
       <div className="min-h-screen bg-ink bg-hero-gradient flex">
       {/* Sidebar */}
-      {isAuthenticated && (
-  <div className={`${sidebarOpen ? 'w-64' : 'w-16'} bg-black/20 border-r border-white/10 transition-all duration-300 flex flex-col sticky top-0 h-screen`}>
-          <div className="p-4 border-b border-white/10">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-md bg-brand-500 inline-flex items-center justify-center shadow-card">
-                <FaServer className="text-white" />
+      {isAuthenticated && (() => {
+        // Sidebar content reused for desktop and mobile overlay
+        const sidebarContent = (
+          <div className="flex flex-col h-full">
+            <div className="p-4 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-md bg-brand-500 inline-flex items-center justify-center shadow-card">
+                  <FaServer className="text-white" />
+                </div>
+                {!isMobile && sidebarOpen && <div className="font-semibold">{APP_NAME}</div>}
               </div>
-              {sidebarOpen && <div className="font-semibold">{APP_NAME}</div>}
             </div>
-          </div>
             <div className="flex-1 overflow-y-auto">
               <nav className="p-4">
-                    <div className="space-y-2">
-                      {sidebarItems.map(item => (
-                        <button
-                          key={item.id}
-                          onClick={() => {
-                            setCurrentPage(item.id);
-                            setSelectedServer(null); // Clear server selection when changing pages
-                          }}
-                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
-                            currentPage === item.id
-                              ? 'bg-brand-500 text-white'
-                              : 'text-white/70 hover:text-white hover:bg-white/10'
-                          }`}
-                        >
-                          <item.icon className={`${sidebarOpen ? 'text-lg' : 'text-xl'}`} />
-                          {sidebarOpen && (
-                            <div className="flex items-center justify-between w-full">
-                              <span>{item.label}</span>
-                              {item.id === 'monitoring' && gd?.alerts && gd.alerts.length > 0 && (
-                                <span className="ml-2 inline-flex items-center justify-center rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white">{gd.alerts.length}</span>
-                              )}
-                            </div>
+                <div className="space-y-2">
+                  {sidebarItems.map(item => (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        setCurrentPage(item.id);
+                        setSelectedServer(null);
+                        if (isMobile) setSidebarOpen(false);
+                      }}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                        currentPage === item.id
+                          ? 'bg-brand-500 text-white'
+                          : 'text-white/70 hover:text-white hover:bg-white/10'
+                      }`}
+                    >
+                      <item.icon className={`${(!isMobile && sidebarOpen) ? 'text-lg' : 'text-xl'}`} />
+                      {(!isMobile && sidebarOpen) && (
+                        <div className="flex items-center justify-between w-full">
+                          <span>{item.label}</span>
+                          {item.id === 'monitoring' && gd?.alerts && gd.alerts.length > 0 && (
+                            <span className="ml-2 inline-flex items-center justify-center rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white">{gd.alerts.length}</span>
                           )}
-                        </button>
-                      ))}
-                    </div>
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
               </nav>
             </div>
-          <div className="p-4 border-t border-white/10 bg-black/30 backdrop-blur supports-[backdrop-filter]:bg-black/20">
-            <div
-              className="flex items-center gap-3 mb-3 cursor-pointer hover:bg-white/10 rounded-lg p-2"
-              onClick={() => setCurrentPage('settings')}
-              role="button"
-              tabIndex={0}
-            >
-              {currentUser && (
-                <>
-                  <div className="w-8 h-8 bg-brand-500 rounded-full flex items-center justify-center">
-                    <FaUsers className="text-sm text-white" />
-                  </div>
-                  {sidebarOpen && (
-                    <div className="text-sm">
-                      <div className="text-white font-medium">{currentUser.username}</div>
-                      <div className="text-white/60">{currentUser.role}</div>
+            <div className="p-4 border-t border-white/10 bg-black/30 backdrop-blur supports-[backdrop-filter]:bg-black/20">
+              <div
+                className="flex items-center gap-3 mb-3 cursor-pointer hover:bg-white/10 rounded-lg p-2"
+                onClick={() => { setCurrentPage('settings'); if (isMobile) setSidebarOpen(false); }}
+                role="button"
+                tabIndex={0}
+              >
+                {currentUser && (
+                  <>
+                    <div className="w-8 h-8 bg-brand-500 rounded-full flex items-center justify-center">
+                      <FaUsers className="text-sm text-white" />
                     </div>
-                  )}
-                </>
-              )}
+                    {(!isMobile && sidebarOpen) && (
+                      <div className="text-sm">
+                        <div className="text-white font-medium">{currentUser.username}</div>
+                        <div className="text-white/60">{currentUser.role}</div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <FaArrowLeft />
+                {(!isMobile && sidebarOpen) && <span>Logout</span>}
+              </button>
             </div>
-            {/* Removed duplicate Settings button under the user block; user block remains the entry to Settings */}
-            <button
-              onClick={handleLogout}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-            >
-              <FaArrowLeft />
-              {sidebarOpen && <span>Logout</span>}
-            </button>
           </div>
-        </div>
-      )}
+        );
+
+        if (isMobile) {
+          return sidebarOpen ? (
+            <div className="fixed inset-0 z-50 flex">
+              <div className="absolute inset-0 bg-black/60" onClick={() => setSidebarOpen(false)} />
+              <div className="relative w-64 bg-black/20 border-r border-white/10">{sidebarContent}</div>
+            </div>
+          ) : null;
+        }
+
+        return (
+          <div className={`${sidebarOpen ? 'w-64' : 'w-16'} bg-black/20 border-r border-white/10 transition-all duration-300 flex flex-col sticky top-0 h-screen`}>
+            {sidebarContent}
+          </div>
+        );
+      })()}
       
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
