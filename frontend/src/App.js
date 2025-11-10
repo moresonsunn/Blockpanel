@@ -1,3 +1,84 @@
+// --- New: Rename server button component ---
+function RenameServerButton({ currentName, onRenamed }) {
+  const [open, setOpen] = useState(false);
+  const [newName, setNewName] = useState(currentName);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submitRename(e) {
+    e.preventDefault();
+    setError('');
+    const trimmed = (newName || '').trim();
+    if (!trimmed) {
+      setError('Name cannot be empty');
+      return;
+    }
+    if (trimmed === currentName) {
+      setError('Name unchanged');
+      return;
+    }
+    // Basic client-side validation: only allow alphanumerics, dashes, underscores
+    if (!/^[-_a-zA-Z0-9]+$/.test(trimmed)) {
+      setError('Invalid characters. Use letters, numbers, - or _.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const resp = await fetch(`/api/servers/${encodeURIComponent(currentName)}/rename-server`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_name: trimmed })
+      });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(txt || `Rename failed (${resp.status})`);
+      }
+      const data = await resp.json();
+      onRenamed?.(data.new_name || trimmed);
+      setOpen(false);
+    } catch (err) {
+      setError(err.message || 'Rename failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => { setOpen(o => !o); setNewName(currentName); setError(''); }}
+        className="text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-white"
+      >Rename</button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-64 bg-neutral-900 border border-white/10 rounded shadow-lg p-3 z-50">
+          <form onSubmit={submitRename} className="flex flex-col gap-2">
+            <div className="text-xs text-white/70">Rename Server</div>
+            <input
+              autoFocus
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              className="bg-neutral-800 text-sm p-2 rounded outline-none focus:ring-2 focus:ring-blue-500 text-white"
+              placeholder="New server name"
+            />
+            {error && <div className="text-red-400 text-xs">{error}</div>}
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => { if (!busy) { setOpen(false); setError(''); } }}
+                className="text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-white"
+              >Cancel</button>
+              <button
+                type="submit"
+                disabled={busy}
+                className={"text-xs px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"}
+              >{busy && <span className="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full"/>}Save</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense, useCallback, createContext, useContext } from 'react';
 // RAM sanitizer utility (lightweight – placed here to avoid new import churn). If this grows, move to utils.
 function normalizeRamInput(value, { defaultUnit = 'M', clampMin = 16, clampMax = 1048576 } = {}) {
@@ -723,7 +804,15 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
       default:
         return (
           <div className="p-4 bg-black/20 rounded-lg">
-            <div className="text-sm text-white/70 mb-3">Server Information</div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm text-white/70">Server Information</div>
+              <RenameServerButton currentName={server.name} onRenamed={(newName) => {
+                // Update local server name and trigger a refresh
+                server.name = newName;
+                // Force a refetch if there's a loader or reload logic; simplest: update a key state
+                setLogReset(Date.now());
+              }} />
+            </div>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <div className="text-white/50">Status</div>

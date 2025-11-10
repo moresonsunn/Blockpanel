@@ -305,6 +305,15 @@ class LocalAdapter:
         server_type = meta.get("type")
         version = meta.get("version")
         created_at = meta.get("created_at")
+        # Accept new created_ts (seconds epoch) or container_created_ts
+        if not created_at:
+            epoch_source = meta.get("created_ts") or meta.get("container_created_ts")
+            if epoch_source:
+                try:
+                    from datetime import datetime
+                    created_at = datetime.utcfromtimestamp(int(epoch_source))
+                except Exception:
+                    created_at = None
         java_version = meta.get("java_version", "unknown")
         minecraft_version = meta.get("minecraft_version") or meta.get("game_version")
         loader_version = meta.get("loader_version")

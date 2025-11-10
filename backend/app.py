@@ -44,6 +44,8 @@ from routers import (
     integrations_router,
 )
 from repair_routes import router as repair_router
+from probe_routes import router as probe_router
+from maintenance_routes import router as maintenance_router
 from server_types_routes import router as server_types_router
 from auth import require_auth, get_current_user, require_admin, require_moderator, get_password_hash
 from scheduler import get_scheduler
@@ -161,6 +163,8 @@ app.include_router(catalog_router)
 app.include_router(integrations_router)
 app.include_router(server_types_router)
 app.include_router(repair_router)
+app.include_router(probe_router)
+app.include_router(maintenance_router)
 
 # /api aliases to avoid ad-block filters blocking paths like /servers/stats or /auth/login
 for _router in [
@@ -177,6 +181,8 @@ for _router in [
     integrations_router,
     server_types_router,
     repair_router,
+    probe_router,
+    maintenance_router,
 ]:
     try:
         app.include_router(_router, prefix="/api")
@@ -919,15 +925,29 @@ async def file_upload(
         pass
     return {"ok": True}
 
-class RenameRequest(BaseModel):
+class FileRenameRequest(BaseModel):
     src: str
     dest: str
 
+class ServerRenameRequest(BaseModel):
+    new_name: str
+
 @app.post("/servers/{name}/rename")
 @app.post("/api/servers/{name}/rename")
-def file_rename(name: str, req: RenameRequest, current_user: User = Depends(require_moderator)):
+def file_rename(name: str, req: FileRenameRequest, current_user: User = Depends(require_moderator)):
     fm_rename_path(name, req.src, req.dest)
     return {"ok": True}
+
+@app.post("/servers/{name}/rename-server")
+@app.post("/api/servers/{name}/rename-server")
+def rename_server(name: str, req: ServerRenameRequest, current_user: User = Depends(require_moderator)):
+    """Rename an existing server (directory + container)."""
+    dm = get_docker_manager()
+    try:
+        result = dm.rename_server(old_name=name, new_name=req.new_name)
+        return {"ok": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/servers/{name}/upload-multiple")
 @app.post("/api/servers/{name}/upload-multiple")

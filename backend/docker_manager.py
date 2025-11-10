@@ -59,7 +59,7 @@ MINECRAFT_PORT = 25565
 
 # --- Helper functions for direct jar download fallback ---
 
-def download_file(url: str, dest: Path, min_size: int = 1024 * 100, max_retries: int = 3):
+def download_file(url: str, dest: Path, min_size: int = 1024 * 100, max_retries: int = 3, diagnostics: list | None = None):
     """
     Download a file from a URL to a destination path.
     Ensures the file is at least min_size bytes (default 100KB).
@@ -72,11 +72,24 @@ def download_file(url: str, dest: Path, min_size: int = 1024 * 100, max_retries:
             with requests.get(url, stream=True, timeout=30) as r:
                 r.raise_for_status()
                 content_type = r.headers.get("content-type", "").lower()
-                
+                status_code = r.status_code
+
                 # Read the first few bytes to check if it's a valid file
                 first_chunk = next(r.iter_content(chunk_size=8192), b'')
                 r.close()  # Close the first request
-                
+                size_header = r.headers.get("content-length")
+                # Record attempt diagnostics
+                if diagnostics is not None:
+                    diagnostics.append({
+                        "attempt": attempt + 1,
+                        "status_code": status_code,
+                        "content_type": content_type,
+                        "first_bytes_hex": first_chunk[:32].hex(),
+                        "first_bytes_ascii": ''.join(chr(b) if 32 <= b <= 126 else '.' for b in first_chunk[:32]),
+                        "declared_size": int(size_header) if size_header and size_header.isdigit() else None,
+                        "url": url,
+                    })
+
                 # Check for valid file signatures
                 is_jar = first_chunk.startswith(b'PK')  # ZIP/JAR signature
                 is_gzip = first_chunk.startswith(b'\x1f\x8b')  # GZIP signature
@@ -112,11 +125,24 @@ def download_file(url: str, dest: Path, min_size: int = 1024 * 100, max_retries:
                     time.sleep(2)
                     continue
                 logger.info(f"Downloaded {url} successfully ({dest.stat().st_size} bytes)")
+                if diagnostics is not None and diagnostics:
+                    diagnostics[-1]["final_size"] = dest.stat().st_size
+                    diagnostics[-1]["success"] = True
                 return True
             else:
                 logger.warning(f"Downloaded file {dest} is too small or missing after download.")
+                if diagnostics is not None and diagnostics:
+                    diagnostics[-1]["final_size"] = dest.stat().st_size if dest.exists() else None
+                    diagnostics[-1]["success"] = False
         except Exception as e:
             logger.warning(f"Failed to download {url} to {dest}: {e}")
+            if diagnostics is not None:
+                diagnostics.append({
+                    "attempt": attempt + 1,
+                    "error": str(e),
+                    "url": url,
+                    "success": False,
+                })
         # Remove incomplete file
         if dest.exists():
             try:
@@ -285,8 +311,25 @@ def fix_server_jar(server_dir: Path, server_type: str, version: str, loader_vers
             url = get_neoforge_download_url(version)
 
         if url:
-            success = download_file(url, jar_path, min_size=min_jar_size)
+            diag: list = []
+            success = download_file(url, jar_path, min_size=min_jar_size, diagnostics=diag)
             if not success:
+                # Persist diagnostics in server_meta.json for post-mortem
+                try:
+                    meta_path = server_dir / "server_meta.json"
+                    meta = {}
+                    if meta_path.exists():
+                        meta = json.loads(meta_path.read_text(encoding="utf-8") or "{}")
+                    meta.setdefault("last_download_failure", {
+                        "url": url,
+                        "attempts": diag,
+                        "timestamp": int(time.time()),
+                        "type": server_type,
+                        "version": version,
+                    })
+                    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+                except Exception:
+                    pass
                 raise RuntimeError(f"Failed to download a valid {server_type} server.jar for {server_dir} from {url}.")
         else:
             # Fallback: try to re-prepare the server files using the download_manager
@@ -1014,6 +1057,15 @@ class DockerManager:
 
             # Persist merged metadata so UI/LocalAdapter can read it immediately
             new_meta = dict(meta or {})
+            # Set creation timestamp if not already present
+            if "created_ts" not in new_meta:
+                import time, datetime
+                now_ts = int(time.time())
+                new_meta["created_ts"] = now_ts  # seconds since epoch
+                try:
+                    new_meta["created_iso"] = datetime.datetime.utcfromtimestamp(now_ts).isoformat() + "Z"
+                except Exception:
+                    pass
             new_meta.setdefault("name", name)
             if selected_host_port is not None:
                 new_meta["host_port"] = int(selected_host_port)
@@ -1058,6 +1110,27 @@ class DockerManager:
                 **run_kwargs,
             )
             logger.info(f"Container {container.id} created from existing dir for server {name}")
+            try:
+                # Augment meta with container creation time if available
+                c_created = getattr(container, 'attrs', {}).get('Created') if hasattr(container, 'attrs') else None
+                if c_created:
+                    # Store raw string for debugging and parsed epoch
+                    new_meta = json.loads((SERVERS_ROOT / name / 'server_meta.json').read_text(encoding='utf-8'))
+                    new_meta.setdefault('container_created_raw', c_created)
+                    from datetime import datetime, timezone
+                    try:
+                        ts = c_created.rstrip('Z')
+                        if '.' in ts:
+                            head, frac = ts.split('.', 1)
+                            frac = (frac + '000000')[:6]
+                            ts = f"{head}.{frac}"
+                        dt = datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
+                        new_meta.setdefault('container_created_ts', int(dt.timestamp()))
+                    except Exception:
+                        pass
+                    (SERVERS_ROOT / name / 'server_meta.json').write_text(json.dumps(new_meta), encoding='utf-8')
+            except Exception:
+                pass
             return {"id": container.id, "name": container.name, "status": container.status}
         except Exception as e:
             logger.error(f"Failed to create container from existing dir for {name}: {e}")
@@ -1140,9 +1213,42 @@ class DockerManager:
         return {"id": container.id, "status": container.status}
 
     def delete_server(self, container_id):
-        container = self.client.containers.get(container_id)
-        container.remove(force=True)
-        return {"id": container_id, "deleted": True}
+        """Delete the server's container AND its directory under SERVERS_ROOT if present.
+
+        container_id may be a container ID or the server name. We'll prefer container.name when found.
+        """
+        name_hint = str(container_id)
+        # Remove container first
+        try:
+            container = self.client.containers.get(container_id)
+            try:
+                name_hint = getattr(container, 'name', name_hint)
+            except Exception:
+                pass
+            try:
+                container.remove(force=True)
+            except Exception:
+                pass
+        except Exception:
+            container = None
+        # Remove directory (prefer using name)
+        removed_dir = False
+        try:
+            server_dir = SERVERS_ROOT / name_hint
+            if server_dir.exists() and server_dir.is_dir():
+                import shutil
+                shutil.rmtree(server_dir, ignore_errors=True)
+                removed_dir = not server_dir.exists()
+            else:
+                # Fallback: if name_hint was an ID but directory uses container name, try to list possible match
+                alt_dir = SERVERS_ROOT / str(container_id)
+                if alt_dir.exists() and alt_dir.is_dir():
+                    import shutil
+                    shutil.rmtree(alt_dir, ignore_errors=True)
+                    removed_dir = not alt_dir.exists()
+        except Exception as e:
+            logger.warning(f"Failed to remove server directory for {container_id}: {e}")
+        return {"id": container_id, "deleted": True, "dir_removed": removed_dir}
 
     def recreate_server_with_env(self, container_id: str, env_overrides: dict | None = None) -> dict:
         """Stop and remove the existing container, then recreate it from its server directory
@@ -1186,6 +1292,92 @@ class DockerManager:
             raise RuntimeError(f"Container {container_id} not found")
         except Exception as e:
             raise RuntimeError(f"Failed to recreate server container: {e}")
+
+    def rename_server(self, old_name: str, new_name: str) -> dict:
+        """Rename a server: directory, metadata, and container.
+
+        Steps:
+        1. Collect current host port, RAM settings, and env overrides.
+        2. Stop & remove existing container (if any).
+        3. Rename the server directory.
+        4. Update server_meta.json (name + previous_names).
+        5. Recreate container under new name preserving settings.
+        """
+        old_dir = SERVERS_ROOT / old_name
+        new_dir = SERVERS_ROOT / new_name
+        if not old_dir.exists() or not old_dir.is_dir():
+            raise RuntimeError(f"Server directory {old_dir} does not exist")
+        if new_dir.exists():
+            raise RuntimeError(f"Target server directory {new_dir} already exists")
+
+        # Extract metadata
+        meta_path = old_dir / "server_meta.json"
+        meta = {}
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8") or "{}")
+            except Exception:
+                meta = {}
+        min_ram = meta.get("min_ram") or "1G"
+        max_ram = meta.get("max_ram") or "2G"
+        env_overrides = meta.get("env_overrides") or {}
+        if not isinstance(env_overrides, dict):
+            env_overrides = {}
+
+        # Try to capture host port from existing container
+        host_port: int | None = None
+        container = None
+        try:
+            container = self.client.containers.get(old_name)
+            try:
+                attrs = container.attrs or {}
+                ports = (attrs.get("NetworkSettings", {}) or {}).get("Ports", {}) or {}
+                mapping = ports.get(f"{MINECRAFT_PORT}/tcp")
+                if mapping and isinstance(mapping, list) and mapping and mapping[0].get("HostPort"):
+                    host_port = int(mapping[0]["HostPort"])
+            except Exception:
+                host_port = None
+        except Exception:
+            container = None
+
+        if container is not None:
+            try:
+                try:
+                    container.stop(timeout=10)
+                except Exception:
+                    pass
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        # Rename directory
+        old_dir.rename(new_dir)
+
+        # Update metadata name/history
+        try:
+            new_meta = dict(meta or {})
+            prev = new_meta.get("previous_names") or []
+            if isinstance(prev, list):
+                if old_name not in prev:
+                    prev.append(old_name)
+                new_meta["previous_names"] = prev
+            new_meta["name"] = new_name
+            (SERVERS_ROOT / new_name / "server_meta.json").write_text(json.dumps(new_meta), encoding="utf-8")
+        except Exception:
+            pass
+
+        # Recreate container with preserved settings
+        result = self.create_server_from_existing(
+            name=new_name,
+            host_port=host_port,
+            min_ram=min_ram,
+            max_ram=max_ram,
+            extra_env=env_overrides,
+        )
+        return {"old_name": old_name, "new_name": new_name, "container": result}
 
     def get_server_logs(self, container_id, tail: int = 200):
         container = self.client.containers.get(container_id)

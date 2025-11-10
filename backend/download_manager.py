@@ -3,7 +3,7 @@ from pathlib import Path
 import requests
 from server_providers.providers import get_provider
 from typing import Optional, Any
-import logging
+import logging, hashlib, json, time, re
 
 logger = logging.getLogger(__name__)
 
@@ -121,11 +121,64 @@ def stream_download(url: str, dest_file: Path):
         logger.error(f"Unexpected error during download: {e}")
         raise
 
+def _sha256(path: Path) -> str | None:
+    try:
+        h = hashlib.sha256()
+        with open(path, 'rb') as f:
+            for chunk in iter(lambda: f.read(8192), b''):
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+def _update_meta(dest_dir: Path, updates: dict):
+    meta_path = dest_dir / 'server_meta.json'
+    data = {}
+    if meta_path.exists():
+        try:
+            data = json.loads(meta_path.read_text(encoding='utf-8') or '{}')
+        except Exception:
+            data = {}
+    # Initial creation timestamp if absent
+    if 'created_ts' not in data:
+        data['created_ts'] = int(time.time())
+    for k, v in updates.items():
+        if v is not None:
+            data[k] = v
+    try:
+        meta_path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+    except Exception as e:
+        logger.warning(f'Failed writing server_meta.json: {e}')
+
 def prepare_server_files(server_type: str, version: str, dest_dir: Path, loader_version: Optional[str] = None, installer_version: Optional[str] = None):
     logger.info(f"Preparing {server_type} server v{version} in {dest_dir}")
     provider: Any = get_provider(server_type)
     
     try:
+        paper_build = None
+        purpur_build = None
+        if server_type.lower() == 'paper':
+            # Query Paper API for builds
+            base = "https://api.papermc.io/v2/projects/paper"
+            try:
+                v_resp = requests.get(f"{base}/versions/{version}", timeout=15)
+                v_resp.raise_for_status()
+                builds = v_resp.json().get('builds') or []
+                if builds:
+                    paper_build = builds[-1]
+            except Exception as e:
+                logger.warning(f"Failed to fetch Paper builds for {version}: {e}")
+        elif server_type.lower() == 'purpur':
+            try:
+                pur_resp = requests.get(f"https://api.purpurmc.org/v2/purpur/{version}", timeout=15)
+                pur_resp.raise_for_status()
+                builds = pur_resp.json().get('builds') or []
+                if builds:
+                    purpur_build = builds[-1]
+            except Exception as e:
+                logger.warning(f"Failed to fetch Purpur builds for {version}: {e}")
 
         if hasattr(provider, 'get_download_url_with_loader'):
             # Try signature with installer_version
@@ -136,6 +189,18 @@ def prepare_server_files(server_type: str, version: str, dest_dir: Path, loader_
         else:
             url = provider.get_download_url(version)
         logger.info(f"Download URL: {url}")
+        build_number = None
+        # Prefer API build number if present
+        if paper_build is not None:
+            build_number = str(paper_build)
+        elif purpur_build is not None:
+            build_number = str(purpur_build)
+        else:
+            # Attempt to extract build number for paper/purpur via filename pattern
+            if server_type.lower() in ('paper','purpur'):
+                m = re.search(rf"{server_type.lower()}-{re.escape(version)}-(\d+)\.jar", url.lower())
+                if m:
+                    build_number = m.group(1)
         
         if server_type in ("forge", "neoforge"):
             installer_name = "forge-installer.jar" if server_type == "forge" else "neoforge-installer.jar"
@@ -151,10 +216,22 @@ def prepare_server_files(server_type: str, version: str, dest_dir: Path, loader_
             
             (dest_dir / "eula.txt").write_text("eula=true\n", encoding="utf-8")
             
+            sha = _sha256(installer_path)
+            _update_meta(dest_dir, {
+                'server_type': server_type,
+                'version': version,
+                'provider': server_type.lower(),
+                'download_url': url,
+                'installer_sha256': sha,
+                'installer_size_bytes': installer_path.stat().st_size if installer_path.exists() else None,
+                'loader_version': loader_version,
+                'build_number': build_number,
+                'paper_build': paper_build,
+                'purpur_build': purpur_build,
+            })
             logger.info(f"Server files prepared successfully at {installer_path}")
             logger.info(f"Directory contents of {dest_dir}: {list(dest_dir.iterdir())}")
             return installer_path
-            
         elif server_type == "fabric":
 
             # Download to the canonical launcher filename and also create server.jar alias for compatibility
@@ -190,6 +267,19 @@ java -jar fabric-server-launch.jar server
                 logger.error(f"Fabric JAR is too small ({jar_size} bytes), likely corrupted")
                 raise ValueError(f"Fabric JAR is too small ({jar_size} bytes), expected at least 5KB")
             
+            sha = _sha256(launcher_path)
+            _update_meta(dest_dir, {
+                'server_type': server_type,
+                'version': version,
+                'provider': 'fabric',
+                'download_url': url,
+                'launcher_sha256': sha,
+                'launcher_size_bytes': jar_size,
+                'loader_version': loader_version,
+                'build_number': build_number,
+                'paper_build': paper_build,
+                'purpur_build': purpur_build,
+            })
             logger.info(f"Fabric server launcher downloaded successfully ({jar_size} bytes)")
         else:
 
@@ -198,6 +288,19 @@ java -jar fabric-server-launch.jar server
             stream_download(url, jar_path)
             
             jar_size = jar_path.stat().st_size
+            sha = _sha256(jar_path)
+            _update_meta(dest_dir, {
+                'server_type': server_type,
+                'version': version,
+                'provider': server_type.lower(),
+                'download_url': url,
+                'jar_sha256': sha,
+                'jar_size_bytes': jar_size,
+                'loader_version': loader_version,
+                'build_number': build_number,
+                'paper_build': paper_build,
+                'purpur_build': purpur_build,
+            })
             logger.info(f"{server_type} server JAR downloaded successfully ({jar_size} bytes)")
         
 
