@@ -149,10 +149,13 @@ import {
   FaStepForward,
   FaFastBackward,
   FaFastForward,
+  FaSun,
+  FaMoon,
   // FaTable, // removed with Permission Matrix
   FaTimes,
   FaUserSlash,
   FaUserCheck,
+  FaUniversalAccess,
 } from 'react-icons/fa';
 import TerminalPanel from './components/TerminalPanel';
 import BackupsPanel from './components/server-details/BackupsPanel';
@@ -160,6 +163,7 @@ import ConfigPanel from './components/server-details/ConfigPanel';
 import WorldsPanel from './components/server-details/WorldsPanel';
 import SchedulePanel from './components/server-details/SchedulePanel';
 import PlayersPanel from './components/server-details/PlayersPanel';
+import GlobalSearchBar from './components/GlobalSearchBar';
 const MonitoringPageLazy = React.lazy(() => import('./components/MonitoringPage'));
 const TemplatesPageLazy = React.lazy(() => import('./pages/TemplatesPage'));
 import FilesPanelWrapper from './components/server-details/FilesPanelWrapper';
@@ -227,6 +231,28 @@ if (typeof window !== 'undefined' && typeof serverVersion === 'undefined') {
 if (typeof window !== 'undefined' && typeof busy === 'undefined') {
   // eslint-disable-next-line no-var
   var busy = false;
+}
+
+const THEME_MODE_KEY = 'theme-mode';
+const COLORBLIND_KEY = 'theme-colorblind';
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  try {
+    const storedTheme = window.localStorage.getItem(THEME_MODE_KEY);
+    const mode = storedTheme === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', mode);
+    if (document.body) {
+      document.body.setAttribute('data-theme', mode);
+    }
+    const storedPalette = window.localStorage.getItem(COLORBLIND_KEY);
+    const palette = storedPalette === 'on' ? 'on' : 'off';
+    document.documentElement.setAttribute('data-colorblind', palette);
+    if (document.body) {
+      document.body.setAttribute('data-colorblind', palette);
+    }
+  } catch (err) {
+    console.warn('Theme initialization failed:', err);
+  }
 }
 
 // Global Data Store Context for instant access to all data
@@ -642,7 +668,20 @@ const SERVER_TYPES_WITH_LOADER = ['fabric', 'forge', 'neoforge'];
 // WorldsPanel moved to components
 // SchedulePanel moved to components
 // PlayersPanel moved to components
-function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestart }) {
+function ServerDetailsPage({
+  server,
+  onBack,
+  onStart,
+  onStop,
+  onDelete,
+  onRestart,
+  initialTab = 'overview',
+  onTabChange,
+  playerFocus = '',
+  onPlayerFocusConsumed,
+  configFocus = '',
+  onConfigFocusConsumed,
+}) {
   const globalData = useGlobalData();
   const [activeTab, setActiveTab] = useState('overview');
   const [filesEditing, setFilesEditing] = useState(false);
@@ -691,6 +730,74 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
     { id: 'backup', label: 'Backup', icon: FaDownload },
     { id: 'schedule', label: 'Schedule', icon: FaClock },
   ];
+
+    useEffect(() => {
+      const validTabs = new Set(tabs.map((tab) => tab.id));
+      const desired = validTabs.has(initialTab) ? initialTab : 'overview';
+      setActiveTab(desired);
+    }, [initialTab, server?.id]);
+
+    useEffect(() => {
+      if (typeof onTabChange === 'function') {
+        onTabChange(activeTab);
+      }
+    }, [activeTab, onTabChange]);
+
+    useEffect(() => {
+      if (!playerFocus) return;
+      if (activeTab !== 'players') {
+        setActiveTab('players');
+      }
+    }, [playerFocus, activeTab]);
+
+    useEffect(() => {
+      if (!configFocus) return;
+      if (activeTab !== 'files') {
+        setActiveTab('files');
+      }
+      if (!server?.name) {
+        if (typeof onConfigFocusConsumed === 'function') {
+          onConfigFocusConsumed();
+        }
+        return;
+      }
+      let cancelled = false;
+      async function openConfigPath(path) {
+        try {
+          const response = await fetch(`${API}/servers/${encodeURIComponent(server.name)}/file?path=${encodeURIComponent(path)}`);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const payload = await response.json().catch(() => ({}));
+          if (cancelled) return;
+          setEditPath(path);
+          setEditContent(payload.content || '');
+          setIsEditing(true);
+          setFilesEditing(true);
+          setBlockedFileError('');
+        } catch (err) {
+          if (!cancelled) {
+            setBlockedFileError(err.message || 'Unable to open file');
+          }
+        } finally {
+          if (!cancelled && typeof onConfigFocusConsumed === 'function') {
+            onConfigFocusConsumed();
+          }
+        }
+      }
+      openConfigPath(configFocus);
+      return () => {
+        cancelled = true;
+      };
+    }, [configFocus, server?.name, server?.id, activeTab, onConfigFocusConsumed]);
+
+    useEffect(() => {
+      setFilesEditing(false);
+      setIsEditing(false);
+      setEditPath('');
+      setEditContent('');
+      setBlockedFileError('');
+    }, [server?.id]);
 
 // FilesPanelWrapper moved to components/server-details/FilesPanelWrapper.jsx
 
@@ -768,7 +875,12 @@ function ServerDetailsPage({ server, onBack, onStart, onStop, onDelete, onRestar
         return <ConfigPanel server={server} onRestart={onRestart} />;
       case 'players':
         return (
-          <PlayersPanel serverId={server.id} serverName={server.name} />
+          <PlayersPanel
+            serverId={server.id}
+            serverName={server.name}
+            focusPlayer={playerFocus}
+            onFocusConsumed={onPlayerFocusConsumed}
+          />
         );
       case 'schedule':
         return (
@@ -2134,7 +2246,8 @@ function ServersPageWithGlobalData({
   types, versionsData, selectedType, setSelectedType,
   name, setName, version, setVersion, hostPort, setHostPort,
   minRam, setMinRam, maxRam, setMaxRam, loaderVersion, setLoaderVersion,
-  loaderVersionsData, installerVersion, setInstallerVersion
+  loaderVersionsData, installerVersion, setInstallerVersion,
+  onNavigate,
 }) {
   // Prefer servers passed from parent (kept in sync with details view); fallback to global data
   const globalData = useGlobalData();
@@ -2182,6 +2295,7 @@ function ServersPageWithGlobalData({
       loaderVersionsData={loaderVersionsData}
       installerVersion={installerVersion}
       setInstallerVersion={setInstallerVersion}
+      onNavigate={onNavigate}
     />
   );
 }
@@ -2192,10 +2306,159 @@ function ServersPage({
   types, versionsData, selectedType, setSelectedType,
   name, setName, version, setVersion, hostPort, setHostPort,
   minRam, setMinRam, maxRam, setMaxRam, loaderVersion, setLoaderVersion,
-  loaderVersionsData, installerVersion, setInstallerVersion
+  loaderVersionsData, installerVersion, setInstallerVersion,
+  onNavigate,
 }) {
+  const normalizedServers = useMemo(
+    () => (Array.isArray(servers) ? servers : []),
+    [servers]
+  );
+
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [runtimeFilter, setRuntimeFilter] = useState('all');
+  const [modpackFilter, setModpackFilter] = useState('all');
+
+  const deriveRuntime = useCallback((server) => {
+    const image = typeof server?.image === 'string' ? server.image.toLowerCase() : '';
+    if (image === 'local' || image.includes('local-runtime')) return 'local';
+    return 'docker';
+  }, []);
+
+  const deriveModpackKey = useCallback((server) => {
+    const labels = (server && server.labels) || {};
+    const provider = labels['mc.modpack.provider'];
+    const packId = labels['mc.modpack.id'];
+    const versionId = labels['mc.modpack.version_id'];
+    if (provider && packId) {
+      const key = `${provider}:${packId}`;
+      const suffix = versionId ? ` (${versionId})` : '';
+      return { key, label: `${provider} · ${packId}${suffix}` };
+    }
+    return { key: 'none', label: 'No modpack' };
+  }, []);
+
+  const formatLabel = useCallback((value) => {
+    if (!value) return 'Unknown';
+    return value
+      .toString()
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }, []);
+
+  const filterSummary = useMemo(() => {
+    const statusMap = new Map();
+    const runtimeMap = new Map();
+    const modpackMap = new Map();
+    normalizedServers.forEach(server => {
+      const status = (server?.status || 'unknown').toString().toLowerCase();
+      statusMap.set(status, (statusMap.get(status) || 0) + 1);
+
+      const runtime = deriveRuntime(server);
+      runtimeMap.set(runtime, (runtimeMap.get(runtime) || 0) + 1);
+
+      const modpack = deriveModpackKey(server);
+      const existing = modpackMap.get(modpack.key) || { label: modpack.label, count: 0 };
+      existing.label = modpack.label;
+      existing.count += 1;
+      modpackMap.set(modpack.key, existing);
+    });
+    if (!modpackMap.has('none')) {
+      modpackMap.set('none', { label: 'No modpack', count: 0 });
+    }
+    return {
+      statuses: Array.from(statusMap.entries()).map(([value, count]) => ({ value, count })),
+      runtimes: Array.from(runtimeMap.entries()).map(([value, count]) => ({ value, count })),
+      modpacks: Array.from(modpackMap.entries()).map(([value, info]) => ({ value, label: info.label, count: info.count })),
+    };
+  }, [normalizedServers, deriveRuntime, deriveModpackKey]);
+
+  const statusOptions = useMemo(() => {
+    const options = [{ value: 'all', label: 'All', count: normalizedServers.length }];
+    filterSummary.statuses
+      .slice()
+      .sort((a, b) => b.count - a.count)
+      .forEach(({ value, count }) => {
+        options.push({ value, label: formatLabel(value), count });
+      });
+    return options;
+  }, [filterSummary.statuses, normalizedServers.length, formatLabel]);
+
+  const runtimeOptions = useMemo(() => {
+    const options = [{ value: 'all', label: 'All', count: normalizedServers.length }];
+    filterSummary.runtimes
+      .slice()
+      .sort((a, b) => b.count - a.count)
+      .forEach(({ value, count }) => {
+        options.push({ value, label: formatLabel(value), count });
+      });
+    return options;
+  }, [filterSummary.runtimes, normalizedServers.length, formatLabel]);
+
+  const modpackOptions = useMemo(() => {
+    const options = [{ value: 'all', label: 'All', count: normalizedServers.length }];
+    filterSummary.modpacks
+      .slice()
+      .sort((a, b) => b.count - a.count)
+      .forEach(({ value, label, count }) => {
+        if (value === 'none') {
+          options.push({ value: 'none', label: 'No modpack', count });
+        } else {
+          options.push({ value, label, count });
+        }
+      });
+    return options;
+  }, [filterSummary.modpacks, normalizedServers.length]);
+
+  const filteredServers = useMemo(() => {
+    return normalizedServers.filter(server => {
+      const status = (server?.status || 'unknown').toString().toLowerCase();
+      if (statusFilter !== 'all' && status !== statusFilter) return false;
+      const runtime = deriveRuntime(server);
+      if (runtimeFilter !== 'all' && runtime !== runtimeFilter) return false;
+      const modpack = deriveModpackKey(server);
+      if (modpackFilter === 'none') {
+        if (modpack.key !== 'none') return false;
+      } else if (modpackFilter !== 'all' && modpack.key !== modpackFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [normalizedServers, statusFilter, runtimeFilter, modpackFilter, deriveRuntime, deriveModpackKey]);
+
+  const hasFilters = statusFilter !== 'all' || runtimeFilter !== 'all' || modpackFilter !== 'all';
+  const totalServers = normalizedServers.length;
+
+  const chipClass = useCallback((active) => (
+    active
+      ? 'px-3 py-1.5 rounded-full text-xs font-medium bg-brand-500 text-white border border-brand-500/70 shadow-sm transition-colors'
+      : 'px-3 py-1.5 rounded-full text-xs font-medium bg-white/10 border border-white/10 text-white/80 hover:bg-white/15 transition-colors'
+  ), []);
+
+  const clearFilters = useCallback(() => {
+    setStatusFilter('all');
+    setRuntimeFilter('all');
+    setModpackFilter('all');
+  }, []);
+
   return (
     <div className="p-6 space-y-6">
+      <nav className="flex items-center gap-2 text-xs text-white/60">
+        <button
+          type="button"
+          onClick={() => onNavigate && onNavigate('dashboard')}
+          className="inline-flex items-center gap-1 hover:text-white transition-colors"
+        >
+          <FaHome className="text-sm" /> Dashboard
+        </button>
+        <FaChevronRight className="text-white/40 text-[10px]" />
+        <span className="text-white/80">Servers</span>
+        {hasFilters ? (
+          <span className="ml-2 text-white/50">{filteredServers.length} / {totalServers}</span>
+        ) : null}
+      </nav>
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-3">
@@ -2338,17 +2601,93 @@ function ServersPage({
       </div>
 
       {/* Servers List */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4">Your Servers</h3>
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold">Your Servers</h3>
+          <div className="flex items-center gap-3 text-xs text-white/60">
+            <span>{filteredServers.length} / {totalServers}</span>
+            {hasFilters ? (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-xs text-white"
+              >
+                Clear filters
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div>
+            <div className="text-[11px] text-white/50 uppercase tracking-wide flex items-center gap-2 mb-2">
+              <FaFilter className="text-white/40" /> Status
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {statusOptions.map(({ value, label, count }) => (
+                <button
+                  key={`status-${value}`}
+                  type="button"
+                  onClick={() => setStatusFilter(value)}
+                  className={chipClass(statusFilter === value)}
+                >
+                  {label}
+                  <span className="ml-1 text-[10px] opacity-70">{count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] text-white/50 uppercase tracking-wide flex items-center gap-2 mb-2">
+              <FaFilter className="text-white/40" /> Runtime
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {runtimeOptions.map(({ value, label, count }) => (
+                <button
+                  key={`runtime-${value}`}
+                  type="button"
+                  onClick={() => setRuntimeFilter(value)}
+                  className={chipClass(runtimeFilter === value)}
+                >
+                  {label}
+                  <span className="ml-1 text-[10px] opacity-70">{count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] text-white/50 uppercase tracking-wide flex items-center gap-2 mb-2">
+              <FaFilter className="text-white/40" /> Modpack
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {modpackOptions.map(({ value, label, count }) => (
+                <button
+                  key={`modpack-${value}`}
+                  type="button"
+                  onClick={() => setModpackFilter(value)}
+                  className={chipClass(modpackFilter === value)}
+                >
+                  {label}
+                  <span className="ml-1 text-[10px] opacity-70">{count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
         {serversLoading ? (
           <div className="text-white/70">Loading servers...</div>
-        ) : servers.length === 0 ? (
+        ) : totalServers === 0 ? (
           <div className="text-white/60 text-center py-8">
             No servers created yet. Create your first server above.
           </div>
+        ) : filteredServers.length === 0 ? (
+          <div className="text-white/60 text-center py-8">
+            No servers match the current filters.
+          </div>
         ) : (
           <div className="space-y-4">
-            {servers.map((server) => (
+            {filteredServers.map((server) => (
               <ServerListCard
                 key={server.id}
                 server={server}
@@ -2445,6 +2784,43 @@ function App() {
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+
+  const [themeMode, setThemeMode] = useState(() => {
+    if (typeof document !== 'undefined') {
+      const attr = document.documentElement.getAttribute('data-theme');
+      if (attr === 'light' || attr === 'dark') {
+        return attr;
+      }
+    }
+    if (typeof window !== 'undefined') {
+      const stored = window.localStorage.getItem(THEME_MODE_KEY);
+      if (stored === 'light' || stored === 'dark') {
+        return stored;
+      }
+    }
+    return 'dark';
+  });
+
+  const [colorblindMode, setColorblindMode] = useState(() => {
+    if (typeof document !== 'undefined') {
+      const attr = document.documentElement.getAttribute('data-colorblind');
+      if (attr === 'on') {
+        return true;
+      }
+    }
+    if (typeof window !== 'undefined') {
+      return window.localStorage.getItem(COLORBLIND_KEY) === 'on';
+    }
+    return false;
+  });
+
+  const toggleThemeMode = useCallback(() => {
+    setThemeMode((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  }, []);
+
+  const toggleColorblindMode = useCallback(() => {
+    setColorblindMode((prev) => !prev);
+  }, []);
   
   // Main navigation state
   const [currentPage, setCurrentPage] = useState('dashboard');
@@ -2465,6 +2841,31 @@ function App() {
     } catch (e) {}
     return () => { try { window.removeEventListener('resize', handleResize); } catch {} };
   }, []);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', themeMode);
+      if (document.body) {
+        document.body.setAttribute('data-theme', themeMode);
+      }
+    }
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(THEME_MODE_KEY, themeMode);
+    }
+  }, [themeMode]);
+
+  useEffect(() => {
+    const flag = colorblindMode ? 'on' : 'off';
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-colorblind', flag);
+      if (document.body) {
+        document.body.setAttribute('data-colorblind', flag);
+      }
+    }
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(COLORBLIND_KEY, flag);
+    }
+  }, [colorblindMode]);
 
   // Validate token and fetch current user
   useEffect(() => {
@@ -2567,6 +2968,9 @@ function App() {
 
   // Selected server for details view
   const [selectedServer, setSelectedServer] = useState(null);
+  const [serverDetailsTab, setServerDetailsTab] = useState('overview');
+  const [pendingPlayerFocus, setPendingPlayerFocus] = useState('');
+  const [pendingConfigFocus, setPendingConfigFocus] = useState('');
 
   // Only fetch loader versions for types that actually need it and only if a version is selected and valid
   useEffect(() => {
@@ -2642,6 +3046,45 @@ function App() {
 
   // Global data context (use once at top-level; reuse inside callbacks)
   const gd = useGlobalData();
+
+  const handleGlobalNavigate = useCallback((item) => {
+    if (!item) return;
+    const candidateList = (gd?.servers && gd.servers.length) ? gd.servers : servers;
+    let resolvedId = item.server_id || null;
+    if (!resolvedId && item.server_name) {
+      const byName = candidateList.find(entry => entry && entry.name === item.server_name);
+      if (byName && byName.id) {
+        resolvedId = byName.id;
+      }
+    }
+    if (!resolvedId && item.server_name) {
+      const byId = candidateList.find(entry => entry && entry.id === item.server_name);
+      if (byId && byId.id) {
+        resolvedId = byId.id;
+      }
+    }
+    if (!resolvedId) {
+      return;
+    }
+
+    if (item.type === 'server') {
+      setServerDetailsTab('overview');
+      setPendingPlayerFocus('');
+      setPendingConfigFocus('');
+    } else if (item.type === 'player') {
+      setServerDetailsTab('players');
+      setPendingPlayerFocus(item.name || item.player_name || '');
+      setPendingConfigFocus('');
+    } else if (item.type === 'config') {
+      setServerDetailsTab('files');
+      setPendingConfigFocus(item.path || '');
+      setPendingPlayerFocus('');
+    }
+
+    setSelectedServer(resolvedId);
+    setCurrentPage('servers');
+    if (isMobile) setSidebarOpen(false);
+  }, [gd, servers, isMobile]);
 
   // Create server handler, using loader_version as in backend/app.py - optimized with useCallback
   const createServer = useCallback(async function createServer(e) {
@@ -2775,16 +3218,32 @@ function App() {
         return selectedServer && selectedServerObj ? (
           <ServerDetailsPage
             server={selectedServerObj}
-            onBack={() => setSelectedServer(null)}
+            onBack={() => {
+              setSelectedServer(null);
+              setServerDetailsTab('overview');
+              setPendingPlayerFocus('');
+              setPendingConfigFocus('');
+            }}
             onStart={start}
             onStop={stop}
             onDelete={del}
             onRestart={restart}
+            initialTab={serverDetailsTab}
+            onTabChange={setServerDetailsTab}
+            playerFocus={pendingPlayerFocus}
+            onPlayerFocusConsumed={() => setPendingPlayerFocus('')}
+            configFocus={pendingConfigFocus}
+            onConfigFocusConsumed={() => setPendingConfigFocus('')}
           />
         ) : (
           <ServersPageWithGlobalData
             servers={servers}
-            onSelectServer={setSelectedServer}
+            onSelectServer={(id) => {
+              setServerDetailsTab('overview');
+              setPendingPlayerFocus('');
+              setPendingConfigFocus('');
+              setSelectedServer(id);
+            }}
             onCreateServer={createServer}
             types={types}
             versionsData={versionsData}
@@ -2805,6 +3264,14 @@ function App() {
             loaderVersionsData={loaderVersionsData}
             installerVersion={installerVersion}
             setInstallerVersion={setInstallerVersion}
+            onNavigate={(target) => {
+              if (!target) return;
+              setCurrentPage(target);
+              if (target !== 'servers') {
+                setSelectedServer(null);
+                setServerDetailsTab('overview');
+              }
+            }}
           />
         );
       case 'monitoring':
@@ -2993,11 +3460,12 @@ function App() {
         {/* Top Header */}
         {isAuthenticated && (
           <header className="border-b border-white/10 bg-ink/80 backdrop-blur supports-[backdrop-filter]:bg-ink/60">
-            <div className="px-6 flex items-center justify-between h-14">
+            <div className="px-4 md:px-6 flex items-center justify-between h-14 gap-3">
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setSidebarOpen(!sidebarOpen)}
                   className="p-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                  aria-label={sidebarOpen ? 'Collapse navigation' : 'Expand navigation'}
                 >
                   {sidebarOpen ? <FaBackward /> : <FaForward />}
                 </button>
@@ -3005,8 +3473,30 @@ function App() {
                   {sidebarItems.find(item => item.id === currentPage)?.label || 'Dashboard'}
                 </h1>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="text-sm text-white/70">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <GlobalSearchBar onNavigate={handleGlobalNavigate} className="w-40 sm:w-64 md:w-80" />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={toggleThemeMode}
+                    className="p-2 rounded-lg bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                    aria-label={themeMode === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                    title={themeMode === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                  >
+                    {themeMode === 'dark' ? <FaSun /> : <FaMoon />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleColorblindMode}
+                    className={`p-2 rounded-lg border transition-colors ${colorblindMode ? 'bg-brand-500/20 border-brand-500 text-white' : 'bg-white/5 border-white/10 text-white/70 hover:text-white hover:bg-white/10'}`}
+                    aria-pressed={colorblindMode}
+                    aria-label={colorblindMode ? 'Disable accessible palette' : 'Enable accessible palette'}
+                    title={colorblindMode ? 'Disable accessible palette' : 'Enable accessible palette'}
+                  >
+                    <FaUniversalAccess />
+                  </button>
+                </div>
+                <div className="hidden sm:block text-sm text-white/70">
                   Welcome back, {currentUser?.username || 'User'}
                 </div>
               </div>

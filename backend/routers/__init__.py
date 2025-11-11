@@ -18,6 +18,7 @@ from health_routes import router as health_router  # Health checks
 from modpack_routes import router as modpack_router  # Modpack providers/import
 from catalog_routes import router as catalog_router  # Catalog listings
 from integrations_routes import router as integrations_router  # External integrations
+from search_routes import router as search_router  # Global search endpoints
 
 # Use the new user management router under api/
 from api.user_routes import router as user_router  # Admin user/roles/permissions
@@ -34,4 +35,5 @@ __all__ = [
     "modpack_router",
     "catalog_router",
     "integrations_router",
+    "search_router",
 ]

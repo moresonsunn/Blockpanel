@@ -469,7 +469,7 @@ class TaskScheduler:
                 server_name=server_name,
                 status=status,
                 issues=issues,
-                metadata=metadata,
+                metadata_payload=metadata,
                 checked_at=datetime.utcnow(),
                 task_id=task.id
             )

@@ -216,6 +216,57 @@
 
 :root {
   color-scheme: dark;
+  --color-bg-primary: #0b1020;
+  --color-hero-gradient: radial-gradient(1200px 500px at 10% -10%, rgba(58, 134, 255, 0.25), rgba(0, 0, 0, 0)), radial-gradient(800px 400px at 90% -10%, rgba(99, 102, 241, 0.28), rgba(0, 0, 0, 0));
+  --color-text-primary-rgb: 248, 250, 252;
+  --color-text-primary: rgba(var(--color-text-primary-rgb), 1);
+  --color-text-secondary: rgba(var(--color-text-primary-rgb), 0.85);
+  --color-text-muted: rgba(var(--color-text-primary-rgb), 0.7);
+  --color-text-soft: rgba(var(--color-text-primary-rgb), 0.6);
+  --color-text-faded: rgba(var(--color-text-primary-rgb), 0.45);
+  --color-text-dim: rgba(var(--color-text-primary-rgb), 0.35);
+  --color-surface-faint: rgba(255, 255, 255, 0.03);
+  --color-surface-soft: rgba(255, 255, 255, 0.06);
+  --color-surface: rgba(255, 255, 255, 0.08);
+  --color-surface-strong: rgba(255, 255, 255, 0.12);
+  --color-surface-stronger: rgba(255, 255, 255, 0.18);
+  --color-surface-alt: rgba(9, 15, 32, 0.55);
+  --color-border-soft: rgba(255, 255, 255, 0.08);
+  --color-border-weak: rgba(255, 255, 255, 0.12);
+  --color-border-strong: rgba(255, 255, 255, 0.2);
+  --color-brand-400: #5ea9ff;
+  --color-brand-500: #3a86ff;
+  --color-brand-600: #2d67e6;
+  --color-brand-rgb: 58, 134, 255;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --color-bg-primary: #f8fafc;
+  --color-hero-gradient: radial-gradient(1100px 500px at 10% -10%, rgba(52, 152, 219, 0.16), rgba(255, 255, 255, 0)), radial-gradient(800px 420px at 85% -15%, rgba(120, 220, 150, 0.18), rgba(255, 255, 255, 0));
+  --color-text-primary-rgb: 15, 23, 42;
+  --color-text-primary: rgba(var(--color-text-primary-rgb), 1);
+  --color-text-secondary: rgba(var(--color-text-primary-rgb), 0.88);
+  --color-text-muted: rgba(var(--color-text-primary-rgb), 0.72);
+  --color-text-soft: rgba(var(--color-text-primary-rgb), 0.6);
+  --color-text-faded: rgba(var(--color-text-primary-rgb), 0.48);
+  --color-text-dim: rgba(var(--color-text-primary-rgb), 0.36);
+  --color-surface-faint: rgba(15, 23, 42, 0.04);
+  --color-surface-soft: rgba(15, 23, 42, 0.06);
+  --color-surface: rgba(15, 23, 42, 0.08);
+  --color-surface-strong: rgba(15, 23, 42, 0.12);
+  --color-surface-stronger: rgba(15, 23, 42, 0.16);
+  --color-surface-alt: rgba(148, 163, 184, 0.14);
+  --color-border-soft: rgba(15, 23, 42, 0.08);
+  --color-border-weak: rgba(15, 23, 42, 0.12);
+  --color-border-strong: rgba(15, 23, 42, 0.18);
+}
+
+[data-colorblind="on"] {
+  --color-brand-400: #fbbf4a;
+  --color-brand-500: #f97316;
+  --color-brand-600: #ea580c;
+  --color-brand-rgb: 249, 115, 22;
 }
 
 html, body, #root {
@@ -223,7 +274,126 @@ html, body, #root {
 }
 
 body {
-  @apply bg-ink text-white;
+  background-color: var(--color-bg-primary);
+  background-image: var(--color-hero-gradient);
+  color: var(--color-text-primary);
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+.bg-ink {
+  background-color: var(--color-bg-primary) !important;
+}
+
+.bg-hero-gradient {
+  background-image: var(--color-hero-gradient) !important;
+}
+
+.bg-black\/20 {
+  background-color: var(--color-surface-alt) !important;
+}
+
+.bg-white\/3 {
+  background-color: var(--color-surface-faint) !important;
+}
+
+.bg-white\/5 {
+  background-color: var(--color-surface) !important;
+}
+
+.bg-white\/6 {
+  background-color: var(--color-surface-soft) !important;
+}
+
+.bg-white\/10 {
+  background-color: var(--color-surface-strong) !important;
+}
+
+.bg-white\/20 {
+  background-color: var(--color-surface-stronger) !important;
+}
+
+.border-white\/6 {
+  border-color: var(--color-border-soft) !important;
+}
+
+.border-white\/10 {
+  border-color: var(--color-border-weak) !important;
+}
+
+.border-white\/20 {
+  border-color: var(--color-border-strong) !important;
+}
+
+.text-white {
+  color: var(--color-text-primary) !important;
+}
+
+.text-white\/90 {
+  color: rgba(var(--color-text-primary-rgb), 0.9) !important;
+}
+
+.text-white\/80 {
+  color: rgba(var(--color-text-primary-rgb), 0.8) !important;
+}
+
+.text-white\/70 {
+  color: rgba(var(--color-text-primary-rgb), 0.7) !important;
+}
+
+.text-white\/60 {
+  color: rgba(var(--color-text-primary-rgb), 0.6) !important;
+}
+
+.text-white\/50 {
+  color: rgba(var(--color-text-primary-rgb), 0.5) !important;
+}
+
+.text-white\/40 {
+  color: rgba(var(--color-text-primary-rgb), 0.4) !important;
+}
+
+.text-white\/30 {
+  color: rgba(var(--color-text-primary-rgb), 0.3) !important;
+}
+
+.text-white\/20 {
+  color: rgba(var(--color-text-primary-rgb), 0.2) !important;
+}
+
+.bg-brand-500 {
+  background-color: var(--color-brand-500) !important;
+}
+
+.bg-brand-600 {
+  background-color: var(--color-brand-600) !important;
+}
+
+.bg-brand-500\/90 {
+  background-color: rgba(var(--color-brand-rgb), 0.9) !important;
+}
+
+.bg-brand-500\/20 {
+  background-color: rgba(var(--color-brand-rgb), 0.2) !important;
+}
+
+.bg-brand-500\/15 {
+  background-color: rgba(var(--color-brand-rgb), 0.15) !important;
+}
+
+.bg-brand-500\/10 {
+  background-color: rgba(var(--color-brand-rgb), 0.1) !important;
+}
+
+.text-brand-400 {
+  color: var(--color-brand-400) !important;
+}
+
+.text-brand-500 {
+  color: var(--color-brand-500) !important;
+}
+
+.ring-brand-500\/20 {
+  --tw-ring-color: rgba(var(--color-brand-rgb), 0.2) !important;
 }
 
 .container {
@@ -232,24 +402,24 @@ body {
 
 /* Fix for select/option visibility issues */
 select {
-  background-color: #1f2937 !important;
-  color: #ffffff !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  background-color: var(--color-surface) !important;
+  color: var(--color-text-primary) !important;
+  border: 1px solid var(--color-border-weak) !important;
 }
 
 select option {
-  background-color: #1f2937 !important;
-  color: #ffffff !important;
+  background-color: var(--color-bg-primary) !important;
+  color: var(--color-text-primary) !important;
   border: none !important;
 }
 
 /* Ensure options are visible in different browsers */
 select option:checked {
-  background-color: #3a86ff !important;
+  background-color: var(--color-brand-500) !important;
   color: #ffffff !important;
 }
 
 select option:hover {
-  background-color: #374151 !important;
-  color: #ffffff !important;
+  background-color: var(--color-surface-strong) !important;
+  color: var(--color-text-primary) !important;
 }

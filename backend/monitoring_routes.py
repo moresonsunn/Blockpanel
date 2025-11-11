@@ -324,7 +324,7 @@ async def list_integrity_reports(
             for item in issue_entries
         ]
 
-        metadata_obj = _coerce_metadata(getattr(report, "metadata", None))
+        metadata_obj = _coerce_metadata(getattr(report, "metadata_payload", None))
 
         response_reports.append(
             IntegrityReportItem(

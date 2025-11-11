@@ -126,7 +126,7 @@ class IntegrityReport(Base):
     server_name = Column(String, nullable=True)
     status = Column(String, nullable=False)
     issues = Column(JSON, default=list)
-    metadata = Column(JSON, nullable=True)
+    metadata_payload = Column("metadata", JSON, nullable=True)
     metric_value = Column(Float, nullable=True)
     threshold = Column(Float, nullable=True)
     checked_at = Column(DateTime, default=datetime.utcnow)

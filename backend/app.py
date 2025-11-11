@@ -42,6 +42,7 @@ from routers import (
     modpack_router,
     catalog_router,
     integrations_router,
+    search_router,
 )
 from repair_routes import router as repair_router
 from probe_routes import router as probe_router
@@ -161,6 +162,7 @@ app.include_router(health_router)
 app.include_router(modpack_router)
 app.include_router(catalog_router)
 app.include_router(integrations_router)
+app.include_router(search_router)
 app.include_router(server_types_router)
 app.include_router(repair_router)
 app.include_router(probe_router)
@@ -179,6 +181,7 @@ for _router in [
     modpack_router,
     catalog_router,
     integrations_router,
+    search_router,
     server_types_router,
     repair_router,
     probe_router,

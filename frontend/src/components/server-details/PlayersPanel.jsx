@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { API } from '../../lib/api';
 /* eslint-disable */
-export default function PlayersPanel({ serverId, serverName }) {
+export default function PlayersPanel({ serverId, serverName, focusPlayer = '', onFocusConsumed }) {
   // Defensive: normalize serverName to avoid ReferenceError if caller omits prop
   const sName = serverName || '';
   const [online, setOnline] = useState([]);
@@ -14,6 +14,8 @@ export default function PlayersPanel({ serverId, serverName }) {
     try { return localStorage.getItem('rcon_hint_dismissed') === '1'; } catch { return false; }
   });
   const avatarCache = useRef({});
+  const highlightRefs = useRef({});
+  const [highlightedPlayer, setHighlightedPlayer] = useState('');
 
   async function fetchRoster() {
     try {
@@ -119,6 +121,33 @@ export default function PlayersPanel({ serverId, serverName }) {
     } catch (e) { console.error(e); }
   }
 
+  useEffect(() => {
+    highlightRefs.current = {};
+  }, [online, offline]);
+
+  useEffect(() => {
+    if (!focusPlayer) return;
+    const key = focusPlayer.toString().toLowerCase();
+    if (!key) return;
+    setHighlightedPlayer(key);
+    const focusTick = setTimeout(() => {
+      const node = highlightRefs.current[key];
+      if (node && node.scrollIntoView) {
+        try { node.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+      }
+      if (typeof onFocusConsumed === 'function') {
+        onFocusConsumed();
+      }
+    }, 120);
+    const clearTick = setTimeout(() => {
+      setHighlightedPlayer('');
+    }, 2400);
+    return () => {
+      clearTimeout(focusTick);
+      clearTimeout(clearTick);
+    };
+  }, [focusPlayer, online, offline, onFocusConsumed]);
+
   return (
     <div className="p-4 bg-black/20 rounded-lg space-y-4" style={{ minHeight: 300 }}>
       <div className="flex items-center justify-between">
@@ -132,28 +161,36 @@ export default function PlayersPanel({ serverId, serverName }) {
 
         {online.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {online.map(p => (
-              <div key={p} className="bg-white/5 border border-white/10 rounded p-3 flex items-center justify-between hover:shadow-lg transition">
-                <div className="flex items-center gap-3">
-                  {avatarCache.current[p] ? (
-                    <img src={avatarCache.current[p]} alt={p} className="w-12 h-12 rounded-full" />
-                  ) : (
-                    <div className="w-12 h-12 rounded-full bg-brand-600 flex items-center justify-center text-base font-semibold text-white">{p.slice(0,1).toUpperCase()}</div>
-                  )}
-                  <div>
-                    <div className="text-sm text-white font-semibold">{p}</div>
-                    <div className="text-xs text-white/60">{serverName}</div>
+            {online.map((p) => {
+              const key = p.toLowerCase();
+              const isHighlighted = highlightedPlayer && highlightedPlayer === key;
+              return (
+                <div
+                  key={p}
+                  ref={(el) => { if (el) highlightRefs.current[key] = el; }}
+                  className={`bg-white/5 border border-white/10 rounded p-3 flex items-center justify-between hover:shadow-lg transition ${isHighlighted ? 'ring-2 ring-brand-500/60 animate-pulse-glow' : ''}`}
+                >
+                  <div className="flex items-center gap-3">
+                    {avatarCache.current[p] ? (
+                      <img src={avatarCache.current[p]} alt={p} className="w-12 h-12 rounded-full" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-brand-600 flex items-center justify-center text-base font-semibold text-white">{p.slice(0,1).toUpperCase()}</div>
+                    )}
+                    <div>
+                      <div className="text-sm text-white font-semibold">{p}</div>
+                      <div className="text-xs text-white/60">{serverName}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button title="Message" onClick={() => sendTell(p)} className="px-2 py-1 bg-white/5 rounded text-xs text-sky-300 hover:bg-white/10">Message</button>
+                    <button title="De-OP" onClick={() => deop(p)} className="px-2 py-1 bg-white/5 rounded text-xs text-orange-300 hover:bg-white/10">DEOP</button>
+                    <button title="OP" onClick={() => postAction('op', p)} className="px-2 py-1 bg-white/5 rounded text-xs text-green-300 hover:bg-white/10">OP</button>
+                    <button title="Kick" onClick={() => postAction('kick', p)} className="px-2 py-1 bg-yellow-800 rounded text-xs text-yellow-100 hover:bg-yellow-700">Kick</button>
+                    <button title="Ban" onClick={() => postAction('ban', p)} className="px-2 py-1 bg-red-800 rounded text-xs text-red-100 hover:bg-red-700">Ban</button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button title="Message" onClick={() => sendTell(p)} className="px-2 py-1 bg-white/5 rounded text-xs text-sky-300 hover:bg-white/10">Message</button>
-                  <button title="De-OP" onClick={() => deop(p)} className="px-2 py-1 bg-white/5 rounded text-xs text-orange-300 hover:bg-white/10">DEOP</button>
-                  <button title="OP" onClick={() => postAction('op', p)} className="px-2 py-1 bg-white/5 rounded text-xs text-green-300 hover:bg-white/10">OP</button>
-                  <button title="Kick" onClick={() => postAction('kick', p)} className="px-2 py-1 bg-yellow-800 rounded text-xs text-yellow-100 hover:bg-yellow-700">Kick</button>
-                  <button title="Ban" onClick={() => postAction('ban', p)} className="px-2 py-1 bg-red-800 rounded text-xs text-red-100 hover:bg-red-700">Ban</button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-xs text-white/50">No players online.</div>
@@ -164,22 +201,30 @@ export default function PlayersPanel({ serverId, serverName }) {
         <div className="text-xs text-white/60 mb-2">Offline Players {offline.length ? `(${offline.length})` : ''}</div>
         {offline.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {offline.map(o => (
-              <div key={o.name} className="bg-white/3 border border-white/6 rounded p-3 flex items-center justify-between opacity-90">
-                <div className="flex items-center gap-3">
-                  {avatarCache.current[o.name] ? (
-                    <img src={avatarCache.current[o.name]} alt={o.name} className="w-10 h-10 rounded-full" />
-                  ) : (
-                    <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-sm font-semibold text-white">{o.name.slice(0,1).toUpperCase()}</div>
-                  )}
-                  <div>
-                    <div className="text-sm text-white">{o.name}</div>
-                    <div className="text-xs text-white/50">{o.last_seen ? new Date(o.last_seen * 1000).toLocaleString() : 'seen recently'}</div>
+            {offline.map((o) => {
+              const key = o.name.toLowerCase();
+              const isHighlighted = highlightedPlayer && highlightedPlayer === key;
+              return (
+                <div
+                  key={o.name}
+                  ref={(el) => { if (el) highlightRefs.current[key] = el; }}
+                  className={`bg-white/3 border border-white/6 rounded p-3 flex items-center justify-between opacity-90 ${isHighlighted ? 'ring-2 ring-brand-500/60 animate-pulse-glow' : ''}`}
+                >
+                  <div className="flex items-center gap-3">
+                    {avatarCache.current[o.name] ? (
+                      <img src={avatarCache.current[o.name]} alt={o.name} className="w-10 h-10 rounded-full" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-sm font-semibold text-white">{o.name.slice(0,1).toUpperCase()}</div>
+                    )}
+                    <div>
+                      <div className="text-sm text-white">{o.name}</div>
+                      <div className="text-xs text-white/50">{o.last_seen ? new Date(o.last_seen * 1000).toLocaleString() : 'seen recently'}</div>
+                    </div>
                   </div>
+                  <div className="text-xs text-white/40">offline</div>
                 </div>
-                <div className="text-xs text-white/40">offline</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-xs text-white/50">No known offline players yet.</div>
