@@ -1047,12 +1047,14 @@ def get_server_config_bundle(name: str, container_id: str | None = Query(None)):
     java = None
     try:
         if container_id:
-            dm = get_docker_manager()
-            info = dm.get_server_info(container_id)
+            rm = get_runtime_manager_or_docker()
+            info = rm.get_server_info(container_id)
             java_version = info.get("java_version", "unknown")
+            java_args = info.get("java_args") or ""
             java = {
                 "current_version": java_version,
-                "available_versions": ["8", "11", "17", "21"]
+                "available_versions": ["8", "11", "17", "21"],
+                "custom_args": java_args,
             }
     except Exception:
         java = None
@@ -1094,6 +1096,48 @@ def set_server_java_version(container_id: str, request: dict = Body(...)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update Java version: {e}")
+
+@app.get("/servers/{container_id}/java-args")
+@app.get("/api/servers/{container_id}/java-args")
+def get_server_java_args(container_id: str):
+    try:
+        rm = get_runtime_manager_or_docker()
+        info = rm.get_server_info(container_id)
+        return {"java_args": info.get("java_args") or ""}
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Java arguments info unavailable: {e}")
+
+@app.post("/servers/{container_id}/java-args")
+@app.post("/api/servers/{container_id}/java-args")
+def set_server_java_args(container_id: str, request: dict = Body(...)):
+    raw_args = request.get("java_args") if isinstance(request, dict) else ""
+    if raw_args is None:
+        raw_args = ""
+    if not isinstance(raw_args, str):
+        raise HTTPException(status_code=400, detail="java_args must be a string")
+    if len(raw_args) > 8192:
+        raise HTTPException(status_code=400, detail="java_args too long (max 8192 characters)")
+
+    try:
+        rm = get_runtime_manager_or_docker()
+        updater = getattr(rm, "update_server_java_args", None)
+        if not callable(updater):
+            raise HTTPException(status_code=500, detail="Runtime does not support custom Java arguments")
+
+        result = updater(container_id, raw_args)
+        if isinstance(result, dict) and result.get("success") is False:
+            raise HTTPException(status_code=500, detail=result.get("error") or "Failed to update Java arguments")
+
+        saved = ""
+        if isinstance(result, dict):
+            saved = result.get("java_args") or ""
+        if not saved:
+            saved = " ".join(raw_args.replace("\r", " ").split()).strip()
+        return {"success": True, "java_args": saved, "result": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update Java arguments: {e}")
 
 @app.get("/servers/{container_id}/java-versions")
 @app.get("/api/servers/{container_id}/java-versions")

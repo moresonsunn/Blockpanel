@@ -318,6 +318,16 @@ class LocalAdapter:
         minecraft_version = meta.get("minecraft_version") or meta.get("game_version")
         loader_version = meta.get("loader_version")
 
+        java_args = ""
+        try:
+            env_overrides = meta.get("env_overrides")
+            if isinstance(env_overrides, dict):
+                val = env_overrides.get("JAVA_OPTS") or env_overrides.get("JAVA_ARGS")
+                if isinstance(val, str):
+                    java_args = val
+        except Exception:
+            java_args = ""
+
         info = {
             "id": container_id,
             "name": container_id,
@@ -332,6 +342,7 @@ class LocalAdapter:
             "ports": {f"{MINECRAFT_PORT}/tcp": None},
             "port_mappings": {f"{MINECRAFT_PORT}/tcp": {"host_port": host_port, "host_ip": None}},
             "exists": exists,
+            "java_args": java_args,
         }
         return info
 
@@ -382,6 +393,54 @@ class LocalAdapter:
                 "message": f"Java version updated to {java_version} and server restarted",
                 "java_version": java_version,
                 "java_bin": java_bin,
+                "restarted": True,
+                "result": result,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e), "id": container_id}
+
+    def update_server_java_args(self, container_id: str, java_args: str) -> Dict:
+        """Persist custom Java arguments (JAVA_OPTS) for local runtime and restart the server."""
+        try:
+            normalized = " ".join((java_args or "").replace("\r", " ").split())
+            if len(normalized) > 4096:
+                raise ValueError("java_args too long (max 4096 characters when normalized)")
+
+            meta_path = (SERVERS_ROOT / container_id / "server_meta.json")
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8") or "{}") if meta_path.exists() else {}
+            except Exception:
+                meta = {}
+
+            stored_overrides = meta.get("env_overrides") or {}
+            if not isinstance(stored_overrides, dict):
+                stored_overrides = {}
+            merged = {str(k): str(v) for k, v in stored_overrides.items() if v is not None}
+            if normalized:
+                merged["JAVA_OPTS"] = normalized
+            else:
+                merged.pop("JAVA_OPTS", None)
+
+            try:
+                self.local.update_metadata(container_id, env_overrides=merged)
+            except Exception:
+                pass
+
+            try:
+                self.local.stop_server(container_id)
+            except Exception:
+                pass
+
+            result = self.local.create_server_from_existing(
+                container_id,
+                min_ram=None,
+                max_ram=None,
+                extra_env=merged or None,
+            )
+
+            return {
+                "success": True,
+                "java_args": normalized,
                 "restarted": True,
                 "result": result,
             }

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, JSON, Float
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime
@@ -100,6 +100,7 @@ class ScheduledTask(Base):
     # Foreign key to user
     created_by = Column(Integer, ForeignKey("users.id"))
     created_by_user = relationship("User", back_populates="scheduled_tasks")
+    integrity_reports = relationship("IntegrityReport", back_populates="task", cascade="all, delete-orphan")
 
 ## Legacy note: ServerTemplate model removed as curated templates feature was dropped.
 ## Existing databases will be cleaned up by init_db() dropping the legacy table if present.
@@ -117,6 +118,22 @@ class BackupTask(Base):
     
     # Auto-cleanup based on retention
     is_auto_created = Column(Boolean, default=False)
+
+class IntegrityReport(Base):
+    __tablename__ = "integrity_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    server_name = Column(String, nullable=True)
+    status = Column(String, nullable=False)
+    issues = Column(JSON, default=list)
+    metadata = Column(JSON, nullable=True)
+    metric_value = Column(Float, nullable=True)
+    threshold = Column(Float, nullable=True)
+    checked_at = Column(DateTime, default=datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+    task_id = Column(Integer, ForeignKey("scheduled_tasks.id"), nullable=True)
+
+    task = relationship("ScheduledTask", back_populates="integrity_reports")
 
 class ServerPerformance(Base):
     __tablename__ = "server_performance"

@@ -30,6 +30,10 @@ export default function ConfigPanel({ server, onRestart }) {
     simulation_distance: ''
   });
   const baselinePropsRef = useRef('');
+  const [javaArgs, setJavaArgs] = useState('');
+  const [javaArgsSaving, setJavaArgsSaving] = useState(false);
+  const [javaArgsError, setJavaArgsError] = useState('');
+  const javaArgsBaselineRef = useRef('');
 
   // EULA state
   const [eulaLoading, setEulaLoading] = useState(false);
@@ -86,6 +90,10 @@ export default function ConfigPanel({ server, onRestart }) {
         baselinePropsRef.current = cached.propsText || '';
         if (cached.javaVersions) setJavaVersions(cached.javaVersions);
         if (cached.currentVersion) setCurrentVersion(cached.currentVersion);
+        if (typeof cached.javaArgs === 'string') {
+          setJavaArgs(cached.javaArgs);
+          javaArgsBaselineRef.current = cached.javaArgs;
+        }
         if (staleOnly) return; // no network fetch
       }
 
@@ -124,11 +132,20 @@ export default function ConfigPanel({ server, onRestart }) {
                 ));
                 setJavaVersions(normalizedJ);
                 setCurrentVersion(d.java.current_version || null);
+                if (typeof d.java.custom_args === 'string') {
+                  setJavaArgs(d.java.custom_args);
+                  javaArgsBaselineRef.current = d.java.custom_args;
+                }
               }
               // Rebuild baseline text from map minimally (best-effort)
               const text = Object.entries(map).map(([k, v]) => `${k}=${v}`).join('\n');
               baselinePropsRef.current = text;
-              return { propsData: pd, propsText: text, eulaAccepted: !!d.eula_accepted };
+              return {
+                propsData: pd,
+                propsText: text,
+                eulaAccepted: !!d.eula_accepted,
+                javaArgs: typeof d?.java?.custom_args === 'string' ? d.java.custom_args : undefined,
+              };
             }
             return null;
           })
@@ -192,7 +209,18 @@ export default function ConfigPanel({ server, onRestart }) {
           })
           .catch((e) => { /* ignore abort/other here */ return null; });
 
-        const results = await Promise.all([propsP, eulaP, javaP]);
+        const javaArgsP = withTimeout(fetch(`${API}/servers/${server.id}/java-args`, { signal: abort.signal }), 8000, abort)
+          .then(async (r) => {
+            if (!r.ok) return null;
+            const data = await r.json();
+            const val = typeof data?.java_args === 'string' ? data.java_args : '';
+            setJavaArgs(val);
+            javaArgsBaselineRef.current = val;
+            return { javaArgs: val };
+          })
+          .catch(() => null);
+
+        const results = await Promise.all([propsP, eulaP, javaP, javaArgsP]);
         const merged = Object.assign({}, ...results.filter(Boolean));
         CONFIG_CACHE[server.name] = { ts: Date.now(), ...(CONFIG_CACHE[server.name] || {}), ...merged };
       } finally {
@@ -294,6 +322,36 @@ export default function ConfigPanel({ server, onRestart }) {
     await updateJavaVersion(selectedJava);
   }
 
+  async function saveJavaArgs() {
+    setJavaArgsSaving(true);
+    setJavaArgsError('');
+    try {
+      const response = await fetch(`${API}/servers/${server.id}/java-args`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ java_args: javaArgs })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.detail || `HTTP ${response.status}`);
+      }
+      const saved = typeof data?.java_args === 'string' ? data.java_args : '';
+      setJavaArgs(saved);
+      javaArgsBaselineRef.current = saved;
+      CONFIG_CACHE[server.name] = { ts: Date.now(), ...(CONFIG_CACHE[server.name] || {}), javaArgs: saved };
+      alert('Custom Java arguments updated. Restart the server to apply changes.');
+    } catch (e) {
+      setJavaArgsError(String(e));
+    } finally {
+      setJavaArgsSaving(false);
+    }
+  }
+
+  function resetJavaArgs() {
+    setJavaArgs(javaArgsBaselineRef.current || '');
+    setJavaArgsError('');
+  }
+
   if (loading) return (<div className="p-4 bg-black/20 rounded-lg"><div className="text-sm text-white/70">Loading Java version information...</div></div>);
   if (error) return (<div className="p-4 bg-black/20 rounded-lg"><div className="text-sm text-red-400">Error: {error}</div></div>);
 
@@ -347,6 +405,40 @@ export default function ConfigPanel({ server, onRestart }) {
                 )}
               </div>
             )}
+          </div>
+
+          <div className="mb-4 p-3 bg-white/5 border border-white/10 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <div className="text-sm text-white/70">Custom Java Arguments (JAVA_OPTS)</div>
+                <div className="text-xs text-white/50">Advanced JVM flags applied when the server starts.</div>
+              </div>
+              <button
+                type="button"
+                onClick={resetJavaArgs}
+                disabled={javaArgsSaving || javaArgs === (javaArgsBaselineRef.current || '')}
+                className={`px-3 py-1 text-xs rounded ${javaArgsSaving || javaArgs === (javaArgsBaselineRef.current || '') ? 'bg-white/5 text-white/40 cursor-not-allowed' : 'bg-white/10 hover:bg-white/20 text-white/80'}`}
+              >Reset</button>
+            </div>
+            <textarea
+              value={javaArgs}
+              onChange={(e) => { setJavaArgs(e.target.value); setJavaArgsError(''); }}
+              className="w-full rounded bg-black/40 border border-white/10 px-3 py-2 text-white text-sm font-mono min-h-[88px]"
+              placeholder="Example: -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC"
+            />
+            {javaArgsError && <div className="text-xs text-red-400 mt-2">{javaArgsError}</div>}
+            <div className="flex items-center justify-between mt-3">
+              <div className="text-xs text-white/40">Leave empty to use BlockPanel defaults. Arguments are normalized to a single line.</div>
+              <button
+                type="button"
+                onClick={saveJavaArgs}
+                disabled={javaArgsSaving || javaArgs === (javaArgsBaselineRef.current || '')}
+                className={`px-3 py-1.5 text-xs rounded ${javaArgsSaving || javaArgs === (javaArgsBaselineRef.current || '') ? 'bg-brand-500/30 text-white/40 cursor-not-allowed' : 'bg-brand-500 hover:bg-brand-400 text-white'} flex items-center gap-2`}
+              >
+                {javaArgsSaving && <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                Save Arguments
+              </button>
+            </div>
           </div>
 
           {/* EULA Section (left) */}

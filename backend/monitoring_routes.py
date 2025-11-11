@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, cast
 from datetime import datetime, timedelta
 
 from database import get_db
-from models import User, ServerPerformance
+from models import User, ServerPerformance, IntegrityReport
 from auth import require_auth, require_admin, require_moderator, get_user_permissions, verify_token, get_user_by_username
 from runtime_adapter import get_runtime_manager_or_docker
 from fastapi.responses import StreamingResponse
@@ -44,6 +44,38 @@ class AlertRule(BaseModel):
     is_active: bool
     created_at: Optional[datetime]
 
+
+class IntegrityIssue(BaseModel):
+    code: Optional[str]
+    message: Optional[str]
+    path: Optional[str]
+    details: Optional[Dict[str, Any]]
+
+
+class IntegrityReportItem(BaseModel):
+    id: int
+    server_name: Optional[str]
+    status: str
+    issues: List[IntegrityIssue]
+    issue_count: int
+    metadata: Optional[Dict[str, Any]]
+    metric_value: Optional[float]
+    threshold: Optional[float]
+    checked_at: datetime
+    task_id: Optional[int]
+    task_name: Optional[str]
+
+
+class IntegrityReportSummary(BaseModel):
+    total: int
+    by_status: Dict[str, int]
+    server_status: Dict[str, str]
+
+
+class IntegrityReportList(BaseModel):
+    reports: List[IntegrityReportItem]
+    summary: IntegrityReportSummary
+
 _manager_cache = None
 
 
@@ -52,6 +84,36 @@ def get_docker_manager():
     if _manager_cache is None:
         _manager_cache = get_runtime_manager_or_docker()
     return _manager_cache
+
+
+def _coerce_issue_entries(raw: Any) -> List[Dict[str, Any]]:
+    if isinstance(raw, list):
+        return [item for item in raw if isinstance(item, dict)]
+    if isinstance(raw, dict):
+        return [raw]
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return [item for item in parsed if isinstance(item, dict)]
+            if isinstance(parsed, dict):
+                return [parsed]
+        except Exception:
+            return []
+    return []
+
+
+def _coerce_metadata(raw: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return None
+    return None
 
 @router.get("/system-health", response_model=SystemHealth)
 async def get_system_health(
@@ -74,7 +136,10 @@ async def get_system_health(
         
         for server in servers:
             try:
-                stats = docker_manager.get_server_stats(server.get("id"))
+                container_id = cast(Optional[str], server.get("id"))
+                if not container_id:
+                    continue
+                stats = docker_manager.get_server_stats(container_id)
                 if stats and "memory_limit_mb" in stats and "memory_usage_mb" in stats:
                     total_memory_gb += stats["memory_limit_mb"] / 1024.0
                     used_memory_gb += stats["memory_usage_mb"] / 1024.0
@@ -207,6 +272,87 @@ async def get_alerts(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/integrity-reports", response_model=IntegrityReportList)
+async def list_integrity_reports(
+    current_user: User = Depends(require_auth),
+    db: Session = Depends(get_db),
+    server_name: Optional[str] = Query(None, description="Filter by server name"),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status (ok|warning|error)"),
+    limit: int = Query(10, ge=1, le=200),
+    offset: int = Query(0, ge=0)
+):
+    """Return recent integrity reports with lightweight summary metadata."""
+
+    base_query = db.query(IntegrityReport)
+    if server_name:
+        base_query = base_query.filter(IntegrityReport.server_name == server_name)
+
+    if status_filter:
+        base_query = base_query.filter(IntegrityReport.status == status_filter.lower())
+
+    total = base_query.count()
+
+    reports_db = (
+        base_query
+        .options(joinedload(IntegrityReport.task))
+        .order_by(IntegrityReport.checked_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    by_status: Dict[str, int] = {}
+    server_status: Dict[str, str] = {}
+    response_reports: List[IntegrityReportItem] = []
+
+    for report in reports_db:
+        status_value = str(getattr(report, "status", "") or "").lower() or "unknown"
+        by_status[status_value] = by_status.get(status_value, 0) + 1
+
+        server_name_val = cast(Optional[str], getattr(report, "server_name", None))
+        if server_name_val and server_name_val not in server_status:
+            server_status[server_name_val] = status_value
+
+        issue_entries = _coerce_issue_entries(getattr(report, "issues", []))
+        issues_serialized = [
+            IntegrityIssue(
+                code=item.get("code"),
+                message=item.get("message"),
+                path=item.get("path"),
+                details=item.get("details") if isinstance(item.get("details"), dict) else None
+            )
+            for item in issue_entries
+        ]
+
+        metadata_obj = _coerce_metadata(getattr(report, "metadata", None))
+
+        response_reports.append(
+            IntegrityReportItem(
+                id=cast(int, getattr(report, "id")),
+                server_name=server_name_val,
+                status=status_value,
+                issues=issues_serialized,
+                issue_count=len(issues_serialized),
+                metadata=metadata_obj,
+                metric_value=cast(Optional[float], getattr(report, "metric_value", None)),
+                threshold=cast(Optional[float], getattr(report, "threshold", None)),
+                checked_at=cast(datetime, getattr(report, "checked_at")),
+                task_id=cast(Optional[int], getattr(report, "task_id", None)),
+                task_name=cast(Optional[str], getattr(getattr(report, "task", None), "name", None))
+            )
+        )
+
+    for key in ("ok", "warning", "error"):
+        by_status.setdefault(key, 0)
+
+    summary = IntegrityReportSummary(
+        total=total,
+        by_status=by_status,
+        server_status=server_status
+    )
+
+    return IntegrityReportList(reports=response_reports, summary=summary)
+
 @router.get("/servers/{server_name}/metrics", response_model=List[ServerMetrics])
 async def get_server_metrics(
     server_name: str,
@@ -277,208 +423,56 @@ async def get_current_server_stats(
     server_name: str,
     current_user: User = Depends(require_auth)
 ):
-    """Get real-time stats for a server."""
+    """Return the latest known stats for a server."""
     try:
         docker_manager = get_docker_manager()
         servers = docker_manager.list_servers()
-        
-        # Find the server
-        target_server = None
-        for server in servers:
-            if server.get("name") == server_name:
-                target_server = server
-                break
-        
+
+        target_server = next((s for s in servers if s.get("name") == server_name), None)
         if not target_server:
             raise HTTPException(status_code=404, detail="Server not found")
-        
-        container_id = target_server.get("id")
-        async def event_generator():
-            """Simple SSE generator: streams container resource stats if `container_id` is set,
-            otherwise streams a light system summary (server list + counts).
-            This avoids complex logic in the generator and prevents use of undefined
-            local variables that previously caused indentation/syntax errors.
-            """
-            try:
-                while True:
-                    if await request.is_disconnected():
-                        break
-                    payload = {}
-                    if container_id:
-                        try:
-                            stats = dm.get_server_stats(container_id)
-                            payload = {"type": "resources", "container_id": container_id, "data": stats}
-                        except Exception as e:
-                            payload = {"type": "error", "message": f"Stats unavailable: {e}"}
-                    else:
-                        try:
-                            servers = dm.list_servers()
-                            total = len(servers)
-                            running = len([s for s in servers if s.get("status") == "running"])
-                            payload = {"type": "system", "total_servers": total, "running_servers": running, "servers": servers}
-                        except Exception as e:
-                            payload = {"type": "error", "message": f"Server list unavailable: {e}"}
 
-                    # SSE format: data: <json>\n\n
-                    yield f"data: {json.dumps(payload, default=str)}\n\n"
-                    await asyncio.sleep(2)
-            except asyncio.CancelledError:
-                return
-            except Exception:
-                return
-            
-            # Get server stats for running servers
+        container_id = cast(Optional[str], target_server.get("id"))
+        stats: Dict[str, Any] = {}
+        if container_id:
             try:
-                if container_id:
-                    stats = docker_manager.get_server_stats(container_id)
-                    
-                    # High CPU usage alert
-                    cpu_percent = stats.get("cpu_percent", 0)
-                    if cpu_percent > 80:
-                        alerts.append({
-                            "id": alert_id,
-                            "type": "warning",
-                            "severity": "medium",
-                            "message": f"High CPU usage on server '{server_name}' ({cpu_percent:.1f}%)",
-                            "timestamp": datetime.utcnow() - timedelta(minutes=2),
-                            "acknowledged": False,
-                            "server_name": server_name,
-                            "category": "performance",
-                            "metric_value": cpu_percent,
-                            "threshold": 80
-                        })
-                        alert_id += 1
-                    
-                    # High memory usage alert
-                    memory_percent = stats.get("memory_percent", 0)
-                    if memory_percent > 90:
-                        alerts.append({
-                            "id": alert_id,
-                            "type": "critical",
-                            "severity": "high",
-                            "message": f"Critical memory usage on server '{server_name}' ({memory_percent:.1f}%)",
-                            "timestamp": datetime.utcnow() - timedelta(minutes=1),
-                            "acknowledged": False,
-                            "server_name": server_name,
-                            "category": "performance",
-                            "metric_value": memory_percent,
-                            "threshold": 90
-                        })
-                        alert_id += 1
-                    elif memory_percent > 75:
-                        alerts.append({
-                            "id": alert_id,
-                            "type": "warning",
-                            "severity": "medium",
-                            "message": f"High memory usage on server '{server_name}' ({memory_percent:.1f}%)",
-                            "timestamp": datetime.utcnow() - timedelta(minutes=3),
-                            "acknowledged": False,
-                            "server_name": server_name,
-                            "category": "performance",
-                            "metric_value": memory_percent,
-                            "threshold": 75
-                        })
-                        alert_id += 1
-                    
-                    # Low disk space warning (if available)
-                    disk_usage = stats.get("disk_usage_percent")
-                    if disk_usage and disk_usage > 85:
-                        alerts.append({
-                            "id": alert_id,
-                            "type": "warning",
-                            "severity": "medium",
-                            "message": f"Low disk space on server '{server_name}' ({disk_usage:.1f}% used)",
-                            "timestamp": datetime.utcnow() - timedelta(minutes=10),
-                            "acknowledged": False,
-                            "server_name": server_name,
-                            "category": "storage",
-                            "metric_value": disk_usage,
-                            "threshold": 85
-                        })
-                        alert_id += 1
-            
-            except Exception as e:
-                # Server stats unavailable alert
-                alerts.append({
-                    "id": alert_id,
-                    "type": "warning",
-                    "severity": "medium",
-                    "message": f"Unable to retrieve stats for server '{server_name}': {str(e)[:100]}",
-                    "timestamp": datetime.utcnow() - timedelta(minutes=5),
-                    "acknowledged": False,
-                    "server_name": server_name,
-                    "category": "monitoring"
-                })
-                alert_id += 1
-        
-        # System-wide alerts
-        total_servers = len(servers)
-        running_servers = len([s for s in servers if s.get("status") == "running"])
-        
-        if total_servers > 0 and running_servers / total_servers < 0.5:
-            alerts.append({
-                "id": alert_id,
-                "type": "critical",
-                "severity": "high",
-                "message": f"More than half of servers are down ({running_servers}/{total_servers} running)",
-                "timestamp": datetime.utcnow() - timedelta(minutes=1),
-                "acknowledged": False,
-                "server_name": None,
-                "category": "system"
-            })
-            alert_id += 1
-        
-        # Add some positive alerts for healthy servers
-        healthy_servers = [s for s in servers if s.get("status") == "running"]
-        if len(healthy_servers) > 0:
-            alerts.append({
-                "id": alert_id,
-                "type": "success",
-                "severity": "info",
-                "message": f"{len(healthy_servers)} server{'s' if len(healthy_servers) != 1 else ''} running smoothly",
-                "timestamp": datetime.utcnow() - timedelta(minutes=1),
-                "acknowledged": True,
-                "server_name": None,
-                "category": "system"
-            })
-            alert_id += 1
-        
-        # Sort alerts by severity and timestamp
-        severity_order = {"critical": 0, "error": 1, "warning": 2, "info": 3, "success": 4}
-        alerts.sort(key=lambda x: (severity_order.get(x["type"], 3), x["timestamp"]))
-        
+                fetched = docker_manager.get_server_stats(container_id)
+                if isinstance(fetched, dict):
+                    stats = fetched
+            except Exception:
+                stats = {}
+
+        players_raw = stats.get("player_count")
+        if isinstance(players_raw, list):
+            player_count = len(players_raw)
+        else:
+            try:
+                player_count = int(players_raw) if players_raw is not None else 0
+            except Exception:
+                player_count = 0
+
         return {
-            "alerts": alerts,
-            "summary": {
-                "total": len(alerts),
-                "critical": len([a for a in alerts if a["type"] == "critical"]),
-                "warnings": len([a for a in alerts if a["type"] == "warning"]),
-                "errors": len([a for a in alerts if a["type"] == "error"]),
-                "unacknowledged": len([a for a in alerts if not a["acknowledged"]])
-            }
+            "id": target_server.get("id"),
+            "container_id": container_id,
+            "name": target_server.get("name"),
+            "status": target_server.get("status"),
+            "server_type": target_server.get("type") or target_server.get("server_type"),
+            "server_version": target_server.get("version") or target_server.get("server_version"),
+            "java_version": target_server.get("java_version"),
+            "cpu_percent": stats.get("cpu_percent"),
+            "memory_usage_mb": stats.get("memory_usage_mb"),
+            "memory_percent": stats.get("memory_percent"),
+            "player_count": player_count,
+            "uptime_seconds": stats.get("uptime_seconds") or target_server.get("uptime_seconds"),
+            "started_at": stats.get("started_at") or target_server.get("started_at"),
+            "last_exit_code": target_server.get("last_exit_code"),
+            "raw_stats": stats,
         }
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
-        # Fallback to basic system alert
-        return {
-            "alerts": [{
-                "id": 1,
-                "type": "error",
-                "severity": "high",
-                "message": f"Monitoring system error: {str(e)}",
-                "timestamp": datetime.utcnow(),
-                "acknowledged": False,
-                "server_name": None,
-                "category": "system"
-            }],
-            "summary": {
-                "total": 1,
-                "critical": 0,
-                "warnings": 0,
-                "errors": 1,
-                "unacknowledged": 1
-            }
-        }
+        raise HTTPException(status_code=500, detail=f"Failed to get server stats: {e}")
 
 @router.get("/events")
 async def stream_events(

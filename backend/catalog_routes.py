@@ -1,7 +1,10 @@
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from typing import Any, Dict, List, Optional
+import json
 import time
+from functools import lru_cache
+from pathlib import Path
 
 import logging
 from modpack_providers.modrinth import ModrinthProvider
@@ -18,6 +21,152 @@ router = APIRouter(prefix="/catalog", tags=["catalog"])
 # Simple in-memory TTL cache
 _CACHE: Dict[str, Dict[str, Any]] = {}
 _TTL_SECONDS = 600
+
+_CURATED_PATH = Path(__file__).resolve().parent / "data" / "templates_marketplace.json"
+
+_CURATED_PACK_CACHE: Dict[str, Dict[str, Any]] = {}
+_CURATED_PACK_TTL = 1800
+
+@lru_cache(maxsize=1)
+def _load_curated_templates() -> List[Dict[str, Any]]:
+    try:
+        if not _CURATED_PATH.exists():
+            log.warning("Curated templates file missing at %s", _CURATED_PATH)
+            return []
+        raw = _CURATED_PATH.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if isinstance(data, list):
+            cleaned: List[Dict[str, Any]] = []
+            for item in data:
+                if isinstance(item, dict):
+                    cleaned.append(item)
+            return cleaned
+        log.warning("Curated templates file must contain a list")
+        return []
+    except Exception as exc:
+        log.error("Failed to load curated templates: %s", exc)
+        return []
+
+
+def _validate_curated_pack(
+    providers: Dict[str, Any],
+    provider_id: str,
+    pack_id: str,
+    version_id: Optional[str]
+) -> Dict[str, Any]:
+    key = f"{provider_id}:{pack_id}:{version_id or ''}"
+    now = time.time()
+    cached = _CURATED_PACK_CACHE.get(key)
+    if cached and now - cached["ts"] < _CURATED_PACK_TTL:
+        return cached["data"]
+
+    provider = providers.get(provider_id)
+    if provider is None:
+        result = {
+            "status": "provider-unavailable",
+            "message": "Provider is not configured or available on this instance."
+        }
+        _CURATED_PACK_CACHE[key] = {"ts": now, "data": result}
+        return result
+
+    try:
+        provider.get_pack(pack_id)
+    except Exception as exc:  # pragma: no cover - remote error surface
+        result = {
+            "status": "missing-pack",
+            "message": f"Pack '{pack_id}' not found or inaccessible: {exc}"
+        }
+        _CURATED_PACK_CACHE[key] = {"ts": now, "data": result}
+        return result
+
+    resolved_version: Optional[str] = None
+    available_versions: List[str] = []
+    try:
+        versions = provider.get_versions(pack_id, limit=50)
+    except Exception as exc:  # pragma: no cover - remote error surface
+        versions = []
+        log.warning("Failed to fetch versions for %s:%s: %s", provider_id, pack_id, exc)
+
+    for v in versions:
+        vid = v.get("id")
+        if vid:
+            vid_str = str(vid)
+            available_versions.append(vid_str)
+            if resolved_version is None:
+                resolved_version = vid_str
+            if version_id and vid_str == str(version_id):
+                resolved_version = vid_str
+
+    status = "ok"
+    message: Optional[str] = None
+
+    if version_id and str(version_id) not in available_versions:
+        if resolved_version:
+            status = "latest-used"
+            message = "Requested version not available; defaulting to latest release."
+        else:
+            status = "missing-version"
+            message = "Pack has no installable versions right now."
+
+    if not version_id and not resolved_version and available_versions:
+        resolved_version = available_versions[0]
+
+    if not available_versions:
+        status = "missing-version"
+        message = message or "Pack currently exposes no versions."
+
+    result = {
+        "status": status,
+        "resolved_version": resolved_version,
+        "available_versions": available_versions,
+        **({"message": message} if message else {}),
+    }
+
+    _CURATED_PACK_CACHE[key] = {"ts": now, "data": result}
+    return result
+
+
+def _enrich_curated_templates(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    providers = get_providers_live()
+    enriched: List[Dict[str, Any]] = []
+    for entry in entries:
+        data = dict(entry)
+        install_info = dict(entry.get("install") or {})
+        provider_id = str(install_info.get("provider") or entry.get("provider") or "modrinth").lower()
+        pack_id = install_info.get("pack_id")
+        version_id = install_info.get("version_id")
+
+        if not pack_id:
+            data["availability"] = "invalid-metadata"
+            data["availability_message"] = "Curated template is missing install.pack_id."
+            data["provider_configured"] = provider_id in providers
+            data["install"] = install_info
+            enriched.append(data)
+            continue
+
+        validation = _validate_curated_pack(providers, provider_id, str(pack_id), str(version_id) if version_id else None)
+
+        data["availability"] = validation.get("status", "unknown")
+        if "message" in validation:
+            data["availability_message"] = validation["message"]
+
+        install_info.setdefault("provider", provider_id)
+        install_info.setdefault("pack_id", pack_id)
+
+        resolved_version = validation.get("resolved_version")
+        if resolved_version:
+            install_info["version_id"] = resolved_version
+        elif version_id is None:
+            install_info["version_id"] = None
+
+        if validation.get("available_versions") is not None:
+            data["available_versions"] = validation.get("available_versions")
+
+        data["provider_configured"] = provider_id in providers
+        data["install"] = install_info
+        enriched.append(data)
+
+    return enriched
 
 # Build providers dynamically so newly saved keys take effect immediately
 
@@ -37,6 +186,21 @@ def get_providers_live() -> Dict[str, Any]:
         # No key configured: clear any previous error
         _PROVIDER_ERRORS.pop("curseforge", None)
     return prov
+
+
+@router.get("/curated")
+async def get_curated_templates(tag: Optional[str] = Query(None, description="Filter by tag")):
+    templates = _load_curated_templates()
+    if tag:
+        normalized = tag.strip().lower()
+        filtered = []
+        for item in templates:
+            tags = item.get("tags")
+            if isinstance(tags, list) and any(str(t).lower() == normalized for t in tags if isinstance(t, str)):
+                filtered.append(item)
+        templates = filtered
+    enriched = _enrich_curated_templates(templates)
+    return {"templates": enriched, "count": len(enriched)}
 
 def _cache_get(key: str):
     entry = _CACHE.get(key)

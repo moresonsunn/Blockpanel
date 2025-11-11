@@ -497,6 +497,7 @@ class DockerManager:
             env_vars = config.get("Env", [])
             java_version = "21"  # Default
             java_bin = "/usr/local/bin/java21"  # Default
+            java_opts = ""
             
             for env_var in env_vars:
                 if env_var.startswith("JAVA_VERSION="):
@@ -508,11 +509,15 @@ class DockerManager:
                     java_version = env_var.split("=", 1)[1]
                 elif env_var.startswith("JAVA_BIN_OVERRIDE="):
                     java_bin = env_var.split("=", 1)[1]
+                elif env_var.startswith("JAVA_OPTS="):
+                    java_opts = env_var.split("=", 1)[1]
             
             # Override with label if present
             if "mc.java_version" in labels:
                 java_version = labels["mc.java_version"]
                 java_bin = f"/usr/local/bin/java{java_version}"
+            if "mc.env.JAVA_OPTS" in labels:
+                java_opts = labels["mc.env.JAVA_OPTS"]
             
             # Extract actual host port mappings
             port_mappings = {}
@@ -550,6 +555,7 @@ class DockerManager:
                 "loader_version": labels.get("mc.loader_version", None),
                 "java_version": java_version,
                 "java_bin": java_bin,
+                "java_args": java_opts,
                 "stats": stats,
                 "created": attrs.get("Created", None),
                 "state": attrs.get("State", {}),
@@ -1833,3 +1839,60 @@ class DockerManager:
         except Exception as e:
             logger.error(f"Error updating Java version for container {container_id}: {e}")
             raise RuntimeError(f"Failed to update Java version: {e}")
+
+    def update_server_java_args(self, container_id: str, java_args: str | None) -> dict:
+        """Update custom Java arguments (JAVA_OPTS) for a server and recreate the container."""
+        try:
+            container = self.client.containers.get(container_id)
+            server_name = container.name or container_id
+
+            raw = java_args or ""
+            normalized = " ".join(raw.replace("\r", " ").split())
+            if len(normalized) > 4096:
+                raise ValueError("java_args too long (max 4096 characters when normalized)")
+
+            # Load and update metadata env_overrides
+            meta_path = SERVERS_ROOT / server_name / "server_meta.json"
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8") or "{}") if meta_path.exists() else {}
+            except Exception:
+                meta = {}
+
+            env_overrides = meta.get("env_overrides") or {}
+            if not isinstance(env_overrides, dict):
+                env_overrides = {}
+            merged = {str(k): str(v) for k, v in env_overrides.items() if v is not None}
+            if normalized:
+                merged["JAVA_OPTS"] = normalized
+            else:
+                merged.pop("JAVA_OPTS", None)
+
+            meta["env_overrides"] = merged
+            try:
+                meta_path.parent.mkdir(parents=True, exist_ok=True)
+                meta_path.write_text(json.dumps(meta), encoding="utf-8")
+            except Exception:
+                pass
+
+            # Update labels to reflect the new value (best effort)
+            current_labels = (container.attrs.get("Config", {}) or {}).get("Labels", {}) or {}
+            if normalized:
+                current_labels["mc.env.JAVA_OPTS"] = normalized
+            else:
+                current_labels.pop("mc.env.JAVA_OPTS", None)
+            try:
+                container.update(labels=current_labels)
+            except Exception:
+                pass
+
+            # Recreate container with updated env overrides so runtime-entrypoint sees the change
+            recreate_result = self.recreate_server_with_env(container_id, env_overrides=merged or None)
+            return {
+                "success": True,
+                "java_args": normalized,
+                "recreate_result": recreate_result,
+            }
+        except docker.errors.NotFound:
+            raise RuntimeError(f"Container {container_id} not found")
+        except Exception as e:
+            raise RuntimeError(f"Failed to update Java arguments: {e}")

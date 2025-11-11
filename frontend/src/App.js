@@ -79,36 +79,8 @@ function RenameServerButton({ currentName, onRenamed }) {
     </div>
   );
 }
-import React, { useState, useEffect, useRef, useMemo, lazy, Suspense, useCallback, createContext, useContext } from 'react';
-// RAM sanitizer utility (lightweight – placed here to avoid new import churn). If this grows, move to utils.
-function normalizeRamInput(value, { defaultUnit = 'M', clampMin = 16, clampMax = 1048576 } = {}) {
-  // Accept examples: 2048, 2048M, 2G, 2GB, 2 g, 1.5G, 1536m, 1t, 1TB
-  if (value == null) return '';
-  let raw = String(value).trim();
-  if (!raw) return '';
-  // Replace common separators
-  raw = raw.replace(/[, ]+/g, '');
-  // If pure number, assume already in MB
-  const pureNumber = /^\d+(?:\.\d+)?$/.test(raw);
-  let num = 0;
-  let unit = defaultUnit;
-  if (pureNumber) {
-    num = parseFloat(raw);
-  } else {
-    const m = raw.match(/^(\d+(?:\.\d+)?)([kmgtp]?)(?:i?b?)$/i); // supports k,m,g,t,p (and optional b / ib) – future-proof
-    if (!m) return ''; // invalid pattern
-    num = parseFloat(m[1]);
-    unit = m[2] ? m[2].toUpperCase() : defaultUnit.toUpperCase();
-  }
-  if (!isFinite(num) || num <= 0) return '';
-  // Convert to MB (binary-ish assumption: 1G = 1024M, etc.)
-  const factorMap = { K: 1/1024, M: 1, G: 1024, T: 1024*1024, P: 1024*1024*1024 };
-  const factor = factorMap[unit] || 1;
-  let mb = num * factor;
-  // Clamp & round
-  mb = Math.round(Math.min(Math.max(mb, clampMin), clampMax));
-  return mb + 'M';
-}
+import React, { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext } from 'react';
+import { normalizeRamInput } from './utils/ram';
 import { APP_NAME, applyDocumentBranding } from './branding';
 import {
   FaServer,
@@ -189,6 +161,7 @@ import WorldsPanel from './components/server-details/WorldsPanel';
 import SchedulePanel from './components/server-details/SchedulePanel';
 import PlayersPanel from './components/server-details/PlayersPanel';
 const MonitoringPageLazy = React.lazy(() => import('./components/MonitoringPage'));
+const TemplatesPageLazy = React.lazy(() => import('./pages/TemplatesPage'));
 import FilesPanelWrapper from './components/server-details/FilesPanelWrapper';
 import EditingPanel from './components/server-details/EditingPanel';
 import { useFetch } from './lib/useFetch';
@@ -2445,349 +2418,6 @@ function PluginManagerPage() {
 }
 
 // Templates & Modpacks Page (curated templates removed)
-function TemplatesPage() {
-  const [serverName, setServerName] = useState('mp-' + Math.random().toString(36).slice(2,6));
-  const [hostPort, setHostPort] = useState('');
-  const [minRam, setMinRam] = useState('2048M');
-  const [maxRam, setMaxRam] = useState('4096M');
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
-  const [zipFile, setZipFile] = useState(null);
-  const [javaOverride, setJavaOverride] = useState('');
-  const [serverType, setServerType] = useState('');
-  const [serverVersion, setServerVersion] = useState('');
-
-  // Catalog (remote providers)
-  const [providers, setProviders] = useState([{ id: 'modrinth', name: 'Modrinth' }]);
-  const [provider, setProvider] = useState('all');
-  const [catalogQuery, setCatalogQuery] = useState('');
-  const [catalogLoader, setCatalogLoader] = useState(''); // forge|fabric|neoforge
-  const [catalogMC, setCatalogMC] = useState('');
-  const [catalogLoading, setCatalogLoading] = useState(false);
-  const [catalogError, setCatalogError] = useState('');
-  const [catalogResults, setCatalogResults] = useState([]);
-  const [catalogPage, setCatalogPage] = useState(1);
-  const CATALOG_PAGE_SIZE = 24;
-
-  // Install modal state
-  const [installOpen, setInstallOpen] = useState(false);
-  const [installPack, setInstallPack] = useState(null);
-  const [installProvider, setInstallProvider] = useState('modrinth');
-  const [installVersions, setInstallVersions] = useState([]);
-  const [installVersionId, setInstallVersionId] = useState('');
-  const [installEvents, setInstallEvents] = useState([]);
-  const [installWorking, setInstallWorking] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadProviders() {
-      try {
-        const r = await fetch(`${API}/catalog/providers`);
-        const d = await r.json();
-        if (!cancelled && Array.isArray(d?.providers)) setProviders(d.providers);
-      } catch {}
-    }
-    loadProviders();
-    return () => { cancelled = true; };
-  }, []);
-
-  async function searchCatalog() {
-    setCatalogLoading(true);
-    setCatalogError('');
-    try {
-      const params = new URLSearchParams();
-      if (catalogQuery) params.set('q', catalogQuery);
-      if (catalogLoader) params.set('loader', catalogLoader);
-      if (catalogMC) params.set('mc_version', catalogMC);
-      params.set('provider', provider);
-      params.set('page', String(catalogPage));
-      params.set('page_size', String(CATALOG_PAGE_SIZE));
-      const r = await fetch(`${API}/catalog/search?${params.toString()}`);
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        const msg = d?.detail || `HTTP ${r.status}`;
-        setCatalogError(msg);
-        setCatalogResults([]);
-        return;
-      }
-      setCatalogResults(Array.isArray(d?.results) ? d.results : []);
-    } catch (e) {
-      setCatalogError(String(e.message || e));
-    } finally {
-      setCatalogLoading(false);
-    }
-  }
-
-  async function openInstallFromCatalog(pack) {
-    setInstallPack(pack);
-    setInstallOpen(true);
-    setInstallEvents([]);
-    setInstallWorking(false);
-    try {
-      const srcProvider = provider === 'all' ? (pack.provider || 'modrinth') : provider;
-      setInstallProvider(srcProvider);
-      const r = await fetch(`${API}/catalog/${srcProvider}/packs/${encodeURIComponent(pack.id || pack.slug)}/versions`, { headers: authHeaders() });
-      const d = await r.json();
-      const vers = Array.isArray(d?.versions) ? d.versions : [];
-      setInstallVersions(vers);
-      setInstallVersionId(vers[0]?.id || '');
-    } catch {
-      setInstallVersions([]);
-      setInstallVersionId('');
-    }
-  }
-  async function submitInstall() {
-    if (!installPack) return;
-    if (!serverName || !String(serverName).trim()) {
-      setInstallEvents((prev) => [...prev, { type: 'error', message: 'Server name is required' }]);
-      return;
-    }
-    setInstallWorking(true);
-    setInstallEvents([{ type: 'progress', message: 'Submitting install task...' }]);
-    try {
-      const body = {
-        provider: (provider === 'all' ? (installPack?.provider || 'modrinth') : provider),
-        pack_id: String(installPack.id || installPack.slug || ''),
-        version_id: installVersionId ? String(installVersionId) : null,
-        name: String(serverName).trim(),
-        host_port: hostPort ? Number(hostPort) : null,
-        min_ram: minRam,
-        max_ram: maxRam,
-      };
-      const r = await fetch(`${API}/modpacks/install`, { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json', ...authHeaders() }, 
-        body: JSON.stringify(body) 
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-      const taskId = d?.task_id;
-      if (!taskId) throw new Error('No task id');
-      const es = new EventSource(`${API}/modpacks/install/events/${taskId}`);
-      es.onmessage = (ev) => {
-        try {
-          const evd = JSON.parse(ev.data);
-          setInstallEvents((prev) => {
-            const next = [...prev, evd];
-            return next.length > 500 ? next.slice(-500) : next;
-          });
-          if (evd.type === 'done' || evd.type === 'error') {
-            es.close();
-            setInstallWorking(false);
-          }
-        } catch {}
-      };
-      es.onerror = () => { try { es.close(); } catch {} setInstallWorking(false); };
-    } catch (e) {
-      setInstallEvents((prev) => [...prev, { type: 'error', message: String(e.message || e) }]);
-      setInstallWorking(false);
-    }
-  }
-
-  return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold flex items-center gap-3">
-          <FaLayerGroup className="text-brand-500" /> Templates & Modpacks
-        </h1>
-        <p className="text-white/70 mt-2">Import modpack server packs or search and install from providers</p>
-      </div>
-
-      {/* URL import removed — local ZIP upload is the supported import flow */}
-
-      {/* Import from local ZIP */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4">Import Local Server Pack (.zip)</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Server Name</label>
-            <input value={serverName} onChange={e=>setServerName(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" />
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Host Port (optional)</label>
-            <input value={hostPort} onChange={e=>setHostPort(e.target.value)} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" placeholder="e.g. 25565" />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-sm text-white/70 mb-1">Select ZIP file</label>
-            <input type="file" accept=".zip" onChange={(e)=> setZipFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)} className="w-full text-sm text-white" />
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Min RAM</label>
-            <input value={minRam} onChange={e=>setMinRam(e.target.value)} onBlur={()=>{ const v = normalizeRamInput(minRam); if (v) setMinRam(v); }} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" aria-describedby="zip-min-ram-help" />
-            <div id="zip-min-ram-help" className="text-[11px] text-white/50 mt-1">Formats: 2048M, 2G, 2048.</div>
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-1">Max RAM</label>
-            <input value={maxRam} onChange={e=>setMaxRam(e.target.value)} onBlur={()=>{ const v = normalizeRamInput(maxRam); if (v) setMaxRam(v); }} className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" aria-describedby="zip-max-ram-help" />
-            <div id="zip-max-ram-help" className="text-[11px] text-white/50 mt-1">Formats: 4096M, 4G, 4096.</div>
-          </div>
-          <div className="md:col-span-2 flex items-center gap-3">
-            <button disabled={busy || !zipFile} onClick={async ()=>{
-              setBusy(true);
-              setMsg('');
-              try {
-                // Normalize RAM before upload
-                const normMin = normalizeRamInput(minRam);
-                const normMax = normalizeRamInput(maxRam);
-                if (!normMin || !normMax) {
-                  setMsg('Invalid RAM values. Examples: 2048M, 2G, 2048');
-                  setBusy(false);
-                  return;
-                }
-                const fd = new FormData();
-                fd.append('server_name', serverName);
-                if (hostPort) fd.append('host_port', hostPort);
-                fd.append('min_ram', normMin);
-                fd.append('max_ram', normMax);
-                if (javaOverride) fd.append('java_version_override', javaOverride);
-                if (serverType) fd.append('server_type', serverType);
-                if (serverVersion) fd.append('server_version', serverVersion);
-                if (zipFile) fd.append('file', zipFile);
-                const r = await fetch(`${API}/modpacks/import-upload`, { method: 'POST', body: fd });
-                const d = await r.json().catch(()=>({}));
-                if (!r.ok) throw new Error(d?.detail || `HTTP ${r.status}`);
-                setMsg('Server pack uploaded and container started. Go to Servers to see it.');
-              } catch (e) {
-                setMsg(`Error: ${e.message || e}`);
-              } finally {
-                setBusy(false);
-              }
-            }} className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded flex items-center gap-2" aria-busy={busy} aria-live="polite">
-              {busy && <span className="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full" aria-hidden="true"></span>}
-              {busy ? 'Uploading…' : 'Import ZIP'}
-            </button>
-            {msg && <div className="text-sm text-white/70">{msg}</div>}
-          </div>
-        </div>
-      </div>
-
-      {/* Search for Modpack Name: Modpacks from providers */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Search for Modpack Name</h3>
-          <div className="flex items-center gap-2 text-sm text-white/70">
-            <button onClick={() => { if (!catalogLoading && catalogPage > 1) { setCatalogPage(p => p - 1); setTimeout(() => { if (!catalogLoading) searchCatalog(); }, 0); } }} disabled={catalogLoading || catalogPage<=1} className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded disabled:opacity-50">Prev</button>
-            <span>Page {catalogPage}</span>
-            <button onClick={() => { if (!catalogLoading) { setCatalogPage(p => p + 1); setTimeout(() => { if (!catalogLoading) searchCatalog(); }, 0); } }} disabled={catalogLoading} className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded disabled:opacity-50">Next</button>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
-          <select className="rounded bg-white/10 border border-white/20 px-3 py-2 text-white" value={provider} onChange={e=>setProvider(e.target.value)} style={{ backgroundColor: '#1f2937' }}>
-            {providers.map(p => (
-              <option key={p.id} value={p.id} disabled={p.requires_key && !p.configured} style={{ backgroundColor: '#1f2937' }}>
-                {p.name}{p.requires_key && !p.configured ? ' (configure in Settings)' : ''}
-              </option>
-            ))}
-          </select>
-          <input className="rounded bg-white/5 border border-white/10 px-3 py-2 text-white placeholder-white/50" placeholder="Type modpack name (e.g. Beyond Cosmo)" value={catalogQuery} onChange={e=>setCatalogQuery(e.target.value)} />
-          <input className="rounded bg-white/5 border border-white/10 px-3 py-2 text-white placeholder-white/50" placeholder="MC Version (e.g. 1.20.4)" value={catalogMC} onChange={e=>setCatalogMC(e.target.value)} />
-          <select className="rounded bg-white/10 border border-white/20 px-3 py-2 text-white" value={catalogLoader} onChange={e=>setCatalogLoader(e.target.value)} style={{ backgroundColor: '#1f2937' }}>
-            <option value="" style={{ backgroundColor: '#1f2937' }}>Any Loader</option>
-            <option value="fabric" style={{ backgroundColor: '#1f2937' }}>Fabric</option>
-            <option value="forge" style={{ backgroundColor: '#1f2937' }}>Forge</option>
-            <option value="neoforge" style={{ backgroundColor: '#1f2937' }}>NeoForge</option>
-          </select>
-          <div className="md:col-span-4 flex items-center gap-2">
-            <button onClick={() => { setCatalogPage(1); searchCatalog(); }} className="bg-brand-500 hover:bg-brand-600 px-3 py-2 rounded">Search</button>
-            {catalogLoading && <div className="text-sm text-white/60">Loading…</div>}
-            {catalogError && <div className="text-sm text-red-400">{catalogError}</div>}
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {catalogResults.map((p, idx) => (
-            <div key={p.id || p.slug || idx} className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col">
-              <div className="flex items-center gap-3 mb-2">
-                {p.icon_url ? <img src={p.icon_url} alt="" className="w-8 h-8 rounded" /> : <div className="w-8 h-8 bg-white/10 rounded" />}
-                <div>
-                  <div className="font-semibold">{p.name}</div>
-                  <div className="text-xs text-white/60">{(p.categories || []).slice(0,3).join(' · ')}</div>
-                </div>
-              </div>
-              <div className="text-sm text-white/70 line-clamp-2">{p.description}</div>
-              <div className="mt-2 flex items-center gap-3 text-xs text-white/60">
-                {typeof p.downloads === 'number' && <span>⬇ {Intl.NumberFormat().format(p.downloads)}</span>}
-                {p.updated && <span>Updated {new Date(p.updated).toLocaleDateString()}</span>}
-              </div>
-              <div className="mt-3 flex items-center gap-2">
-                <button onClick={() => openInstallFromCatalog(p)} className="bg-brand-500 hover:bg-brand-600 px-3 py-1.5 rounded text-sm">Install</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Install Wizard Modal */}
-      {installOpen && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-ink border border-white/10 rounded-lg p-6 w-full max-w-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <div className="text-lg font-semibold">Install Modpack{installPack?.name ? `: ${installPack.name}` : ''}</div>
-              <button onClick={() => { setInstallOpen(false); setInstallPack(null); }} className="text-white/60 hover:text-white">Close</button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-              <div>
-                <label className="block text-xs text-white/60 mb-1">Version</label>
-                <select className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white" value={installVersionId} onChange={e=>setInstallVersionId(e.target.value)} style={{ backgroundColor: '#1f2937' }}>
-                  {installVersions.map(v => <option key={v.id} value={v.id} style={{ backgroundColor: '#1f2937' }}>{v.name || v.version_number}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-white/60 mb-1">Server Name</label>
-                <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={serverName} onChange={e=>setServerName(e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-xs text-white/60 mb-1">Host Port (optional)</label>
-                <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={hostPort} onChange={e=>setHostPort(e.target.value)} placeholder="25565" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-white/60 mb-1">Min RAM</label>
-                  <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={minRam} onChange={e=>setMinRam(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-xs text-white/60 mb-1">Max RAM</label>
-                  <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={maxRam} onChange={e=>setMaxRam(e.target.value)} />
-                </div>
-              </div>
-              <div className="md:col-span-2 flex items-center gap-2 mt-2">
-                <button disabled={installWorking} onClick={submitInstall} className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 px-4 py-2 rounded">{installWorking ? 'Installing…' : 'Start Install'}</button>
-                <div className="text-sm text-white/70">{installPack?.provider || provider}</div>
-              </div>
-            </div>
-            <div className="bg-white/5 border border-white/10 rounded p-3 h-40 overflow-auto text-sm">
-              {installEvents.length === 0 ? (
-                <div className="text-white/50">No events yet…</div>
-              ) : (
-                <ul className="space-y-1">
-                  {installEvents.map((ev, i) => {
-                    let text = '';
-                    if (typeof ev?.message === 'string') {
-                      text = ev.message;
-                    } else if (ev?.message) {
-                      try { text = JSON.stringify(ev.message); } catch { text = String(ev.message); }
-                    } else if (ev?.step) {
-                      const pct = typeof ev.progress === 'number' ? ` (${ev.progress}%)` : '';
-                      text = `${ev.step}${pct}`;
-                    } else {
-                      try { text = JSON.stringify(ev); } catch { text = String(ev); }
-                    }
-                    return (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="w-2 h-2 rounded-full mt-2" style={{ background: ev.type === 'error' ? '#f87171' : ev.type === 'done' ? '#34d399' : '#a78bfa' }}></span>
-                        <span>{text}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function SecurityPage() {
   return (
     <div className="p-6 space-y-6">
@@ -3037,21 +2667,45 @@ function App() {
     setServersData && setServersData(prev => (Array.isArray(prev) ? [optimistic, ...prev] : [optimistic]));
     gd && gd.__setGlobalData && gd.__setGlobalData(cur => ({ ...cur, servers: [optimistic, ...(cur.servers || [])] }));
 
+    // Fire create request
     await fetch(`${API}/servers`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    // Refresh the servers list without leaving the page
-    const r = await fetch(`${API}/servers`);
-    if (r.ok) {
-      const updated = await r.json();
-      // Update global store if available (no hook calls here)
-      if (gd && gd.__setGlobalData) {
-        gd.__setGlobalData(cur => ({ ...cur, servers: Array.isArray(updated) ? updated : [] }));
-      }
-      // Also update local servers list used by this page immediately
-      setServersData && setServersData(Array.isArray(updated) ? updated : []);
+
+    // After creation, poll briefly until the new server appears, then update lists.
+    // This avoids requiring a full page reload and handles async backend provisioning.
+    const start = Date.now();
+    const timeoutMs = 15000; // poll up to 15s
+    const intervalMs = 800;  // gentle cadence
+    let found = false;
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const r = await fetch(`${API}/servers`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const updated = await r.json();
+        // consider it appeared if any entry matches by name
+        if (Array.isArray(updated) && updated.some(s => s && s.name === name)) {
+          found = true;
+          if (gd && gd.__setGlobalData) {
+            gd.__setGlobalData(cur => ({ ...cur, servers: updated }));
+          }
+          setServersData && setServersData(updated);
+          break;
+        } else {
+          // still provisioning, keep optimistic but refresh list to show progress if available
+          if (gd && gd.__setGlobalData) {
+            gd.__setGlobalData(cur => ({ ...cur, servers: Array.isArray(updated) ? updated : cur.servers }));
+          }
+          setServersData && setServersData(Array.isArray(updated) ? updated : []);
+        }
+      } catch {}
+      await new Promise(res => setTimeout(res, intervalMs));
+    }
+    // Final fallback refresh if not found in time (keeps optimistic card until background refresh swaps it)
+    if (!found) {
+      gd && gd.__refreshServers && gd.__refreshServers();
     }
   }, [name, selectedType, version, loaderVersion, installerVersion, hostPort, minRam, maxRam, gd]);
 
@@ -3160,7 +2814,11 @@ function App() {
           </React.Suspense>
         );
       case 'templates':
-        return <TemplatesPage />;
+        return (
+          <React.Suspense fallback={<div className="p-6">Loading templates…</div>}>
+            <TemplatesPageLazy API={API} authHeaders={authHeaders} />
+          </React.Suspense>
+        );
       case 'users':
         return (
           <ErrorBoundary>
