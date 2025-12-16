@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from datetime import datetime, timedelta
 import logging
+import os
 from passlib.context import CryptContext
 import secrets
 
@@ -11,6 +12,16 @@ from models import User, Role, Permission, UserSession, AuditLog
 from database import get_db
 
 logger = logging.getLogger(__name__)
+
+# Idle timeout for session tokens (minutes)
+def _load_idle_timeout() -> int:
+    try:
+        val = int(os.getenv("SESSION_IDLE_TIMEOUT_MINUTES", "5"))
+        return max(val, 1)
+    except Exception:
+        return 5
+
+SESSION_IDLE_TIMEOUT_MINUTES = _load_idle_timeout()
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -495,9 +506,9 @@ class UserService:
     
     def create_user_session(self, user: User, ip_address: Optional[str] = None, 
                            user_agent: Optional[str] = None) -> UserSession:
-        """Create a new user session."""
+        """Create a new user session with short idle timeout."""
         session_token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(hours=24)  # 24 hour sessions
+        expires_at = datetime.utcnow() + timedelta(minutes=SESSION_IDLE_TIMEOUT_MINUTES)
         
         session = UserSession(
             user_id=user.id,
@@ -510,22 +521,41 @@ class UserService:
         self.db.add(session)
         self.db.commit()
         
-        logger.info(f"Created session for user {user.username}")
+        logger.info(f"Created session for user {user.username} with {SESSION_IDLE_TIMEOUT_MINUTES}m idle timeout")
         return session
     
-    def get_user_by_session_token(self, session_token: str) -> Optional[User]:
-        """Get user by session token."""
+    def get_user_by_session_token(self, session_token: str, refresh_expiry: bool = True) -> Optional[User]:
+        """Get user by session token and optionally extend idle expiry."""
         session = self.db.query(UserSession).filter(
             and_(
                 UserSession.session_token == session_token,
-                UserSession.is_active == True,
-                UserSession.expires_at > datetime.utcnow()
+                UserSession.is_active == True
             )
         ).first()
-        
-        if session:
-            return session.user
-        return None
+
+        if not session:
+            return None
+
+        now = datetime.utcnow()
+        if not session.expires_at or session.expires_at <= now:
+            try:
+                session.is_active = False
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+            return None
+
+        if refresh_expiry:
+            new_expiry = now + timedelta(minutes=SESSION_IDLE_TIMEOUT_MINUTES)
+            # Avoid excessive writes: only bump when inside final minute of the window
+            if session.expires_at < new_expiry - timedelta(seconds=30):
+                session.expires_at = new_expiry
+                try:
+                    self.db.commit()
+                except Exception:
+                    self.db.rollback()
+
+        return session.user
     
     def invalidate_session(self, session_token: str) -> bool:
         """Invalidate a session."""

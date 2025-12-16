@@ -393,7 +393,7 @@ export function GlobalDataProvider({ children }) {
     // Set up optimized background refresh intervals for balanced performance
     refreshIntervals.current.servers = setInterval(() => {
       refreshDataInBackground('servers', `${API}/servers`, (data) => Array.isArray(data) ? data : []);
-    }, 10000);
+    }, 5000);
 
     refreshIntervals.current.dashboardData = setInterval(() => {
       refreshDataInBackground('dashboardData', `${API}/monitoring/dashboard-data`);
@@ -422,11 +422,26 @@ export function GlobalDataProvider({ children }) {
       } catch {}
     }, 6000);
 
+    const handleVisibility = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      refreshDataInBackground('servers', `${API}/servers`, (data) => Array.isArray(data) ? data : []);
+    };
+    try {
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', handleVisibility);
+      }
+    } catch {}
+
     return () => {
       // Cleanup intervals and abort controllers
       Object.values(refreshIntervals.current).forEach((h) => { try { clearInterval(h); } catch {} });
       if (refreshIntervals.current.deferredPreloads) { try { clearTimeout(refreshIntervals.current.deferredPreloads); } catch {} }
       Object.values(abortControllers.current).forEach(controller => { try { controller.abort(); } catch {} });
+      try {
+        if (typeof document !== 'undefined') {
+          document.removeEventListener('visibilitychange', handleVisibility);
+        }
+      } catch {}
     };
   }, []);
 
@@ -1246,6 +1261,10 @@ function AdvancedUserManagementPageImpl() {
 
   async function createUser() {
     try {
+      if (!newUser.username.trim() || !newUser.email.trim()) {
+        setError('Username and email are required');
+        return;
+      }
       let tempPassword = newUser.password;
       if (newUser.autoPassword) {
         tempPassword = generatePassword(16);
@@ -1260,7 +1279,7 @@ function AdvancedUserManagementPageImpl() {
         }
       }
       
-      await fetch(`${API}/users`, {
+      const resp = await fetch(`${API}/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1272,6 +1291,11 @@ function AdvancedUserManagementPageImpl() {
           must_change_password: newUser.mustChangePassword
         }),
       });
+      if (!resp.ok) {
+        const payload = await resp.json().catch(() => ({}));
+        const detail = payload?.detail || payload?.message || `HTTP ${resp.status}`;
+        throw new Error(detail);
+      }
       setShowCreateUser(false);
       setNewUser({ 
         username: '', email: '', password: '', confirmPassword: '',
@@ -1375,6 +1399,138 @@ function AdvancedUserManagementPageImpl() {
           <button onClick={() => setSuccess('')} className="ml-auto text-green-400 hover:text-green-300">
             <FaTimes />
           </button>
+        </div>
+      )}
+
+      {/* Create User Modal */}
+      {showCreateUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur" onClick={() => setShowCreateUser(false)} />
+          <div className="relative w-full max-w-2xl bg-ink border border-white/10 rounded-2xl shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm uppercase tracking-wide text-white/50">Create User</div>
+                <div className="text-2xl font-semibold text-white">Invite a new teammate</div>
+              </div>
+              <button
+                onClick={() => setShowCreateUser(false)}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white/70"
+                aria-label="Close create user modal"
+              >
+                <FaTimes />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs text-white/60 block mb-1">Username</label>
+                <input
+                  className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-white focus:ring-2 focus:ring-brand-500"
+                  value={newUser.username}
+                  onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                  placeholder="minecraft_admin"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-white/60 block mb-1">Email</label>
+                <input
+                  className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-white focus:ring-2 focus:ring-brand-500"
+                  type="email"
+                  value={newUser.email}
+                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                  placeholder="user@example.com"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-white/60 block mb-1">Role</label>
+                <select
+                  className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-white focus:ring-2 focus:ring-brand-500"
+                  value={newUser.role}
+                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                >
+                  {safeRoles.map((role) => (
+                    <option key={role.name} value={role.name}>{role.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-white/60 block mb-1">Full Name (optional)</label>
+                <input
+                  className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-white focus:ring-2 focus:ring-brand-500"
+                  value={newUser.fullName}
+                  onChange={(e) => setNewUser({ ...newUser, fullName: e.target.value })}
+                  placeholder="Alex Smith"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs text-white/60 block">Password</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    className="flex-1 rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-white focus:ring-2 focus:ring-brand-500 disabled:opacity-40"
+                    type="password"
+                    value={newUser.password}
+                    onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                    placeholder={newUser.autoPassword ? 'Auto-generate secure password' : 'Enter a strong password'}
+                    disabled={newUser.autoPassword}
+                  />
+                  <label className="flex items-center gap-2 text-sm text-white/80">
+                    <input
+                      type="checkbox"
+                      checked={newUser.autoPassword}
+                      onChange={(e) => setNewUser({ ...newUser, autoPassword: e.target.checked })}
+                    />
+                    Auto-generate
+                  </label>
+                </div>
+                {!newUser.autoPassword && (
+                  <input
+                    className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-white focus:ring-2 focus:ring-brand-500"
+                    type="password"
+                    value={newUser.confirmPassword}
+                    onChange={(e) => setNewUser({ ...newUser, confirmPassword: e.target.value })}
+                    placeholder="Confirm password"
+                  />
+                )}
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs text-white/60 block">Onboarding</label>
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3 space-y-2 text-sm text-white/80">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={newUser.mustChangePassword}
+                      onChange={(e) => setNewUser({ ...newUser, mustChangePassword: e.target.checked })}
+                    />
+                    Require password change on first login
+                  </label>
+                  <p className="text-xs text-white/50">A one-time password is shown after creation.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <div className="text-xs text-white/50">Passwords must include upper, lower, and a digit.</div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowCreateUser(false)}
+                  className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white/80"
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={createUser}
+                  className="px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white shadow-lg"
+                  type="button"
+                >
+                  Create User
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2779,8 +2935,8 @@ function App() {
   // Auth state
   const [authToken, setAuthToken] = useState(getStoredToken());
   const isAuthenticated = !!authToken;
-  const [loginUsername, setLoginUsername] = useState('admin');
-  const [loginPassword, setLoginPassword] = useState('admin123');
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
@@ -2916,7 +3072,7 @@ function App() {
     }
   }
 
-  async function handleLogout() {
+  const handleLogout = useCallback(async () => {
     try {
       await fetch(`${API}/auth/logout`, { method: 'POST' });
     } catch (_) {}
@@ -2924,7 +3080,32 @@ function App() {
     setAuthToken('');
     // Reload to clear any in-memory state
     window.location.reload();
-  }
+  }, []);
+
+  // Auto-logout users after 5 minutes of inactivity
+  useEffect(() => {
+    if (!isAuthenticated || typeof window === 'undefined') return undefined;
+    let timeoutId = null;
+    const resetTimer = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      timeoutId = window.setTimeout(() => {
+        handleLogout();
+      }, 5 * 60 * 1000);
+    };
+
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach((evt) => window.addEventListener(evt, resetTimer, { passive: true }));
+    resetTimer();
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      events.forEach((evt) => window.removeEventListener(evt, resetTimer));
+    };
+  }, [isAuthenticated, handleLogout]);
 
   // Fetch server types from backend
   const { data: typesData, error: typesError } = useFetch(
@@ -3350,10 +3531,6 @@ function App() {
                   {loginLoading ? 'Signing in...' : 'Sign In'}
                 </button>
               </form>
-              
-              <div className="text-center text-sm text-white/60 border-t border-white/10 pt-4">
-                Default credentials: admin / admin123
-              </div>
             </div>
           </div>
         </div>

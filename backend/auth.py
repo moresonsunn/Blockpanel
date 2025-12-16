@@ -12,13 +12,21 @@ import os
 import logging
 import time
 from functools import lru_cache
+import secrets
 
 logger = logging.getLogger(__name__)
 
 # Configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
+_raw_secret = os.getenv("SECRET_KEY")
+if not _raw_secret or _raw_secret == "your-secret-key-change-this-in-production":
+    # Generate an ephemeral secret so deployments without SECRET_KEY do not share a predictable token key.
+    _raw_secret = secrets.token_urlsafe(64)
+    logging.warning("SECRET_KEY was not set; generated a temporary secret. Configure SECRET_KEY for stable auth tokens.")
+
+SECRET_KEY = _raw_secret
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 300000000000000  # Effectively no expiration by default
+# Keep JWT access tokens short-lived; session tokens are now authoritative.
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -164,7 +172,7 @@ def get_current_user(
         # Import here to avoid circular import
         from user_service import UserService
         user_service = UserService(db)
-        user = user_service.get_user_by_session_token(credentials.credentials)
+        user = user_service.get_user_by_session_token(credentials.credentials, refresh_expiry=True)
         return user
     except ImportError:
         logger.warning("UserService not available, using legacy JWT authentication only")

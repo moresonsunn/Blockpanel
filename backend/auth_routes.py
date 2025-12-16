@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 import logging
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, validator
 from typing import List, Optional
 from datetime import datetime, timedelta
 
@@ -27,8 +27,20 @@ class Token(BaseModel):
 class UserCreate(BaseModel):
     username: str
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=8)
     role: str = "user"
+
+    @validator("password")
+    def validate_password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        if not any(ch.isupper() for ch in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(ch.islower() for ch in v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not any(ch.isdigit() for ch in v):
+            raise ValueError("Password must contain at least one digit")
+        return v
 
 class UserResponse(BaseModel):
     id: int
@@ -63,6 +75,17 @@ class RoleUpdate(BaseModel):
 class AdminPasswordReset(BaseModel):
     new_password: str
     force_change: bool = True
+
+
+def _ensure_password_strength(password: str):
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters long")
+    if not any(ch.isupper() for ch in password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter")
+    if not any(ch.islower() for ch in password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one lowercase letter")
+    if not any(ch.isdigit() for ch in password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one digit")
 
 @router.post("/login", response_model=Token)
 async def login(
@@ -100,9 +123,7 @@ async def change_password(
     """Change current user's password."""
     from auth import verify_password
 
-    # Basic password policy
-    if len(password_data.new_password) < 8:
-        raise HTTPException(status_code=400, detail="New password must be at least 8 characters long")
+    _ensure_password_strength(password_data.new_password)
     
     if not verify_password(password_data.current_password, current_user.hashed_password):
         raise HTTPException(
@@ -287,6 +308,7 @@ async def admin_reset_password(
 ):
     if len(payload.new_password) < 8:
         raise HTTPException(status_code=400, detail="New password must be at least 8 characters long")
+    _ensure_password_strength(payload.new_password)
     svc = UserService(db)
     try:
         svc.reset_user_password(user_id, payload.new_password, payload.force_change, updated_by=current_user.id)

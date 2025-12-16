@@ -3,6 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime
 import os
+import secrets
 
 # Database URL - support both SQLite and PostgreSQL
 # Honor an explicitly provided DATABASE_URL always. Provide sensible defaults otherwise.
@@ -170,14 +171,15 @@ def init_db():
         # Create default admin user if none exists
         admin_user = user_service.get_user_by_username("admin")
         if not admin_user:
+            initial_password = os.getenv("ADMIN_INITIAL_PASSWORD") or secrets.token_urlsafe(16)
             admin_user = user_service.create_user(
                 username="admin",
                 email="admin@localhost",
-                password="admin123",  # Strong default password
+                password=initial_password,
                 role="admin",
                 full_name="Administrator"
             )
-            print("Default admin user created: username=admin, password=admin123")
+            print(f"Default admin user created: username=admin, password={initial_password}")
         else:
             print("Default admin user already exists")
     except Exception as e:
