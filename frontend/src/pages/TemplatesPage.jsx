@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { FaLayerGroup } from 'react-icons/fa';
 import { normalizeRamInput } from '../utils/ram';
 
 export default function TemplatesPage({ API, authHeaders }) {
   const safeAuthHeaders = useMemo(() => (typeof authHeaders === 'function' ? authHeaders : () => ({})), [authHeaders]);
-  const numberFormatter = useMemo(() => new Intl.NumberFormat(), []);
 
   const [serverName, setServerName] = useState('mp-' + Math.random().toString(36).slice(2, 6));
   const [hostPort, setHostPort] = useState('');
@@ -17,8 +16,11 @@ export default function TemplatesPage({ API, authHeaders }) {
   const [serverType, setServerType] = useState('');
   const [serverVersion, setServerVersion] = useState('');
 
-  const [providers, setProviders] = useState([{ id: 'modrinth', name: 'Modrinth' }]);
-  const [provider, setProvider] = useState('all');
+  const [providers] = useState([
+    { id: 'modrinth', name: 'Modrinth' },
+    { id: 'curseforge', name: 'CurseForge' },
+  ]);
+  const [provider, setProvider] = useState('modrinth');
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogLoader, setCatalogLoader] = useState('');
   const [catalogMC, setCatalogMC] = useState('');
@@ -28,10 +30,6 @@ export default function TemplatesPage({ API, authHeaders }) {
   const [catalogPage, setCatalogPage] = useState(1);
   const CATALOG_PAGE_SIZE = 24;
 
-  const [curatedItems, setCuratedItems] = useState([]);
-  const [curatedLoading, setCuratedLoading] = useState(false);
-  const [curatedError, setCuratedError] = useState('');
-
   const [installOpen, setInstallOpen] = useState(false);
   const [installPack, setInstallPack] = useState(null);
   const [installProvider, setInstallProvider] = useState('modrinth');
@@ -40,56 +38,7 @@ export default function TemplatesPage({ API, authHeaders }) {
   const [installEvents, setInstallEvents] = useState([]);
   const [installWorking, setInstallWorking] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function loadProviders() {
-      try {
-        const response = await fetch(`${API}/catalog/providers`);
-        const data = await response.json();
-        if (!cancelled && Array.isArray(data?.providers)) {
-          setProviders(data.providers);
-        }
-      } catch {
-        // Silently ignore provider lookup failures; UI will fallback to defaults
-      }
-    }
-    loadProviders();
-    return () => {
-      cancelled = true;
-    };
-  }, [API]);
-
-  const refreshCurated = useCallback(async (opts = {}) => {
-    const { signal } = opts;
-    setCuratedLoading(true);
-    setCuratedError('');
-    try {
-      const headers = safeAuthHeaders();
-      const response = await fetch(`${API}/catalog/curated`, { headers, signal });
-      const data = await response.json().catch(() => ({}));
-      if (signal?.aborted) return;
-      if (!response.ok) {
-        setCuratedError(data?.detail || `HTTP ${response.status}`);
-        setCuratedItems([]);
-        return;
-      }
-      const templates = Array.isArray(data?.templates) ? data.templates : [];
-      setCuratedItems(templates);
-    } catch (error) {
-      if (signal?.aborted) return;
-      setCuratedError(String(error?.message || error));
-      setCuratedItems([]);
-    } finally {
-      if (signal?.aborted) return;
-      setCuratedLoading(false);
-    }
-  }, [API, safeAuthHeaders]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    refreshCurated({ signal: controller.signal });
-    return () => controller.abort();
-  }, [refreshCurated]);
+  // Provider list is fixed (Modrinth & CurseForge), no curated marketplace.
 
   async function searchCatalog() {
     setCatalogLoading(true);
@@ -141,7 +90,7 @@ export default function TemplatesPage({ API, authHeaders }) {
     setInstallEvents([]);
     setInstallWorking(false);
     try {
-      const chosenProvider = providerOverride || (provider === 'all' ? (pack.provider || 'modrinth') : provider);
+      const chosenProvider = providerOverride || provider || 'modrinth';
       setInstallProvider(chosenProvider);
       const packIdentifier = pack.id || pack.slug || pack.project_id || pack.projectSlug;
       if (!packIdentifier) {
@@ -167,52 +116,6 @@ export default function TemplatesPage({ API, authHeaders }) {
     }
   }
 
-  async function openCuratedInstall(entry) {
-    if (!entry || !entry.install || !entry.install.pack_id) {
-      setMsg('Curated template is missing install metadata.');
-      return;
-    }
-
-    const availabilityKey = String(entry.availability || 'unknown').toLowerCase();
-    const blockedStatuses = new Set(['provider-unavailable', 'missing-pack', 'invalid-metadata', 'missing-version', 'error']);
-    if (blockedStatuses.has(availabilityKey)) {
-      setMsg(entry.availability_message || 'This curated template cannot be installed right now.');
-      return;
-    }
-
-    setMsg('');
-
-    const installMeta = entry.install;
-    const providerOverride = installMeta.provider || entry.provider || 'modrinth';
-    const baseName = entry.name || entry.id || serverName;
-    const slug = String(baseName)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 18);
-    const suggestedName = slug ? `mp-${slug}` : serverName;
-    const pseudoPack = {
-      id: installMeta.pack_id,
-      slug: installMeta.pack_id,
-      provider: providerOverride,
-      name: entry.name,
-      description: entry.short_description || entry.description || '',
-      icon_url: entry.icon_url,
-      categories: entry.tags || [],
-    };
-
-    await openInstallFromCatalog(pseudoPack, {
-      providerOverride,
-      versionOverride: installMeta.version_id || null,
-      recommendedRam: entry.recommended_ram || null,
-      suggestedName,
-    });
-
-    if (availabilityKey === 'latest-used' && entry.availability_message) {
-      setInstallEvents(prev => [...prev, { type: 'info', message: entry.availability_message }]);
-    }
-  }
-
   async function submitInstall() {
     if (!installPack) return;
     if (!serverName || !String(serverName).trim()) {
@@ -223,7 +126,7 @@ export default function TemplatesPage({ API, authHeaders }) {
     setInstallEvents([{ type: 'progress', message: 'Submitting install task...' }]);
     try {
       const body = {
-        provider: installProvider || (provider === 'all' ? installPack?.provider || 'modrinth' : provider),
+        provider: installProvider || provider || 'modrinth',
         pack_id: String(installPack.id || installPack.slug || ''),
         version_id: installVersionId ? String(installVersionId) : null,
         name: String(serverName).trim(),
@@ -279,124 +182,6 @@ export default function TemplatesPage({ API, authHeaders }) {
           <FaLayerGroup className="text-brand-500" /> Templates & Modpacks
         </h1>
         <p className="text-white/70 mt-2">Import modpack server packs or search and install from providers</p>
-      </div>
-
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-          <div>
-            <h3 className="text-lg font-semibold">Curated Marketplace</h3>
-            <p className="text-sm text-white/60">Vetted "one-click" setups with community ratings.</p>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-white/60">
-            {curatedLoading ? <span>Syncing…</span> : null}
-            <button
-              type="button"
-              onClick={() => refreshCurated()}
-              className="px-3 py-1 rounded bg-white/10 hover:bg-white/20 text-white disabled:opacity-40"
-              disabled={curatedLoading}
-            >Refresh</button>
-          </div>
-        </div>
-        {curatedError && <div className="text-sm text-red-400 mb-3">{curatedError}</div>}
-        {curatedLoading && !curatedItems.length ? (
-          <div className="text-sm text-white/60">Loading curated templates…</div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {curatedItems.map(item => {
-              const rating = typeof item.rating === 'number' ? item.rating.toFixed(1) : '—';
-              const votes = typeof item.votes === 'number' ? numberFormatter.format(item.votes) : '0';
-              const ram = item.recommended_ram;
-              const serverTypeLabel = item.server_type ? String(item.server_type).toUpperCase() : 'TEMPLATE';
-              const minecraftVersionLabel = item.minecraft_version || '—';
-              const availabilityKey = String(item.availability || 'unknown').toLowerCase();
-              const availabilityMeta = {
-                ok: { label: 'Ready', tone: 'success' },
-                'latest-used': { label: 'Ready • Latest used', tone: 'success' },
-                'provider-unavailable': { label: 'Provider not configured', tone: 'warn' },
-                'missing-pack': { label: 'Pack missing', tone: 'error' },
-                'missing-version': { label: 'No versions', tone: 'error' },
-                'invalid-metadata': { label: 'Invalid metadata', tone: 'error' },
-                error: { label: 'Unavailable', tone: 'error' },
-                unknown: { label: 'Status unknown', tone: 'warn' },
-              }[availabilityKey] || { label: 'Status unknown', tone: 'warn' };
-              const toneClasses = {
-                success: 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/30',
-                warn: 'bg-amber-500/15 text-amber-100 border border-amber-400/30',
-                error: 'bg-red-500/15 text-red-200 border border-red-400/30',
-              };
-              const availabilityBadgeClass = toneClasses[availabilityMeta.tone] || toneClasses.warn;
-              const showInstallBlocked = new Set(['provider-unavailable', 'missing-pack', 'invalid-metadata', 'missing-version', 'error']).has(availabilityKey);
-              const providerLabel = String(item.install?.provider || item.provider || 'modrinth');
-              const providerConfigured = item.provider_configured !== false;
-              const availabilityMessageClass = availabilityMeta.tone === 'success'
-                ? 'text-emerald-100'
-                : availabilityMeta.tone === 'error'
-                  ? 'text-red-200'
-                  : 'text-amber-100';
-              return (
-                <div key={item.id} className="p-4 rounded-lg border border-white/10 bg-black/20 flex flex-col gap-3">
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="font-semibold text-white">{item.name}</div>
-                        <div className="text-xs text-white/60">
-                          {serverTypeLabel} · MC {minecraftVersionLabel}
-                        </div>
-                      </div>
-                      <div className="text-xs text-white/60 text-right">
-                        <div>⭐ {rating}</div>
-                        <div>{votes} votes</div>
-                      </div>
-                    </div>
-                    <div className="text-sm text-white/70 mt-2 line-clamp-3">{item.short_description || item.description}</div>
-                  </div>
-                  {Array.isArray(item.tags) && item.tags.length ? (
-                    <div className="flex flex-wrap gap-1 text-[11px] text-white/60">
-                      {item.tags.slice(0, 6).map(tag => (
-                        <span key={`${item.id}-${tag}`} className="px-2 py-0.5 rounded-full bg-white/10 border border-white/10">{tag}</span>
-                      ))}
-                    </div>
-                  ) : null}
-                  <div className="flex justify-between items-center text-[11px]">
-                    <span className={`px-2 py-0.5 rounded-full ${availabilityBadgeClass}`}>{availabilityMeta.label}</span>
-                    {!providerConfigured ? (
-                      <span className="text-amber-100">Provider key not configured</span>
-                    ) : null}
-                  </div>
-                  {item.availability_message ? (
-                    <div className={`text-xs ${availabilityMessageClass}`}>{item.availability_message}</div>
-                  ) : null}
-                  <div className="text-xs text-white/50 space-y-1">
-                    <div>Loader: {item.loader || item.server_type || '—'}</div>
-                    {ram && ram.min && ram.max ? (
-                      <div>Recommended RAM: {ram.min} – {ram.max}</div>
-                    ) : null}
-                    <div>Provider: {providerLabel}</div>
-                    {item.verified_by ? <div>Verified by: {item.verified_by}</div> : null}
-                  </div>
-                  <div className="flex items-center gap-2 mt-auto">
-                    <button
-                      onClick={() => openCuratedInstall(item)}
-                      className="px-3 py-1.5 rounded bg-brand-500 hover:bg-brand-600 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-                      disabled={showInstallBlocked}
-                    >Quick Install</button>
-                    {item.homepage ? (
-                      <a
-                        href={item.homepage}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-sm text-white/80"
-                      >Details</a>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-            {!curatedItems.length && !curatedLoading ? (
-              <div className="text-sm text-white/50">No curated templates are available yet.</div>
-            ) : null}
-          </div>
-        )}
       </div>
 
       <div className="bg-white/5 border border-white/10 rounded-lg p-6">
