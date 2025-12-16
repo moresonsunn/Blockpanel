@@ -424,6 +424,7 @@ class DockerManager:
                         "server_type": server_type,
                         "server_version": server_version,
                         "loader_version": loader_version,
+                        "created_at": attrs.get("Created"),
                         # Shorthand keys for UI convenience
                         "type": server_type,
                         "version": server_version,

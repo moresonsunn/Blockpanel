@@ -729,11 +729,44 @@ function ServerDetailsPage({
 
   // Prefer preloaded server info for instant render; fallback to fetch if missing
   const preloadedInfo = globalData.serverInfoById?.[server.id] || null;
-  const { data: fetchedInfo } = useFetch(
+  const { data: fetchedInfo, error: fetchedInfoError } = useFetch(
     !preloadedInfo && server?.id ? `${API}/servers/${server.id}/info` : null,
     [server?.id]
   );
   const typeVersionData = preloadedInfo || fetchedInfo || null;
+  const infoError = fetchedInfoError ? (fetchedInfoError.message || String(fetchedInfoError)) : null;
+
+  const primaryPort = useMemo(() => {
+    // Prefer explicit port_mappings from server info
+    const mapping = typeVersionData?.port_mappings?.["25565/tcp"];
+    if (mapping && mapping.host_port) {
+      return `${mapping.host_port} → 25565`;
+    }
+    // Fall back to host_port convenience field from the list endpoint
+    if (server?.host_port) {
+      return `${server.host_port} → 25565`;
+    }
+    // Legacy raw ports
+    if (server?.ports) {
+      const entries = Object.entries(server.ports)
+        .filter(([containerPort, mappings]) =>
+          containerPort.includes('25565') && mappings && mappings.length > 0
+        )
+        .map(([_, mappings]) => mappings[0]?.HostPort)
+        .filter(Boolean);
+      if (entries.length) {
+        return `${entries[0]} → 25565`;
+      }
+    }
+    return 'Not mapped';
+  }, [typeVersionData, server]);
+
+  const createdDisplay = useMemo(() => {
+    const created = typeVersionData?.created || typeVersionData?.state?.StartedAt || server?.created_at;
+    if (!created) return 'N/A';
+    const dt = new Date(created);
+    return Number.isNaN(dt.getTime()) ? 'N/A' : dt.toLocaleString();
+  }, [typeVersionData, server]);
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: FaServer },
@@ -905,6 +938,9 @@ function ServerDetailsPage({
           <div className="p-4 bg-black/20 rounded-lg">
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm text-white/70">Server Information</div>
+              {infoError ? (
+                <div className="text-xs text-red-400">Details unavailable: {String(infoError)}</div>
+              ) : null}
               <RenameServerButton currentName={server.name} onRenamed={(newName) => {
                 // Update local server name and trigger a refresh
                 server.name = newName;
@@ -927,24 +963,12 @@ function ServerDetailsPage({
               </div>
               <div>
                 <div className="text-white/50">Port</div>
-                <div>
-                  {server.ports
-                    ? Object.entries(server.ports)
-                        .filter(([containerPort, mappings]) => 
-                          containerPort.includes('25565') && mappings && mappings.length > 0
-                        )
-                        .map(([containerPort, mappings]) => {
-                          const hostPort = mappings[0]?.HostPort;
-                          return hostPort ? `${hostPort} → 25565` : '25565 (unmapped)';
-                        })
-                        .join(', ') || 'Not mapped'
-                    : 'N/A'}
-                </div>
+                <div>{primaryPort}</div>
               </div>
               <div>
                 <div className="text-white/50">Type</div>
                 <div>
-                  {typeVersionData?.server_type ||
+                  {typeVersionData?.server_type || typeVersionData?.labels?.["mc.type"] ||
                     server.type ||
                     <span className="text-white/40">Unknown</span>}
                 </div>
@@ -952,14 +976,14 @@ function ServerDetailsPage({
               <div>
                 <div className="text-white/50">Version</div>
                 <div>
-                  {typeVersionData?.server_version ||
+                  {typeVersionData?.server_version || typeVersionData?.labels?.["mc.version"] ||
                     server.version ||
                     <span className="text-white/40">Unknown</span>}
                 </div>
               </div>
               <div>
                 <div className="text-white/50">Created</div>
-                <div>{server.created_at ? new Date(server.created_at).toLocaleString() : 'N/A'}</div>
+                <div>{createdDisplay}</div>
               </div>
               <div>
                 <div className="text-white/50">ID</div>
