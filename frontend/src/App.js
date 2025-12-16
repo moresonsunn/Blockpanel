@@ -88,7 +88,6 @@ import {
   FaStop,
   FaTrash,
   FaTerminal,
-  FaPlusCircle,
   FaFolder,
   FaCog,
   FaUsers,
@@ -2398,59 +2397,18 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
 // Servers Page with Global Data
 function ServersPageWithGlobalData({
   servers: serversProp,
-  onSelectServer, onCreateServer,
-  types, versionsData, selectedType, setSelectedType,
-  name, setName, version, setVersion, hostPort, setHostPort,
-  minRam, setMinRam, maxRam, setMaxRam, loaderVersion, setLoaderVersion,
-  loaderVersionsData, installerVersion, setInstallerVersion,
+  onSelectServer,
   onNavigate,
 }) {
   // Prefer servers passed from parent (kept in sync with details view); fallback to global data
   const globalData = useGlobalData();
   const servers = Array.isArray(serversProp) ? serversProp : (globalData?.servers || []);
-
-  // Auto-suggest a free host port on mount or when servers list changes
-  useEffect(() => {
-    let cancelled = false;
-    async function suggest() {
-      try {
-        if (!hostPort) {
-          const r = await fetch(`${API}/ports/suggest?start=25565&end=25999`);
-          if (!r.ok) return;
-          const d = await r.json();
-          if (!cancelled && d?.port) setHostPort(String(d.port));
-        }
-      } catch {}
-    }
-    suggest();
-    return () => { cancelled = true; };
-  }, [servers]);
   
   return (
     <ServersPage
       servers={servers}
       serversLoading={false} // Never loading with preloaded data!
       onSelectServer={onSelectServer}
-      onCreateServer={onCreateServer}
-      types={types}
-      versionsData={versionsData}
-      selectedType={selectedType}
-      setSelectedType={setSelectedType}
-      name={name}
-      setName={setName}
-      version={version}
-      setVersion={setVersion}
-      hostPort={hostPort}
-      setHostPort={setHostPort}
-      minRam={minRam}
-      setMinRam={setMinRam}
-      maxRam={maxRam}
-      setMaxRam={setMaxRam}
-      loaderVersion={loaderVersion}
-      setLoaderVersion={setLoaderVersion}
-      loaderVersionsData={loaderVersionsData}
-      installerVersion={installerVersion}
-      setInstallerVersion={setInstallerVersion}
       onNavigate={onNavigate}
     />
   );
@@ -2458,11 +2416,9 @@ function ServersPageWithGlobalData({
 
 // Original Servers Page
 function ServersPage({
-  servers, serversLoading, onSelectServer, onCreateServer,
-  types, versionsData, selectedType, setSelectedType,
-  name, setName, version, setVersion, hostPort, setHostPort,
-  minRam, setMinRam, maxRam, setMaxRam, loaderVersion, setLoaderVersion,
-  loaderVersionsData, installerVersion, setInstallerVersion,
+  servers,
+  serversLoading,
+  onSelectServer,
   onNavigate,
 }) {
   const normalizedServers = useMemo(
@@ -2624,138 +2580,6 @@ function ServersPage({
         </div>
       </div>
 
-      {/* Create Server Form */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <FaPlusCircle /> Create New Server
-        </h3>
-        <form onSubmit={onCreateServer} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-white/70 mb-2">Server Name</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-white/50"
-                placeholder="Enter server name"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-white/70 mb-2">Server Type</label>
-              <select
-                value={selectedType}
-                onChange={(e) => setSelectedType(e.target.value)}
-                className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white"
-              >
-                {types.map((t) => (
-                  <option key={t} value={t} style={{ backgroundColor: '#1f2937' }}>{t}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-white/70 mb-2">Version</label>
-              <select
-                value={version}
-                onChange={(e) => setVersion(e.target.value)}
-                className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white"
-              >
-                {(versionsData?.versions || []).map((v) => (
-                  <option key={v} value={v} style={{ backgroundColor: '#1f2937' }}>{v}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Loader version for modded servers */}
-          {SERVER_TYPES_WITH_LOADER.includes(selectedType) && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-2">Loader Version</label>
-                <select
-                  value={loaderVersion}
-                  onChange={(e) => setLoaderVersion(e.target.value)}
-                  className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white"
-                >
-                  {(loaderVersionsData?.loader_versions || []).map((lv) => (
-                    <option key={lv} value={lv} style={{ backgroundColor: '#1f2937' }}>{lv}</option>
-                  ))}
-                </select>
-              </div>
-              {selectedType === 'fabric' && (
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-2">Installer Version</label>
-                {Array.isArray(loaderVersionsData?.installer_versions) && loaderVersionsData.installer_versions.length > 0 ? (
-                  <select
-                    value={installerVersion}
-                    onChange={(e) => setInstallerVersion(e.target.value)}
-                    className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white"
-                  >
-                    {loaderVersionsData.installer_versions.map((iv) => (
-                      <option key={iv} value={iv} style={{ backgroundColor: '#1f2937' }}>{iv}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={installerVersion}
-                    onChange={(e) => setInstallerVersion(e.target.value)}
-                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-white/50"
-                    placeholder="e.g., 1.0.1"
-                  />
-                )}
-                <div className="text-xs text-white/40 mt-1">
-                  {loaderVersionsData?.latest_installer_version ? (
-                    <button type="button" className="underline" onClick={() => setInstallerVersion(loaderVersionsData.latest_installer_version)}>
-                      Use latest: {loaderVersionsData.latest_installer_version}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-              )}
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-white/70 mb-2">Host Port</label>
-              <input
-                type="number"
-                value={hostPort}
-                onChange={(e) => setHostPort(e.target.value)}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-white/50"
-                placeholder="25565"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-white/70 mb-2">Min RAM (MB)</label>
-              <input
-                type="number"
-                value={minRam}
-                onChange={(e) => setMinRam(e.target.value)}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-white/70 mb-2">Max RAM (MB)</label>
-              <input
-                type="number"
-                value={maxRam}
-                onChange={(e) => setMaxRam(e.target.value)}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
-              />
-            </div>
-          </div>
-          <button
-            type="submit"
-            className="bg-brand-500 hover:bg-brand-600 px-6 py-3 rounded-lg text-white font-medium flex items-center gap-2"
-          >
-            <FaPlusCircle /> Create Server
-          </button>
-        </form>
-      </div>
-
       {/* Servers List */}
       <div className="bg-white/5 border border-white/10 rounded-lg p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2834,8 +2658,17 @@ function ServersPage({
         {serversLoading ? (
           <div className="text-white/70">Loading servers...</div>
         ) : totalServers === 0 ? (
-          <div className="text-white/60 text-center py-8">
-            No servers created yet. Create your first server above.
+          <div className="text-white/60 text-center py-8 space-y-3">
+            <div>No servers created yet. Use Templates to create your first server.</div>
+            {onNavigate ? (
+              <button
+                type="button"
+                onClick={() => onNavigate('templates')}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded bg-brand-500 hover:bg-brand-600 text-white text-sm"
+              >
+                Go to Templates
+              </button>
+            ) : null}
           </div>
         ) : filteredServers.length === 0 ? (
           <div className="text-white/60 text-center py-8">
@@ -3425,26 +3258,6 @@ function App() {
               setPendingConfigFocus('');
               setSelectedServer(id);
             }}
-            onCreateServer={createServer}
-            types={types}
-            versionsData={versionsData}
-            selectedType={selectedType}
-            setSelectedType={setSelectedType}
-            name={name}
-            setName={setName}
-            version={version}
-            setVersion={setVersion}
-            hostPort={hostPort}
-            setHostPort={setHostPort}
-            minRam={minRam}
-            setMinRam={setMinRam}
-            maxRam={maxRam}
-            setMaxRam={setMaxRam}
-            loaderVersion={loaderVersion}
-            setLoaderVersion={setLoaderVersion}
-            loaderVersionsData={loaderVersionsData}
-            installerVersion={installerVersion}
-            setInstallerVersion={setInstallerVersion}
             onNavigate={(target) => {
               if (!target) return;
               setCurrentPage(target);
@@ -3464,7 +3277,30 @@ function App() {
       case 'templates':
         return (
           <React.Suspense fallback={<div className="p-6">Loading templates…</div>}>
-            <TemplatesPageLazy API={API} authHeaders={authHeaders} />
+            <TemplatesPageLazy
+              API={API}
+              authHeaders={authHeaders}
+              onCreateServer={createServer}
+              types={types}
+              versionsData={versionsData}
+              selectedType={selectedType}
+              setSelectedType={setSelectedType}
+              name={name}
+              setName={setName}
+              version={version}
+              setVersion={setVersion}
+              hostPort={hostPort}
+              setHostPort={setHostPort}
+              minRam={minRam}
+              setMinRam={setMinRam}
+              maxRam={maxRam}
+              setMaxRam={setMaxRam}
+              loaderVersion={loaderVersion}
+              setLoaderVersion={setLoaderVersion}
+              loaderVersionsData={loaderVersionsData}
+              installerVersion={installerVersion}
+              setInstallerVersion={setInstallerVersion}
+            />
           </React.Suspense>
         );
       case 'users':

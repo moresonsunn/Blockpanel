@@ -1,8 +1,33 @@
-import React, { useMemo, useState } from 'react';
-import { FaLayerGroup } from 'react-icons/fa';
+import React, { useEffect, useMemo, useState } from 'react';
+import { FaLayerGroup, FaPlusCircle } from 'react-icons/fa';
 import { normalizeRamInput } from '../utils/ram';
 
-export default function TemplatesPage({ API, authHeaders }) {
+const SERVER_TYPES_WITH_LOADER = ['fabric', 'forge', 'neoforge'];
+
+export default function TemplatesPage({
+  API,
+  authHeaders,
+  onCreateServer,
+  types = [],
+  versionsData,
+  selectedType: createSelectedType,
+  setSelectedType: setCreateSelectedType,
+  name: createName,
+  setName: setCreateName,
+  version: createVersion,
+  setVersion: setCreateVersion,
+  hostPort: createHostPort,
+  setHostPort: setCreateHostPort,
+  minRam: createMinRam,
+  setMinRam: setCreateMinRam,
+  maxRam: createMaxRam,
+  setMaxRam: setCreateMaxRam,
+  loaderVersion: createLoaderVersion,
+  setLoaderVersion: setCreateLoaderVersion,
+  loaderVersionsData: createLoaderVersionsData,
+  installerVersion: createInstallerVersion,
+  setInstallerVersion: setCreateInstallerVersion,
+}) {
   const safeAuthHeaders = useMemo(() => (typeof authHeaders === 'function' ? authHeaders : () => ({})), [authHeaders]);
 
   const [serverName, setServerName] = useState('mp-' + Math.random().toString(36).slice(2, 6));
@@ -39,6 +64,24 @@ export default function TemplatesPage({ API, authHeaders }) {
   const [installWorking, setInstallWorking] = useState(false);
 
   // Provider list is fixed (Modrinth & CurseForge), no curated marketplace.
+
+  // Suggest a free host port for the create-server form when none is set yet.
+  useEffect(() => {
+    const controller = new AbortController();
+    async function suggest() {
+      if (createHostPort) return;
+      try {
+        const r = await fetch(`${API}/ports/suggest?start=25565&end=25999`, { signal: controller.signal });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!controller.signal.aborted && d?.port) {
+          setCreateHostPort(String(d.port));
+        }
+      } catch {}
+    }
+    suggest();
+    return () => controller.abort();
+  }, [API, createHostPort, setCreateHostPort]);
 
   async function searchCatalog() {
     setCatalogLoading(true);
@@ -182,6 +225,142 @@ export default function TemplatesPage({ API, authHeaders }) {
           <FaLayerGroup className="text-brand-500" /> Templates & Modpacks
         </h1>
         <p className="text-white/70 mt-2">Import modpack server packs or search and install from providers</p>
+      </div>
+
+      <div className="bg-white/5 border border-white/10 rounded-lg p-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+          <div>
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <FaPlusCircle /> Create New Server
+            </h3>
+            <p className="text-sm text-white/60">Provision a fresh server without attaching a modpack.</p>
+          </div>
+        </div>
+        <form onSubmit={(e) => { if (onCreateServer) { onCreateServer(e); } else { e.preventDefault(); } }} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Server Name</label>
+              <input
+                type="text"
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-white/50"
+                placeholder="Enter server name"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Server Type</label>
+              <select
+                value={createSelectedType}
+                onChange={(e) => setCreateSelectedType(e.target.value)}
+                className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white"
+              >
+                {(types || []).map((t) => (
+                  <option key={t} value={t} style={{ backgroundColor: '#1f2937' }}>{t}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Version</label>
+              <select
+                value={createVersion}
+                onChange={(e) => setCreateVersion(e.target.value)}
+                className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white"
+              >
+                {(versionsData?.versions || []).map((v) => (
+                  <option key={v} value={v} style={{ backgroundColor: '#1f2937' }}>{v}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {SERVER_TYPES_WITH_LOADER.includes(createSelectedType) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">Loader Version</label>
+                <select
+                  value={createLoaderVersion}
+                  onChange={(e) => setCreateLoaderVersion(e.target.value)}
+                  className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white"
+                >
+                  {(createLoaderVersionsData?.loader_versions || []).map((lv) => (
+                    <option key={lv} value={lv} style={{ backgroundColor: '#1f2937' }}>{lv}</option>
+                  ))}
+                </select>
+              </div>
+              {createSelectedType === 'fabric' && (
+              <div>
+                <label className="block text-sm font-medium text-white/70 mb-2">Installer Version</label>
+                {Array.isArray(createLoaderVersionsData?.installer_versions) && createLoaderVersionsData.installer_versions.length > 0 ? (
+                  <select
+                    value={createInstallerVersion}
+                    onChange={(e) => setCreateInstallerVersion(e.target.value)}
+                    className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white"
+                  >
+                    {createLoaderVersionsData.installer_versions.map((iv) => (
+                      <option key={iv} value={iv} style={{ backgroundColor: '#1f2937' }}>{iv}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={createInstallerVersion}
+                    onChange={(e) => setCreateInstallerVersion(e.target.value)}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-white/50"
+                    placeholder="e.g., 1.0.1"
+                  />
+                )}
+                <div className="text-xs text-white/40 mt-1">
+                  {createLoaderVersionsData?.latest_installer_version ? (
+                    <button type="button" className="underline" onClick={() => setCreateInstallerVersion(createLoaderVersionsData.latest_installer_version)}>
+                      Use latest: {createLoaderVersionsData.latest_installer_version}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              )}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Host Port</label>
+              <input
+                type="number"
+                value={createHostPort}
+                onChange={(e) => setCreateHostPort(e.target.value)}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-white/50"
+                placeholder="25565"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Min RAM (MB)</label>
+              <input
+                type="number"
+                value={createMinRam}
+                onChange={(e) => setCreateMinRam(e.target.value)}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-2">Max RAM (MB)</label>
+              <input
+                type="number"
+                value={createMaxRam}
+                onChange={(e) => setCreateMaxRam(e.target.value)}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            className="bg-brand-500 hover:bg-brand-600 px-6 py-3 rounded-lg text-white font-medium flex items-center gap-2"
+          >
+            <FaPlusCircle /> Create Server
+          </button>
+        </form>
       </div>
 
       <div className="bg-white/5 border border-white/10 rounded-lg p-6">
