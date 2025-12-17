@@ -4,6 +4,21 @@ import { normalizeRamInput } from '../utils/ram';
 
 const SERVER_TYPES_WITH_LOADER = ['fabric', 'forge', 'neoforge'];
 
+const TMOD_WORLD_SIZE_OPTIONS = [
+  { value: '1', label: 'Small' },
+  { value: '2', label: 'Medium' },
+  { value: '3', label: 'Large' },
+];
+
+const TMOD_WORLD_DIFFICULTY_OPTIONS = [
+  { value: '0', label: 'Journey' },
+  { value: '1', label: 'Classic' },
+  { value: '2', label: 'Expert' },
+  { value: '3', label: 'Master' },
+];
+
+const TMOD_WORLD_ENV_KEY_SET = new Set(['WORLD_NAME', 'WORLD_FILENAME', 'WORLD_SIZE', 'WORLD_DIFFICULTY', 'WORLD_SEED']);
+
 export default function TemplatesPage({
   API,
   authHeaders,
@@ -95,7 +110,7 @@ export default function TemplatesPage({
     const envDefaults = {};
     if (game.env && typeof game.env === 'object') {
       Object.entries(game.env).forEach(([key, value]) => {
-        envDefaults[key] = value ?? '';
+        envDefaults[key] = value === undefined || value === null ? '' : String(value);
       });
     }
     setSteamSelectedGame(game);
@@ -979,11 +994,80 @@ export default function TemplatesPage({
 
                 <div className="space-y-3">
                   <div className="text-xs uppercase tracking-wide text-white/50">Environment overrides</div>
+                  {steamSelectedGame?.slug === 'tmodloader' ? (
+                    <div className="bg-white/5 border border-white/10 rounded-lg p-3 space-y-3">
+                      <div className="text-xs text-white/60 uppercase tracking-wide">Terraria world setup</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="block text-xs text-white/60">World name</label>
+                          <input
+                            className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white"
+                            value={steamForm.env?.WORLD_NAME ?? ''}
+                            onChange={(e) => updateSteamEnv('WORLD_NAME', e.target.value)}
+                            placeholder="Dedicated"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-xs text-white/60">World filename</label>
+                          <input
+                            className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white"
+                            value={steamForm.env?.WORLD_FILENAME ?? ''}
+                            onChange={(e) => updateSteamEnv('WORLD_FILENAME', e.target.value)}
+                            placeholder="Dedicated.wld"
+                          />
+                          <div className="text-[11px] text-white/40">Ends with .wld and must exist or be generated.</div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-xs text-white/60">World size</label>
+                          <select
+                            className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white"
+                            value={steamForm.env?.WORLD_SIZE === undefined || steamForm.env.WORLD_SIZE === null ? '3' : String(steamForm.env.WORLD_SIZE)}
+                            onChange={(e) => updateSteamEnv('WORLD_SIZE', e.target.value)}
+                            style={{ backgroundColor: '#1f2937' }}
+                          >
+                            {TMOD_WORLD_SIZE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value} style={{ backgroundColor: '#1f2937' }}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-xs text-white/60">World difficulty</label>
+                          <select
+                            className="w-full rounded bg-white/10 border border-white/20 px-3 py-2 text-white"
+                            value={steamForm.env?.WORLD_DIFFICULTY === undefined || steamForm.env.WORLD_DIFFICULTY === null ? '1' : String(steamForm.env.WORLD_DIFFICULTY)}
+                            onChange={(e) => updateSteamEnv('WORLD_DIFFICULTY', e.target.value)}
+                            style={{ backgroundColor: '#1f2937' }}
+                          >
+                            {TMOD_WORLD_DIFFICULTY_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value} style={{ backgroundColor: '#1f2937' }}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-xs text-white/60">World seed (optional)</label>
+                          <input
+                            className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white"
+                            value={steamForm.env?.WORLD_SEED ?? ''}
+                            onChange={(e) => updateSteamEnv('WORLD_SEED', e.target.value)}
+                            placeholder="Random"
+                          />
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-white/40">Adjust size and difficulty before first launch to generate the desired world.</div>
+                    </div>
+                  ) : null}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {Object.keys(steamForm.env || {}).length === 0 ? (
                       <div className="text-xs text-white/50">No environment variables exposed for this template.</div>
                     ) : null}
                     {Object.entries(steamForm.env || {}).map(([key, value]) => {
+                      if (steamSelectedGame?.slug === 'tmodloader' && TMOD_WORLD_ENV_KEY_SET.has(key)) {
+                        return null;
+                      }
                       const isSecret = key.toLowerCase().includes('password') || key.toLowerCase().includes('token');
                       return (
                         <div key={key} className="space-y-1">

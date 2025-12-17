@@ -1001,6 +1001,13 @@ class DockerManager:
             "io.casaos.parent": CASAOS_APP_ID,
             "io.casaos.managed": "true",
             "io.casaos.category": "Game Servers",
+            "io.casaos.group": CASAOS_APP_ID,
+            "io.casaos.subapp": "true",
+            "casaos": "casaos",
+            "origin": "blockpanel",
+            "name": name,
+            "custom_id": f"{CASAOS_APP_ID}-{name}",
+            "protocol": "tcp",
             # Optional: generic metadata that some dashboards honor
             "org.opencontainers.image.title": "BlockPanel Runtime",
             "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
@@ -1012,6 +1019,10 @@ class DockerManager:
                 labels.update({k: str(v) for k, v in extra_labels.items()})
             except Exception:
                 pass
+        if selected_host_port is not None:
+            labels["web"] = str(selected_host_port)
+        else:
+            labels.setdefault("web", "")
 
         # 6) Memory limits
         def ram_to_bytes(ram_str):
@@ -1136,28 +1147,6 @@ class DockerManager:
                     env_vars[str(k)] = str(v)
             except Exception:
                 pass
-        labels = {
-            MINECRAFT_LABEL: "true",
-            "mc.type": "custom",
-            # Group with controller using compose-style labels only
-            "com.docker.compose.project": COMPOSE_PROJECT,
-            "com.docker.compose.service": COMPOSE_RUNTIME_SERVICE,
-            "com.docker.compose.version": "2",
-            # CasaOS grouping to avoid Legacy App classification
-            "io.casaos.app": CASAOS_APP_ID,
-            "io.casaos.parent": CASAOS_APP_ID,
-            "io.casaos.managed": "true",
-            "io.casaos.category": "Game Servers",
-            "org.opencontainers.image.title": "BlockPanel Runtime",
-            "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
-        }
-        try:
-            for k, v in (extra_labels or {}).items():
-                if v is None:
-                    continue
-                labels[str(k)] = str(v)
-        except Exception:
-            pass
         try:
             run_kwargs = {}
             if (
@@ -1188,6 +1177,116 @@ class DockerManager:
             except Exception:
                 pass
 
+            template_section = meta.get("template")
+            template_info = template_section if isinstance(template_section, dict) else {}
+            source_template_section = meta.get("source_template")
+            source_template_info = source_template_section if isinstance(source_template_section, dict) else {}
+
+            def _first_non_empty(*values):
+                for value in values:
+                    if isinstance(value, str):
+                        candidate = value.strip()
+                        if candidate:
+                            return candidate
+                return None
+
+            server_type_guess = _first_non_empty(
+                (extra_labels or {}).get("mc.type") if extra_labels else None,
+                merged_env.get("SERVER_TYPE"),
+                merged_env.get("SERVER_KIND"),
+                meta.get("detected_type"),
+                meta.get("server_type"),
+                template_info.get("server_type"),
+                source_template_info.get("server_type"),
+                meta.get("type"),
+            )
+            server_version_guess = _first_non_empty(
+                (extra_labels or {}).get("mc.version") if extra_labels else None,
+                merged_env.get("SERVER_VERSION"),
+                merged_env.get("MINECRAFT_VERSION"),
+                merged_env.get("VERSION"),
+                meta.get("detected_version"),
+                meta.get("server_version"),
+                template_info.get("server_version"),
+                source_template_info.get("server_version"),
+                meta.get("version"),
+            )
+            loader_version_guess = _first_non_empty(
+                (extra_labels or {}).get("mc.loader_version") if extra_labels else None,
+                merged_env.get("LOADER_VERSION"),
+                merged_env.get("FABRIC_LOADER_VERSION"),
+                merged_env.get("SERVER_LOADER"),
+                meta.get("detected_loader_version"),
+                meta.get("loader_version"),
+                template_info.get("loader_version"),
+                source_template_info.get("loader_version"),
+            )
+            custom_id_guess = _first_non_empty(
+                (extra_labels or {}).get("custom_id") if extra_labels else None,
+                meta.get("custom_id"),
+                template_info.get("custom_id"),
+                source_template_info.get("custom_id"),
+            ) or f"{CASAOS_APP_ID}-{name}"
+
+            def _ensure_env_var(key: str, value: str | None):
+                if value is None:
+                    return
+                value_str = str(value).strip()
+                if not value_str:
+                    return
+                current_env_val = env_vars.get(key)
+                if not isinstance(current_env_val, str) or not current_env_val.strip():
+                    env_vars[key] = value_str
+                current_override = merged_env.get(key)
+                if not isinstance(current_override, str) or not current_override.strip():
+                    merged_env[key] = value_str
+
+            _ensure_env_var("SERVER_TYPE", server_type_guess)
+            _ensure_env_var("SERVER_VERSION", server_version_guess)
+            if loader_version_guess:
+                _ensure_env_var("LOADER_VERSION", loader_version_guess)
+                if (server_type_guess or "").lower() == "fabric":
+                    _ensure_env_var("FABRIC_LOADER_VERSION", loader_version_guess)
+
+            resolved_label_type = server_type_guess or "custom"
+            labels = {
+                MINECRAFT_LABEL: "true",
+                "mc.type": resolved_label_type,
+                # Group with controller using compose-style labels only
+                "com.docker.compose.project": COMPOSE_PROJECT,
+                "com.docker.compose.service": COMPOSE_RUNTIME_SERVICE,
+                "com.docker.compose.version": "2",
+                # CasaOS grouping to avoid Legacy App classification
+                "io.casaos.app": CASAOS_APP_ID,
+                "io.casaos.parent": CASAOS_APP_ID,
+                "io.casaos.managed": "true",
+                "io.casaos.category": "Game Servers",
+                "io.casaos.group": CASAOS_APP_ID,
+                "io.casaos.subapp": "true",
+                "casaos": "casaos",
+                "origin": "blockpanel",
+                "name": name,
+                "custom_id": custom_id_guess,
+                "protocol": "tcp",
+                "org.opencontainers.image.title": "BlockPanel Runtime",
+                "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
+            }
+            if server_version_guess:
+                labels["mc.version"] = str(server_version_guess)
+            if loader_version_guess:
+                labels["mc.loader_version"] = str(loader_version_guess)
+            try:
+                for k, v in (extra_labels or {}).items():
+                    if v is None:
+                        continue
+                    labels[str(k)] = str(v)
+            except Exception:
+                pass
+            if selected_host_port is not None:
+                labels["web"] = str(selected_host_port)
+            else:
+                labels.setdefault("web", "")
+
             # Determine numeric RAM values if provided (best-effort parsing)
             def _parse_mb(s):
                 try:
@@ -1207,14 +1306,12 @@ class DockerManager:
             try:
                 jar_path = server_dir / "server.jar"
                 min_jar_size = 1024 * 100
-                # Only attempt repair if we have explicit overrides or detected metadata
-                st = (merged_env.get("SERVER_TYPE") or meta.get("detected_type") or meta.get("server_type") or "").strip()
-                sv = (merged_env.get("SERVER_VERSION") or meta.get("detected_version") or meta.get("server_version") or meta.get("version") or "").strip()
-                loader_ver = (merged_env.get("FABRIC_LOADER_VERSION") or merged_env.get("LOADER_VERSION") or meta.get("loader_version") or "").strip()
-                if st and sv and ((not jar_path.exists()) or jar_path.stat().st_size < min_jar_size):
-                    logger.warning(f"server.jar missing/too small for {name}; attempting auto-repair using {st} {sv}...")
+                if server_type_guess and server_version_guess and ((not jar_path.exists()) or jar_path.stat().st_size < min_jar_size):
+                    logger.warning(
+                        f"server.jar missing/too small for {name}; attempting auto-repair using {server_type_guess} {server_version_guess}..."
+                    )
                     try:
-                        fix_server_jar(server_dir, st, sv, loader_version=loader_ver or None)
+                        fix_server_jar(server_dir, server_type_guess, server_version_guess, loader_version=loader_version_guess or None)
                     except Exception as rep_err:
                         logger.error(f"Auto-repair failed for {name}: {rep_err}")
             except Exception as auto_rep_err:
@@ -1244,6 +1341,23 @@ class DockerManager:
                 new_meta["env_overrides"] = merged_env
             if java_ver:
                 new_meta["java_version"] = str(java_ver)
+            if custom_id_guess:
+                new_meta.setdefault("custom_id", custom_id_guess)
+            if server_type_guess:
+                new_meta["server_type"] = server_type_guess
+                existing_detected_type = new_meta.get("detected_type")
+                if not isinstance(existing_detected_type, str) or not existing_detected_type.strip():
+                    new_meta["detected_type"] = server_type_guess
+            if server_version_guess:
+                new_meta["server_version"] = server_version_guess
+                existing_detected_version = new_meta.get("detected_version")
+                if not isinstance(existing_detected_version, str) or not existing_detected_version.strip():
+                    new_meta["detected_version"] = server_version_guess
+            if loader_version_guess:
+                new_meta["loader_version"] = loader_version_guess
+                existing_detected_loader = new_meta.get("detected_loader_version")
+                if not isinstance(existing_detected_loader, str) or not existing_detected_loader.strip():
+                    new_meta["detected_loader_version"] = loader_version_guess
             try:
                 (SERVERS_ROOT / name).mkdir(parents=True, exist_ok=True)
                 meta_path.write_text(json.dumps(new_meta), encoding="utf-8")
@@ -1368,7 +1482,17 @@ class DockerManager:
             "io.casaos.category": "Game Servers",
             "io.casaos.group": CASAOS_APP_ID,
             "io.casaos.subapp": "true",
+            "casaos": "casaos",
+            "origin": "blockpanel",
+            "name": name,
+            "custom_id": f"{CASAOS_APP_ID}-{name}",
         }
+
+        if port_binding:
+            primary_port = next(iter(port_binding.values()), None)
+            if primary_port is not None:
+                labels["web"] = str(primary_port)
+                labels["protocol"] = "tcp"
 
         if extra_labels:
             for label_key, label_value in extra_labels.items():

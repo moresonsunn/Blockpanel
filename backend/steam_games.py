@@ -61,15 +61,20 @@ STEAM_GAMES = {
         "summary": "Modded Terraria server via tModLoader with SteamCMD builds.",
         "notes": "Set world seed, max players, and password as desired.",
         "default_name": "tmodloader",
-        "image": "beardedio/terraria-tmodloader:latest",
+        "image": "ghcr.io/beardedio/terraria:latest",
         "ports": [
             {"container": 7777, "protocol": "tcp"},
         ],
         "env": {
             "WORLD_NAME": "Dedicated",
             "MAX_PLAYERS": 8,
+            "TYPE": "tmodloader",
+            "WORLD_FILENAME": "Dedicated.wld",
+            "WORLD_SIZE": 3,
+            "WORLD_DIFFICULTY": 1,
+            "WORLD_SEED": "",
         },
-        "volume": {"container": "/data"},
+        "volume": {"container": "/config"},
     },
     "cs2": {
         "display_name": "Counter-Strike 2",
