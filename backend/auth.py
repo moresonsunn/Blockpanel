@@ -210,7 +210,7 @@ def get_user_permissions(user: User, db: Session) -> List[str]:
         return user_service.get_user_permissions(user)
     except ImportError:
         # Fallback to basic role-based permissions if UserService not available
-        if user.role == "admin":
+        if user.role in ("admin", "owner"):
             return ["*"]
         elif user.role == "moderator":
             return ["server.view", "server.start", "server.stop", "server.console", "server.files", "server.config"]
@@ -225,8 +225,8 @@ def require_permission(permission: str):
     ) -> User:
         permissions = get_user_permissions(user, db)
         
-        # Admin has all permissions
-        if user.role == "admin" or "*" in permissions:
+        # Admin/Owner have all permissions
+        if user.role in ("admin", "owner") or "*" in permissions:
             return user
             
         if permission not in permissions:
@@ -247,8 +247,8 @@ def require_any_permission(permissions: List[str]):
     ) -> User:
         user_permissions = get_user_permissions(user, db)
         
-        # Admin has all permissions
-        if user.role == "admin" or "*" in user_permissions:
+        # Admin/Owner have all permissions
+        if user.role in ("admin", "owner") or "*" in user_permissions:
             return user
             
         has_permission = any(perm in user_permissions for perm in permissions)
@@ -268,7 +268,7 @@ def require_role(required_role: str):
     def role_dependency(
         user: User = Depends(require_auth)
     ) -> User:
-        role_hierarchy = {"admin": 3, "moderator": 2, "user": 1}
+        role_hierarchy = {"owner": 4, "admin": 3, "moderator": 2, "user": 1}
         user_level = role_hierarchy.get(user.role, 0)
         required_level = role_hierarchy.get(required_role, 999)
         

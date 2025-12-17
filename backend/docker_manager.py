@@ -56,6 +56,7 @@ RUNTIME_IMAGE = (
     else "mc-runtime:latest"
 )
 MINECRAFT_PORT = 25565
+DEFAULT_STEAM_PORT_START = 20000
 
 # --- Helper functions for direct jar download fallback ---
 
@@ -351,6 +352,21 @@ class DockerManager:
         # Simple in-memory caches
         self._stats_cache: dict[str, tuple[float, dict]] = {}
 
+    def _ensure_client(self) -> None:
+        """Ensure the Docker client is ready; recreate it if the connection dropped."""
+        if getattr(self, "client", None) is None:
+            self.client = self._init_client()
+            return
+        try:
+            # Ping the daemon to confirm the existing client is still valid.
+            self.client.ping()
+        except Exception:
+            try:
+                self.client.close()
+            except Exception:
+                pass
+            self.client = self._init_client()
+
     def _init_client(self) -> docker.DockerClient:
         docker_host = os.environ.get("DOCKER_HOST")
         if docker_host:
@@ -376,7 +392,7 @@ class DockerManager:
 
     def list_servers(self):
         try:
-            containers = self.client.containers.list(all=True, filters={"label": [MINECRAFT_LABEL]})
+            containers = self.client.containers.list(all=True)
             result = []
             for c in containers:
                 try:
@@ -385,10 +401,18 @@ class DockerManager:
                     network = attrs.get("NetworkSettings", {})
                     # Extract server type and version from labels if present
                     labels = (attrs.get("Config", {}) or {}).get("Labels", {}) or {}
-                    server_type = labels.get("mc.type", None)
-                    server_version = labels.get("mc.version", None)
-                    # Optionally, extract loader version if present
-                    loader_version = labels.get("mc.loader_version", None)
+                    is_minecraft = str(labels.get(MINECRAFT_LABEL, "")).lower() == "true"
+                    is_steam = str(labels.get("steam.server", "")).lower() == "true"
+                    if not (is_minecraft or is_steam):
+                        continue
+
+                    server_type = labels.get("mc.type") if is_minecraft else None
+                    server_version = labels.get("mc.version") if is_minecraft else None
+                    loader_version = labels.get("mc.loader_version") if is_minecraft else None
+                    steam_game = labels.get("steam.game") if is_steam else None
+                    if is_steam:
+                        server_type = f"steam:{steam_game}" if steam_game else "steam"
+                        server_version = labels.get("steam.version")
                     
                     # Extract actual host port mappings
                     port_mappings = {}
@@ -411,7 +435,56 @@ class DockerManager:
                                 }
                         else:
                             port_mappings[container_port] = None
+
+                    primary_host_port = None
+                    try:
+                        for mapping in port_mappings.values():
+                            if isinstance(mapping, dict):
+                                hp = mapping.get("host_port")
+                                if hp:
+                                    primary_host_port = int(hp) if str(hp).isdigit() else hp
+                                    break
+                    except Exception:
+                        primary_host_port = None
+
+                    mounts = attrs.get("Mounts", [])
+                    data_path = None
+                    try:
+                        if mounts:
+                            first_mount = next((m for m in mounts if isinstance(m, dict) and m.get("Source")), None)
+                            if first_mount:
+                                data_path = first_mount.get("Source")
+                    except Exception:
+                        data_path = None
                     
+                    steam_ports: List[Dict[str, object]] = []
+                    try:
+                        for raw_key, mapping in port_mappings.items():
+                            if not isinstance(raw_key, str):
+                                continue
+                            parts = raw_key.split("/", 1)
+                            if not parts:
+                                continue
+                            container_port = parts[0]
+                            proto = parts[1] if len(parts) > 1 else "tcp"
+                            try:
+                                c_port_int = int(container_port)
+                            except Exception:
+                                c_port_int = container_port
+                            host_port = None
+                            host_ip = None
+                            if isinstance(mapping, dict):
+                                host_port = mapping.get("host_port")
+                                host_ip = mapping.get("host_ip")
+                            steam_ports.append({
+                                "container_port": c_port_int,
+                                "protocol": proto.lower(),
+                                "host_port": host_port,
+                                "host_ip": host_ip,
+                            })
+                    except Exception:
+                        steam_ports = []
+
                     result.append({
                         "id": c.id,
                         "name": c.name,
@@ -420,10 +493,16 @@ class DockerManager:
                         "labels": labels,
                         "ports": raw_ports,  # Keep raw ports for backward compatibility
                         "port_mappings": port_mappings,  # New field with actual host port mappings
-                        "mounts": attrs.get("Mounts", []),
+                        "mounts": mounts,
                         "server_type": server_type,
                         "server_version": server_version,
                         "loader_version": loader_version,
+                        "steam_game": steam_game,
+                        "server_kind": "steam" if is_steam else "minecraft",
+                        "primary_host_port": primary_host_port,
+                        "data_path": data_path,
+                        "steam_ports": steam_ports,
+                        "host_port": primary_host_port,
                         "created_at": attrs.get("Created"),
                         # Shorthand keys for UI convenience
                         "type": server_type,
@@ -447,14 +526,24 @@ class DockerManager:
         try:
             container = self.client.containers.get(container_id)
             labels = getattr(container, "labels", {})
-            server_type = labels.get("mc.type", None)
-            server_version = labels.get("mc.version", None)
-            loader_version = labels.get("mc.loader_version", None)
+            server_kind = "minecraft"
+            server_type = labels.get("mc.type")
+            server_version = labels.get("mc.version")
+            loader_version = labels.get("mc.loader_version")
+            steam_game = None
+            if str(labels.get("steam.server", "")).lower() == "true":
+                server_kind = "steam"
+                steam_game = labels.get("steam.game")
+                server_type = f"steam:{steam_game}" if steam_game else "steam"
+                server_version = labels.get("steam.version")
+                loader_version = None
             return {
                 "id": container.id,
                 "server_type": server_type,
                 "server_version": server_version,
                 "loader_version": loader_version,
+                "server_kind": server_kind,
+                "steam_game": steam_game,
             }
         except docker.errors.NotFound:
             logger.warning(f"Container {container_id} not found when getting server type/version")
@@ -485,6 +574,17 @@ class DockerManager:
             config = attrs.get("Config", {})
             network = attrs.get("NetworkSettings", {})
             labels = (attrs.get("Config", {}) or {}).get("Labels", {}) or {}
+            server_kind = "minecraft"
+            steam_game = None
+            server_type = labels.get("mc.type")
+            server_version = labels.get("mc.version")
+            loader_version = labels.get("mc.loader_version")
+            if str(labels.get("steam.server", "")).lower() == "true":
+                server_kind = "steam"
+                steam_game = labels.get("steam.game")
+                server_type = f"steam:{steam_game}" if steam_game else "steam"
+                server_version = labels.get("steam.version")
+                loader_version = None
             
             # Get server stats if container is running
             stats = None
@@ -522,6 +622,7 @@ class DockerManager:
             
             # Extract actual host port mappings
             port_mappings = {}
+            steam_ports: List[Dict[str, object]] = []
             raw_ports = network.get("Ports", {})
             for container_port, host_bindings in raw_ports.items():
                 if host_bindings and isinstance(host_bindings, list) and len(host_bindings) > 0:
@@ -541,6 +642,45 @@ class DockerManager:
                         }
                 else:
                     port_mappings[container_port] = None
+
+                try:
+                    parts = str(container_port).split("/", 1)
+                    c_port = parts[0]
+                    proto = parts[1] if len(parts) > 1 else "tcp"
+                    try:
+                        c_port_val = int(c_port)
+                    except Exception:
+                        c_port_val = c_port
+                    mapping = port_mappings.get(container_port)
+                    steam_ports.append({
+                        "container_port": c_port_val,
+                        "protocol": proto.lower(),
+                        "host_port": mapping.get("host_port") if isinstance(mapping, dict) else None,
+                        "host_ip": mapping.get("host_ip") if isinstance(mapping, dict) else None,
+                    })
+                except Exception:
+                    continue
+
+            primary_host_port = None
+            try:
+                for mapping in port_mappings.values():
+                    if isinstance(mapping, dict):
+                        hp = mapping.get("host_port")
+                        if hp:
+                            primary_host_port = int(hp) if str(hp).isdigit() else hp
+                            break
+            except Exception:
+                primary_host_port = None
+
+            mounts = attrs.get("Mounts", [])
+            data_path = None
+            try:
+                if mounts:
+                    first_mount = next((m for m in mounts if isinstance(m, dict) and m.get("Source")), None)
+                    if first_mount:
+                        data_path = first_mount.get("Source")
+            except Exception:
+                data_path = None
             
             return {
                 "id": container.id,
@@ -550,10 +690,15 @@ class DockerManager:
                 "labels": labels,
                 "ports": raw_ports,
                 "port_mappings": port_mappings,
-                "mounts": attrs.get("Mounts", []),
-                "server_type": labels.get("mc.type", None),
-                "server_version": labels.get("mc.version", None),
-                "loader_version": labels.get("mc.loader_version", None),
+                "mounts": mounts,
+                "server_type": server_type,
+                "server_version": server_version,
+                "loader_version": loader_version,
+                "server_kind": server_kind,
+                "steam_game": steam_game,
+                "primary_host_port": primary_host_port,
+                "data_path": data_path,
+                "steam_ports": steam_ports,
                 "java_version": java_version,
                 "java_bin": java_bin,
                 "java_args": java_opts,
@@ -614,10 +759,19 @@ class DockerManager:
         """
         used: set[int] = set()
         try:
-            filters = {"label": [MINECRAFT_LABEL]} if only_minecraft else None
-            containers = self.client.containers.list(all=True, filters=filters)
+            containers = self.client.containers.list(all=True)
             for c in containers:
                 try:
+                    attrs = c.attrs or {}
+                    labels = (attrs.get("Config", {}) or {}).get("Labels", {}) or {}
+                    is_minecraft = str(labels.get(MINECRAFT_LABEL, "")).lower() == "true"
+                    is_steam = str(labels.get("steam.server", "")).lower() == "true"
+                    if only_minecraft:
+                        if not is_minecraft:
+                            continue
+                    else:
+                        if not (is_minecraft or is_steam):
+                            continue
                     ports = (c.attrs.get("NetworkSettings", {}) or {}).get("Ports", {}) or {}
                     for container_port, bindings in ports.items():
                         if only_minecraft and not str(container_port).startswith(f"{MINECRAFT_PORT}/"):
@@ -844,7 +998,9 @@ class DockerManager:
             "com.docker.compose.version": "2",
             # CasaOS grouping to avoid Legacy App classification
             "io.casaos.app": CASAOS_APP_ID,
+            "io.casaos.parent": CASAOS_APP_ID,
             "io.casaos.managed": "true",
+            "io.casaos.category": "Game Servers",
             # Optional: generic metadata that some dashboards honor
             "org.opencontainers.image.title": "BlockPanel Runtime",
             "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
@@ -989,7 +1145,9 @@ class DockerManager:
             "com.docker.compose.version": "2",
             # CasaOS grouping to avoid Legacy App classification
             "io.casaos.app": CASAOS_APP_ID,
+            "io.casaos.parent": CASAOS_APP_ID,
             "io.casaos.managed": "true",
+            "io.casaos.category": "Game Servers",
             "org.opencontainers.image.title": "BlockPanel Runtime",
             "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
         }
@@ -1144,6 +1302,114 @@ class DockerManager:
             raise RuntimeError(f"Failed to create Docker container for server {name}: {e}")
 
 
+    def create_steam_container(
+        self,
+        *,
+        name: str,
+        image: str,
+        ports: list[dict],
+        env: dict | None = None,
+        volume: dict | None = None,
+        command: list[str] | None = None,
+        restart_policy: dict | None = None,
+        extra_labels: dict | None = None,
+    ) -> dict:
+        """Create a non-Minecraft container (Steam or other dedicated server).
+
+        ports: list of {"container": 27015, "protocol": "udp"|"tcp", "host": optional int}
+        volume: {"host": Path, "container": "/data"}
+        """
+        self._ensure_client()
+
+        # Resolve host port bindings
+        port_binding: dict[str, int | None] = {}
+        used = self.get_used_host_ports(only_minecraft=False)
+        for p in ports:
+            try:
+                cport = int(p.get("container"))
+                proto = (p.get("protocol") or "tcp").lower()
+                key = f"{cport}/{proto}"
+                preferred = p.get("host")
+                host_val = None
+                if preferred and isinstance(preferred, int) and preferred > 0:
+                    if preferred not in used:
+                        host_val = preferred
+                else:
+                    # Try to keep host port equal to container port when free.
+                    if cport not in used and 1 <= cport <= 65535:
+                        host_val = cport
+                if host_val is None:
+                    # Fallback to dynamic range until we find a free port.
+                    attempts = 0
+                    while True:
+                        candidate = self.pick_available_port(start=DEFAULT_STEAM_PORT_START, end=65000)
+                        attempts += 1
+                        if candidate not in used:
+                            host_val = candidate
+                            break
+                        if attempts > 1000:
+                            raise RuntimeError("Unable to allocate a free host port for Steam container")
+                used.add(host_val)
+                port_binding[key] = host_val
+            except Exception as e:
+                logger.warning(f"Failed to bind port {p}: {e}")
+                raise
+
+        labels = {
+            "steam.server": "true",
+            "steam.name": name,
+            # Group alongside the controller for dashboards
+            "com.docker.compose.project": COMPOSE_PROJECT,
+            "com.docker.compose.service": "steam-server",
+            "com.docker.compose.version": "2",
+            "io.casaos.app": CASAOS_APP_ID,
+            "io.casaos.parent": CASAOS_APP_ID,
+            "io.casaos.managed": "true",
+            "io.casaos.category": "Game Servers",
+            "io.casaos.group": CASAOS_APP_ID,
+            "io.casaos.subapp": "true",
+        }
+
+        if extra_labels:
+            for label_key, label_value in extra_labels.items():
+                try:
+                    labels[label_key] = str(label_value)
+                except Exception:
+                    pass
+
+        volume_mounts = None
+        if volume and volume.get("host") and volume.get("container"):
+            volume_mounts = {str(Path(volume["host"])): {"bind": volume["container"], "mode": "rw"}}
+
+        run_kwargs = {}
+        if restart_policy:
+            run_kwargs["restart_policy"] = restart_policy
+
+        container = self.client.containers.run(
+            image,
+            name=name,
+            detach=True,
+            tty=True,
+            stdin_open=True,
+            environment={k: str(v) for k, v in (env or {}).items()},
+            ports=port_binding,
+            volumes=volume_mounts,
+            network=COMPOSE_NETWORK if COMPOSE_NETWORK else None,
+            command=command,
+            labels=labels,
+            **run_kwargs,
+        )
+
+        return {
+            "id": container.id,
+            "name": container.name,
+            "image": image,
+            "ports": port_binding,
+            "labels": labels,
+            "status": getattr(container, "status", "unknown"),
+        }
+
+
     def start_server(self, container_id):
         """Start the container and attempt a lightweight readiness check.
         Does not block for long; callers can poll logs/status if needed.
@@ -1242,17 +1508,42 @@ class DockerManager:
         removed_dir = False
         try:
             server_dir = SERVERS_ROOT / name_hint
-            if server_dir.exists() and server_dir.is_dir():
+            target_removed = False
+            if server_dir.exists():
                 import shutil
-                shutil.rmtree(server_dir, ignore_errors=True)
-                removed_dir = not server_dir.exists()
-            else:
+                # Handle symlinked Steam directories without wiping shared targets unexpectedly
+                if server_dir.is_symlink():
+                    try:
+                        target = server_dir.resolve()
+                    except Exception:
+                        target = None
+                    server_dir.unlink(missing_ok=True)
+                    target_removed = True
+                    if target and target.exists() and target.is_dir():
+                        shutil.rmtree(target, ignore_errors=True)
+                        target_removed = not target.exists()
+                elif server_dir.is_dir():
+                    shutil.rmtree(server_dir, ignore_errors=True)
+                    target_removed = not server_dir.exists()
+            if not target_removed:
                 # Fallback: if name_hint was an ID but directory uses container name, try to list possible match
                 alt_dir = SERVERS_ROOT / str(container_id)
-                if alt_dir.exists() and alt_dir.is_dir():
+                if alt_dir.exists():
                     import shutil
-                    shutil.rmtree(alt_dir, ignore_errors=True)
-                    removed_dir = not alt_dir.exists()
+                    if alt_dir.is_symlink():
+                        try:
+                            target = alt_dir.resolve()
+                        except Exception:
+                            target = None
+                        alt_dir.unlink(missing_ok=True)
+                        target_removed = True
+                        if target and target.exists() and target.is_dir():
+                            shutil.rmtree(target, ignore_errors=True)
+                            target_removed = target_removed or (not target.exists())
+                    elif alt_dir.is_dir():
+                        shutil.rmtree(alt_dir, ignore_errors=True)
+                        target_removed = target_removed or (not alt_dir.exists())
+            removed_dir = target_removed
         except Exception as e:
             logger.warning(f"Failed to remove server directory for {container_id}: {e}")
         return {"id": container_id, "deleted": True, "dir_removed": removed_dir}

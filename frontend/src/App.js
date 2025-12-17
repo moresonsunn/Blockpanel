@@ -390,9 +390,10 @@ export function GlobalDataProvider({ children }) {
     preloadAllData();
 
     // Set up optimized background refresh intervals for balanced performance
+    // Keep a light fallback poll; primary real-time updates come via SSE below.
     refreshIntervals.current.servers = setInterval(() => {
       refreshDataInBackground('servers', `${API}/servers`, (data) => Array.isArray(data) ? data : []);
-    }, 5000);
+    }, 15000);
 
     refreshIntervals.current.dashboardData = setInterval(() => {
       refreshDataInBackground('dashboardData', `${API}/monitoring/dashboard-data`);
@@ -443,6 +444,34 @@ export function GlobalDataProvider({ children }) {
       } catch {}
     };
   }, []);
+
+  // Real-time server list updates via SSE (falls back to polling above)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const token = getStoredToken();
+    if (!token) return;
+
+    const es = new EventSource(`${API}/servers/stream?token=${encodeURIComponent(token)}`);
+
+    es.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload?.type === 'servers' && Array.isArray(payload.servers)) {
+          setGlobalData(cur => ({ ...cur, servers: payload.servers }));
+        }
+      } catch {
+        // ignore malformed payloads
+      }
+    };
+
+    es.onerror = () => {
+      try { es.close(); } catch {}
+    };
+
+    return () => {
+      try { es.close(); } catch {}
+    };
+  }, [API]);
 
   // Preload server info (type/version + dir snapshots) for all servers after initial load
   useEffect(() => {
@@ -705,6 +734,15 @@ function ServerDetailsPage({
   const [blockedFileError, setBlockedFileError] = useState('');
   const stats = useServerStats(server.id);
   const [logReset, setLogReset] = useState(0);
+  const prettify = useCallback((value) => {
+    if (!value) return '';
+    return value
+      .toString()
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }, []);
 
   // Wrap power actions to bump log reset so TerminalPanel clears and refetches
   const onStartWrapped = useCallback(async (id) => {
@@ -735,8 +773,22 @@ function ServerDetailsPage({
   );
   const typeVersionData = preloadedInfo || fetchedInfo || null;
   const infoError = fetchedInfoError ? (fetchedInfoError.message || String(fetchedInfoError)) : null;
+  const runtimeKind = (typeVersionData?.server_kind || server?.server_kind || '').toLowerCase();
+  const isSteam = runtimeKind === 'steam';
+  const steamPorts = useMemo(() => {
+    const raw = typeVersionData?.steam_ports ?? server?.steam_ports ?? [];
+    return Array.isArray(raw) ? raw : [];
+  }, [typeVersionData?.steam_ports, server?.steam_ports]);
 
   const primaryPort = useMemo(() => {
+    if (isSteam) {
+      if (!steamPorts.length) return 'Not mapped';
+      const first = steamPorts[0] || {};
+      const host = first.host_port ?? 'auto';
+      const target = first.container_port ? `${first.container_port}${first.protocol ? `/${first.protocol}` : ''}` : 'container';
+      const extras = steamPorts.length > 1 ? ` (+${steamPorts.length - 1} more)` : '';
+      return `${host} → ${target}${extras}`;
+    }
     // Prefer explicit port_mappings from server info
     const mapping = typeVersionData?.port_mappings?.["25565/tcp"];
     if (mapping && mapping.host_port) {
@@ -759,7 +811,7 @@ function ServerDetailsPage({
       }
     }
     return 'Not mapped';
-  }, [typeVersionData, server]);
+  }, [isSteam, steamPorts, typeVersionData, server]);
 
   const createdDisplay = useMemo(() => {
     const created = typeVersionData?.created || typeVersionData?.state?.StartedAt || server?.created_at;
@@ -768,15 +820,37 @@ function ServerDetailsPage({
     return Number.isNaN(dt.getTime()) ? 'N/A' : dt.toLocaleString();
   }, [typeVersionData, server]);
 
-  const tabs = [
-    { id: 'overview', label: 'Overview', icon: FaServer },
-    { id: 'files', label: 'Files', icon: FaFolder },
-    { id: 'config', label: 'Config', icon: FaCog },
-    { id: 'players', label: 'Players', icon: FaUsers },
-    { id: 'worlds', label: 'Worlds', icon: FaFolder },
-    { id: 'backup', label: 'Backup', icon: FaDownload },
-    { id: 'schedule', label: 'Schedule', icon: FaClock },
-  ];
+  const tabs = useMemo(() => {
+    const base = [
+      { id: 'overview', label: 'Overview', icon: FaServer },
+      { id: 'files', label: 'Files', icon: FaFolder },
+      { id: 'config', label: 'Config', icon: FaCog },
+      { id: 'players', label: 'Players', icon: FaUsers },
+      { id: 'worlds', label: 'Worlds', icon: FaFolder },
+      { id: 'backup', label: 'Backup', icon: FaDownload },
+      { id: 'schedule', label: 'Schedule', icon: FaClock },
+    ];
+    if (!isSteam) {
+      return base;
+    }
+    const allowed = new Set(['overview', 'files', 'backup', 'schedule']);
+    return base.filter(tab => allowed.has(tab.id));
+  }, [isSteam]);
+
+  const displayType = useMemo(() => {
+    if (isSteam) {
+      const game = prettify(typeVersionData?.steam_game || server?.steam_game || server?.type || 'Steam');
+      return game ? `Steam · ${game}` : 'Steam';
+    }
+    return typeVersionData?.server_type || typeVersionData?.labels?.['mc.type'] || server.type || 'Unknown';
+  }, [isSteam, prettify, server, typeVersionData]);
+
+  const displayVersion = useMemo(() => {
+    if (isSteam) {
+      return typeVersionData?.server_version || server?.version || 'latest';
+    }
+    return typeVersionData?.server_version || typeVersionData?.labels?.['mc.version'] || server.version || 'Unknown';
+  }, [isSteam, server, typeVersionData]);
 
     useEffect(() => {
       const validTabs = new Set(tabs.map((tab) => tab.id));
@@ -968,17 +1042,13 @@ function ServerDetailsPage({
               <div>
                 <div className="text-white/50">Type</div>
                 <div>
-                  {typeVersionData?.server_type || typeVersionData?.labels?.["mc.type"] ||
-                    server.type ||
-                    <span className="text-white/40">Unknown</span>}
+                  {displayType || <span className="text-white/40">Unknown</span>}
                 </div>
               </div>
               <div>
                 <div className="text-white/50">Version</div>
                 <div>
-                  {typeVersionData?.server_version || typeVersionData?.labels?.["mc.version"] ||
-                    server.version ||
-                    <span className="text-white/40">Unknown</span>}
+                  {displayVersion || <span className="text-white/40">Unknown</span>}
                 </div>
               </div>
               <div>
@@ -989,6 +1059,18 @@ function ServerDetailsPage({
                 <div className="text-white/50">ID</div>
                 <div>{server.id}</div>
               </div>
+              {isSteam ? (
+                <div>
+                  <div className="text-white/50">Steam Ports</div>
+                  <div>
+                    {steamPorts.length
+                      ? steamPorts
+                          .map(p => `${p.host_port ?? 'auto'} → ${p.container_port}${p.protocol ? `/${p.protocol}` : ''}`)
+                          .join(', ')
+                      : 'Not mapped'}
+                  </div>
+                </div>
+              ) : null}
             </div>
             <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
               <Stat
@@ -1045,7 +1127,7 @@ function ServerDetailsPage({
                   {server.id.slice(0, 12)}
                 </div>
                 <div className="text-xs text-white/50 mt-1">
-                  Type: {typeVersionData?.server_type || server.type || <span className="text-white/40">Unknown</span>} | Version: {typeVersionData?.server_version || server.version || <span className="text-white/40">Unknown</span>}
+                  Type: {displayType || <span className="text-white/40">Unknown</span>} | Version: {displayVersion || <span className="text-white/40">Unknown</span>}
                 </div>
               </div>
             </div>
@@ -1085,12 +1167,12 @@ function ServerDetailsPage({
             </div>
           </div>
           <div className="mt-8">
-            <div className="flex gap-4 border-b border-white/10 overflow-x-auto">
+            <div className="flex gap-3 md:gap-4 border-b border-white/10 overflow-x-auto pb-2 md:pb-0">
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-3 px-6 py-4 text-lg rounded-t-lg transition ${
+                  className={`flex items-center gap-2 md:gap-3 px-4 py-3 md:px-6 md:py-4 text-base md:text-lg rounded-t-lg transition whitespace-nowrap ${
                     activeTab === tab.id
                       ? 'bg-brand-500 text-white'
                       : 'text-white/70 hover:text-white hover:bg-white/10'
@@ -1101,7 +1183,7 @@ function ServerDetailsPage({
                 </button>
               ))}
             </div>
-            <div className="mt-4 flex flex-row gap-6">
+            <div className="mt-4 flex flex-col md:flex-row gap-6">
               {renderTabContent()}
             </div>
           </div>
@@ -1137,6 +1219,27 @@ const ServerListCard = React.memo(function ServerListCard({ server, onClick }) {
     [server?.id],
     { cacheDuration: 60000 } // Cache for 1 minute since this rarely changes
   );
+
+  const normalizeLabel = useCallback((value) => {
+    if (!value) return '';
+    return value
+      .toString()
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }, []);
+
+  const runtimeKind = (typeVersionData?.server_kind || server.server_kind || '').toLowerCase();
+  const isSteam = runtimeKind === 'steam';
+  const steamGame = typeVersionData?.steam_game || server.steam_game;
+  const displayKind = isSteam
+    ? `Steam · ${normalizeLabel(steamGame || server.type || 'Dedicated')}`
+    : normalizeLabel(server.type || typeVersionData?.server_type || 'Minecraft');
+  const primaryHostPort = typeVersionData?.primary_host_port
+    ?? server.primary_host_port
+    ?? server.host_port;
+  const dataPath = typeVersionData?.data_path || server.data_path;
   
   // Predictive preloading on hover
   const handleMouseEnter = useCallback(() => {
@@ -1149,35 +1252,46 @@ const ServerListCard = React.memo(function ServerListCard({ server, onClick }) {
 
   return (
     <div
-      className="rounded-xl bg-gradient-to-b from-white/10 to-white/5 border border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-6 transition-all duration-200 hover:from-white/15 hover:to-white/10"
+      className="rounded-xl bg-gradient-to-b from-white/10 to-white/5 border border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-5 md:p-6 transition-all duration-200 hover:from-white/15 hover:to-white/10"
       onClick={onClick}
       onMouseEnter={handleMouseEnter}
       tabIndex={0}
       role="button"
       style={{ minHeight: 100 }}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-5">
-          <div className="w-12 h-12 rounded-lg bg-brand-500/90 ring-4 ring-brand-500/20 inline-flex items-center justify-center text-2xl text-white shadow-md">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-4 md:gap-5">
+          <div className="w-12 h-12 rounded-lg bg-brand-500/90 ring-4 ring-brand-500/20 inline-flex items-center justify-center text-2xl text-white shadow-md flex-shrink-0">
             <FaServer />
           </div>
           <div>
-            <div className="font-bold text-xl">{server.name}</div>
-            <div className="text-sm text-white/60">{server.id.slice(0, 12)}</div>
-            <div className="text-xs text-white/60 mt-1">
-              Type: {typeVersionData?.server_type || server.type || <span className="text-white/40">Unknown</span>} · Version: {typeVersionData?.server_version || server.version || <span className="text-white/40">Unknown</span>}
+            <div className="font-bold text-lg md:text-xl leading-tight">{server.name}</div>
+            <div className="text-xs md:text-sm text-white/60 break-all">{server.id.slice(0, 12)}</div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] md:text-xs text-white/60 mt-1">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/10 border border-white/15">
+                {displayKind || <span className="text-white/40">Unknown</span>}
+              </span>
+              <span>
+                Version: {typeVersionData?.server_version || server.version || <span className="text-white/40">Unknown</span>}
+              </span>
+              {primaryHostPort ? (
+                <span>Port: {primaryHostPort}</span>
+              ) : null}
             </div>
+            {dataPath ? (
+              <div className="text-[10px] text-white/40 mt-1 break-all">{dataPath}</div>
+            ) : null}
             {stats && !stats.error && (
-              <div className="flex items-center gap-2 mt-2 text-[11px] text-white/80">
+              <div className="flex flex-wrap items-center gap-2 mt-2 text-[11px] text-white/80">
                 <span className="rounded-full bg-white/10 px-2 py-0.5 shadow-inner">CPU {stats.cpu_percent}%</span>
                 <span className="rounded-full bg-white/10 px-2 py-0.5 shadow-inner">RAM {stats.memory_usage_mb}/{stats.memory_limit_mb} MB</span>
               </div>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 md:self-start">
           <div
-            className={`text-sm px-3 py-1.5 rounded-full border ${
+            className={`text-xs md:text-sm px-3 py-1.5 rounded-full border ${
               server.status === 'running'
                 ? 'bg-green-500/15 text-green-300 border-green-400/20'
                 : 'bg-yellow-500/15 text-yellow-300 border-yellow-400/20'
@@ -1185,7 +1299,7 @@ const ServerListCard = React.memo(function ServerListCard({ server, onClick }) {
           >
             {server.status}
           </div>
-          <FaChevronRight className="text-white/40 text-xl" />
+          <FaChevronRight className="text-white/40 text-lg md:text-xl" />
         </div>
       </div>
     </div>
@@ -2798,42 +2912,13 @@ function App() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
 
-  const [themeMode, setThemeMode] = useState(() => {
-    if (typeof document !== 'undefined') {
-      const attr = document.documentElement.getAttribute('data-theme');
-      if (attr === 'light' || attr === 'dark') {
-        return attr;
-      }
-    }
-    if (typeof window !== 'undefined') {
-      const stored = window.localStorage.getItem(THEME_MODE_KEY);
-      if (stored === 'light' || stored === 'dark') {
-        return stored;
-      }
-    }
-    return 'dark';
-  });
+  const [themeMode, setThemeMode] = useState('dark');
 
-  const [colorblindMode, setColorblindMode] = useState(() => {
-    if (typeof document !== 'undefined') {
-      const attr = document.documentElement.getAttribute('data-colorblind');
-      if (attr === 'on') {
-        return true;
-      }
-    }
-    if (typeof window !== 'undefined') {
-      return window.localStorage.getItem(COLORBLIND_KEY) === 'on';
-    }
-    return false;
-  });
+  const [colorblindMode, setColorblindMode] = useState(false);
 
-  const toggleThemeMode = useCallback(() => {
-    setThemeMode((prev) => (prev === 'dark' ? 'light' : 'dark'));
-  }, []);
+  const toggleThemeMode = useCallback(() => {}, []); // disabled; keeping stub to avoid ref churn
 
-  const toggleColorblindMode = useCallback(() => {
-    setColorblindMode((prev) => !prev);
-  }, []);
+  const toggleColorblindMode = useCallback(() => {}, []);
   
   // Main navigation state
   const [currentPage, setCurrentPage] = useState('dashboard');
@@ -3512,27 +3597,6 @@ function App() {
               </div>
               <div className="flex items-center gap-2 sm:gap-3">
                 <GlobalSearchBar onNavigate={handleGlobalNavigate} className="w-40 sm:w-64 md:w-80" />
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={toggleThemeMode}
-                    className="p-2 rounded-lg bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-                    aria-label={themeMode === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-                    title={themeMode === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-                  >
-                    {themeMode === 'dark' ? <FaSun /> : <FaMoon />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={toggleColorblindMode}
-                    className={`p-2 rounded-lg border transition-colors ${colorblindMode ? 'bg-brand-500/20 border-brand-500 text-white' : 'bg-white/5 border-white/10 text-white/70 hover:text-white hover:bg-white/10'}`}
-                    aria-pressed={colorblindMode}
-                    aria-label={colorblindMode ? 'Disable accessible palette' : 'Enable accessible palette'}
-                    title={colorblindMode ? 'Disable accessible palette' : 'Enable accessible palette'}
-                  >
-                    <FaUniversalAccess />
-                  </button>
-                </div>
                 <div className="hidden sm:block text-sm text-white/70">
                   Welcome back, {currentUser?.username || 'User'}
                 </div>
@@ -3973,7 +4037,22 @@ function CreateUserModal({ show, onClose, newUser, setNewUser, roles, onSubmit }
 
 // Role Details Modal
 function RoleDetailsModal({ role, onClose }) {
+  const gd = useGlobalData();
   const [permissions, setPermissions] = React.useState([]);
+  const [localRole, setLocalRole] = React.useState(role || null);
+  const [selectedPerms, setSelectedPerms] = React.useState(new Set(role?.permissions || []));
+  const [editMode, setEditMode] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [filter, setFilter] = React.useState('');
+
+  React.useEffect(() => {
+    setLocalRole(role || null);
+    setSelectedPerms(new Set(role?.permissions || []));
+    setEditMode(false);
+    setError('');
+  }, [role]);
+
   React.useEffect(() => {
     let cancelled = false;
     async function loadPermissions() {
@@ -3981,7 +4060,7 @@ function RoleDetailsModal({ role, onClose }) {
         const r = await fetch(`${API}/users/permissions`, { headers: authHeaders() });
         if (!r.ok) return;
         const data = await r.json();
-        if (!cancelled) setPermissions(data.permissions || []);
+        if (!cancelled) setPermissions(Array.isArray(data.permissions) ? data.permissions : []);
       } catch {}
     }
     loadPermissions();
@@ -3989,43 +4068,138 @@ function RoleDetailsModal({ role, onClose }) {
   }, [role?.name]);
 
   const permsByCategory = React.useMemo(() => {
-    const map = new Map(permissions.map(p => [p.name, p]));
     const grouped = {};
-    (role?.permissions || []).forEach(name => {
-      const p = map.get(name) || { name, category: 'uncategorized' };
+    const set = selectedPerms;
+    permissions.forEach((p) => {
       const cat = p.category || 'uncategorized';
       if (!grouped[cat]) grouped[cat] = [];
-      grouped[cat].push(p);
+      if (filter && !p.name.toLowerCase().includes(filter.toLowerCase())) return;
+      grouped[cat].push({ ...p, checked: set.has(p.name) });
     });
     Object.keys(grouped).forEach(cat => grouped[cat].sort((a, b) => a.name.localeCompare(b.name)));
     return grouped;
-  }, [permissions, role]);
+  }, [permissions, selectedPerms, filter]);
 
-  if (!role) return null;
+  if (!localRole) return null;
+
+  const togglePerm = (name) => {
+    setSelectedPerms((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  };
+
+  const selectAllCategory = (cat, value) => {
+    setSelectedPerms((prev) => {
+      const next = new Set(prev);
+      (permsByCategory[cat] || []).forEach((p) => {
+        if (value) next.add(p.name); else next.delete(p.name);
+      });
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      const body = { description: localRole.description, permissions: Array.from(selectedPerms) };
+      const resp = await fetch(`${API}/users/roles/${encodeURIComponent(localRole.name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(body)
+      });
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        const msg = payload?.detail || payload?.message || `HTTP ${resp.status}`;
+        throw new Error(msg);
+      }
+      const updated = payload.role || { ...localRole, permissions: Array.from(selectedPerms) };
+      setLocalRole(updated);
+      setEditMode(false);
+      // refresh global roles list
+      gd?.__refreshBG && gd.__refreshBG('roles', `${API}/users/roles`, (d) => d.roles || []);
+    } catch (e) {
+      setError(e.message || 'Failed to update role');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-      <div className="bg-gray-900 border border-white/10 rounded-lg p-6 w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-2xl">
+      <div className="bg-gray-900 border border-white/10 rounded-lg p-6 w-full max-w-4xl max-h-[85vh] overflow-y-auto shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-xl font-semibold text-white">{role.name}</h3>
-            <p className="text-white/70 text-sm">{role.description}</p>
+            <h3 className="text-xl font-semibold text-white">{localRole.name}</h3>
+            <p className="text-white/70 text-sm">{localRole.description}</p>
           </div>
           <div className="flex items-center gap-2">
-            {role.is_system && <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">system</span>}
+            {localRole.is_system && <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">system</span>}
+            {!editMode && (
+              <button
+                onClick={() => setEditMode(true)}
+                className="px-3 py-1 rounded bg-white/10 hover:bg-white/20 text-white/80 text-sm"
+              >Edit</button>
+            )}
           </div>
         </div>
 
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/20 text-red-300 p-3 rounded mb-3 text-sm">{error}</div>
+        )}
+
+        {editMode && (
+          <div className="mb-3 flex items-center gap-2">
+            <input
+              className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white"
+              placeholder="Filter permissions"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+            <button
+              onClick={() => setSelectedPerms(new Set(permissions.map(p => p.name)))}
+              className="px-3 py-2 rounded bg-white/10 text-white/80 hover:bg-white/20 text-sm"
+            >Select all</button>
+            <button
+              onClick={() => setSelectedPerms(new Set())}
+              className="px-3 py-2 rounded bg-white/10 text-white/80 hover:bg-white/20 text-sm"
+            >Clear</button>
+          </div>
+        )}
+
         <div className="space-y-4">
           {Object.entries(permsByCategory).length === 0 ? (
-            <div className="text-white/60">No permissions assigned.</div>
+            <div className="text-white/60">No permissions available.</div>
           ) : (
             Object.entries(permsByCategory).map(([cat, perms]) => (
               <div key={cat} className="bg-gray-800/50 border border-white/10 rounded p-3">
-                <div className="text-white/80 font-medium mb-2">{cat.replace(/_/g,' ')}</div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-white/80 font-medium">{cat.replace(/_/g,' ')}</div>
+                  {editMode && (
+                    <div className="flex items-center gap-2 text-xs text-white/70">
+                      <button onClick={() => selectAllCategory(cat, true)} className="px-2 py-1 bg-white/10 rounded">All</button>
+                      <button onClick={() => selectAllCategory(cat, false)} className="px-2 py-1 bg-white/10 rounded">None</button>
+                    </div>
+                  )}
+                </div>
                 <ul className="grid grid-cols-1 md:grid-cols-2 gap-1">
                   {perms.map(p => (
-                    <li key={p.name} className="text-sm text-white/80">{p.name}</li>
+                    <li key={p.name} className="text-sm text-white/80 flex items-center gap-2">
+                      {editMode ? (
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={p.checked}
+                            onChange={() => togglePerm(p.name)}
+                          />
+                          <span>{p.name}</span>
+                        </label>
+                      ) : (
+                        <span>{p.name}</span>
+                      )}
+                    </li>
                   ))}
                 </ul>
               </div>
@@ -4034,6 +4208,20 @@ function RoleDetailsModal({ role, onClose }) {
         </div>
 
         <div className="flex justify-end gap-3 mt-6">
+          {editMode && (
+            <>
+              <button
+                onClick={() => { setEditMode(false); setSelectedPerms(new Set(localRole.permissions || [])); setFilter(''); setError(''); }}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded text-white"
+                disabled={saving}
+              >Cancel</button>
+              <button
+                onClick={handleSave}
+                className="px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded text-white disabled:opacity-50"
+                disabled={saving}
+              >{saving ? 'Saving…' : 'Save'}</button>
+            </>
+          )}
           <button onClick={onClose} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded text-white">Close</button>
         </div>
       </div>

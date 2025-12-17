@@ -331,6 +331,9 @@ class LocalRuntimeManager:
                         meta = json.loads(mp.read_text(encoding="utf-8"))
                 except Exception:
                     meta = {}
+                if str(meta.get("server_kind", "")).lower() == "steam":
+                    # Steam servers are managed via Docker, skip local entry
+                    continue
                 host_port = meta.get("host_port") or MINECRAFT_PORT
                 items.append({
                     "id": name,

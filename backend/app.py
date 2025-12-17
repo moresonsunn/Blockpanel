@@ -47,11 +47,15 @@ from routers import (
 from repair_routes import router as repair_router
 from probe_routes import router as probe_router
 from maintenance_routes import router as maintenance_router
+from steam_routes import router as steam_router
 from server_types_routes import router as server_types_router
-from auth import require_auth, get_current_user, require_admin, require_moderator, get_password_hash
+from auth import require_auth, get_current_user, require_admin, require_moderator, get_password_hash, verify_token, get_user_by_username
 from scheduler import get_scheduler
 from models import User
 from config import SERVERS_ROOT, APP_NAME, APP_VERSION
+import json
+import asyncio
+import hashlib
 
 def get_forge_loader_versions(mc_version: str) -> list[str]:
     url = f"https://files.minecraftforge.net/net/minecraftforge/forge/index_{mc_version}.html"
@@ -167,6 +171,7 @@ app.include_router(server_types_router)
 app.include_router(repair_router)
 app.include_router(probe_router)
 app.include_router(maintenance_router)
+app.include_router(steam_router)
 
 # /api aliases to avoid ad-block filters blocking paths like /servers/stats or /auth/login
 for _router in [
@@ -186,6 +191,7 @@ for _router in [
     repair_router,
     probe_router,
     maintenance_router,
+    steam_router,
 ]:
     try:
         app.include_router(_router, prefix="/api")
@@ -776,6 +782,61 @@ def get_server_info(container_id: str, request: Request):
         return JSONResponse(content=info, headers=headers)
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Server info unavailable: {e}")
+
+
+@app.get("/servers/stream")
+@app.get("/api/servers/stream")
+async def stream_servers(request: Request, token: str | None = Query(None)):
+    """Server-sent events stream of the server list. Emits only when the list changes.
+
+    EventSource cannot send Authorization headers, so we accept a token query param
+    (JWT or session token). This keeps the stream lightweight while giving near-real-time updates
+    without frequent polling.
+    """
+    # Resolve user from token param to allow EventSource auth
+    db = SessionLocal()
+    user = None
+    if token:
+        try:
+            payload = verify_token(token)
+            if payload and payload.get("sub"):
+                user = get_user_by_username(db, payload["sub"])
+        except Exception:
+            user = None
+        if user is None:
+            try:
+                from user_service import UserService  # lazy import to avoid circular
+                user_service = UserService(db)
+                user = user_service.get_user_by_session_token(token, refresh_expiry=True)
+            except Exception:
+                user = None
+
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    dm = get_docker_manager()
+
+    async def event_generator():
+        last_sig = None
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    servers = dm.list_servers()
+                    sig = hashlib.md5(json.dumps(servers, default=str, sort_keys=True).encode()).hexdigest()
+                    if sig != last_sig:
+                        last_sig = sig
+                        yield f"data: {json.dumps({'type': 'servers', 'servers': servers, 'sig': sig}, default=str)}\n\n"
+                except Exception as e:
+                    yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            return
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/servers/{container_id}/console")
 @app.get("/api/servers/{container_id}/console")

@@ -63,10 +63,66 @@ class LocalAdapter:
 
     def __init__(self) -> None:
         self.local = LocalRuntimeManager()
+        self._docker = None
+        self._steam_index: Dict[str, Dict[str, Any]] = {}
+
+    def _get_docker(self):
+        if self._docker is None:
+            try:
+                from docker_manager import DockerManager  # Local import to avoid circular dependency
+            except Exception as exc:
+                raise RuntimeError(f"Docker manager unavailable: {exc}")
+            self._docker = DockerManager()
+        return self._docker
+
+    def _refresh_steam_index(self, entries: List[Dict[str, Any]]) -> None:
+        index: Dict[str, Dict[str, Any]] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("server_kind", "")).lower() != "steam":
+                continue
+            cid = str(entry.get("id") or "")
+            name = str(entry.get("name") or "")
+            if cid:
+                index[cid] = entry
+            if name:
+                index[name] = entry
+        self._steam_index = index
+
+    def _resolve_steam_id(self, container_id: str) -> Optional[str]:
+        if not container_id:
+            return None
+        cached = self._steam_index.get(container_id)
+        if cached and str(cached.get("server_kind", "")).lower() == "steam":
+            return str(cached.get("id"))
+        try:
+            docker = self._get_docker()
+        except Exception:
+            return None
+        try:
+            container = docker.client.containers.get(container_id)
+        except Exception:
+            return None
+        labels = (container.attrs.get("Config", {}) or {}).get("Labels", {}) or {}
+        if str(labels.get("steam.server", "")).lower() == "true":
+            identifier = container.id
+            data = {
+                "id": identifier,
+                "name": getattr(container, "name", container_id),
+                "status": getattr(container, "status", "unknown"),
+                "server_kind": "steam",
+            }
+            self._steam_index[identifier] = data
+            self._steam_index[data["name"]] = data
+            return identifier
+        return None
 
     # --- Server lifecycle ---
     def list_servers(self) -> List[Dict]:
         items = self.local.list_servers()
+        for it in items:
+            it.setdefault("server_kind", "minecraft")
         for it in items:
             name = it.get("name") or it.get("id")
             it.setdefault("labels", {})
@@ -95,6 +151,27 @@ class LocalAdapter:
                         it["labels"] = lbl
             except Exception:
                 pass
+
+        steam_entries: List[Dict[str, Any]] = []
+        try:
+            docker = self._get_docker()
+            docker_servers = docker.list_servers()
+            for entry in docker_servers:
+                try:
+                    if str(entry.get("server_kind", "")).lower() != "steam":
+                        continue
+                    steam_entry = dict(entry)
+                    steam_entries.append(steam_entry)
+                except Exception:
+                    continue
+        except Exception:
+            steam_entries = []
+
+        if steam_entries:
+            self._refresh_steam_index(steam_entries)
+            items.extend(steam_entries)
+        else:
+            self._steam_index = {}
         return items
 
     def create_server(
@@ -170,15 +247,27 @@ class LocalAdapter:
         return result
 
     def stop_server(self, container_id: str) -> Dict:
+        steam_id = self._resolve_steam_id(container_id)
+        if steam_id:
+            return self._get_docker().stop_server(steam_id)
         return self.local.stop_server(container_id)
 
     def start_server(self, container_id: str) -> Dict:
         # For local runtime, starting means spawn from existing folder.
         # Pass None for RAM so LocalRuntimeManager preserves saved metadata values.
+        steam_id = self._resolve_steam_id(container_id)
+        if steam_id:
+            return self._get_docker().start_server(steam_id)
         return self.local.create_server_from_existing(container_id, min_ram=None, max_ram=None)
 
     def restart_server(self, container_id: str) -> Dict:
         # Stop then start again from existing
+        try:
+            steam_id = self._resolve_steam_id(container_id)
+        except Exception:
+            steam_id = None
+        if steam_id:
+            return self._get_docker().restart_server(steam_id)
         try:
             self.local.stop_server(container_id)
         except Exception:
@@ -187,9 +276,15 @@ class LocalAdapter:
         return self.local.create_server_from_existing(container_id, min_ram=None, max_ram=None)
 
     def kill_server(self, container_id: str) -> Dict:
+        steam_id = self._resolve_steam_id(container_id)
+        if steam_id:
+            return self._get_docker().kill_server(steam_id)
         return self.local.stop_server(container_id)
 
     def delete_server(self, container_id: str) -> Dict:
+        steam_id = self._resolve_steam_id(container_id)
+        if steam_id:
+            return self._get_docker().delete_server(steam_id)
         return self.local.stop_server(container_id)
 
     def update_metadata(self, container_id: str, **fields: Any) -> None:
@@ -197,6 +292,9 @@ class LocalAdapter:
 
     # --- Info & metrics ---
     def get_server_stats(self, container_id: str) -> Dict:
+        steam_id = self._resolve_steam_id(container_id)
+        if steam_id:
+            return self._get_docker().get_server_stats(steam_id)
         p = (SERVERS_ROOT / container_id).resolve()
         pid = None
         try:
@@ -288,9 +386,17 @@ class LocalAdapter:
         return results
 
     def get_player_info(self, container_id: str) -> Dict:
+        steam_id = self._resolve_steam_id(container_id)
+        if steam_id:
+            return {"online": 0, "max": 0, "names": []}
         return {"online": 0, "max": 0, "names": []}
 
     def get_server_info(self, container_id: str) -> Dict:
+        steam_id = self._resolve_steam_id(container_id)
+        if steam_id:
+            info = self._get_docker().get_server_info(steam_id)
+            info.setdefault("server_kind", "steam")
+            return info
         p = (SERVERS_ROOT / container_id).resolve()
         exists = p.exists()
         meta: Dict[str, Any] = {}
@@ -343,6 +449,7 @@ class LocalAdapter:
             "port_mappings": {f"{MINECRAFT_PORT}/tcp": {"host_port": host_port, "host_ip": None}},
             "exists": exists,
             "java_args": java_args,
+            "server_kind": str(meta.get("server_kind") or "minecraft").lower(),
         }
         return info
 
@@ -449,6 +556,14 @@ class LocalAdapter:
 
     # --- Console/logs ---
     def get_server_logs(self, container_id: str, tail: int = 200) -> Dict:
+        steam_id = self._resolve_steam_id(container_id)
+        if steam_id:
+            try:
+                logs = self._get_docker().get_server_logs(steam_id, tail=tail)
+                logs.setdefault("server_kind", "steam")
+                return logs
+            except Exception:
+                return {"id": container_id, "logs": ""}
         log_path = (SERVERS_ROOT / container_id / "server.stdout.log").resolve()
         try:
             if not log_path.exists():
@@ -460,9 +575,15 @@ class LocalAdapter:
             return {"id": container_id, "logs": ""}
 
     def get_server_terminal(self, container_id: str, tail: int = 100) -> Dict:
+        steam_id = self._resolve_steam_id(container_id)
+        if steam_id:
+            return self.get_server_logs(steam_id, tail=tail)
         return self.get_server_logs(container_id, tail=tail)
 
     def send_command(self, container_id: str, command: str) -> Dict:
+        steam_id = self._resolve_steam_id(container_id)
+        if steam_id:
+            return self._get_docker().send_command(steam_id, command)
         fifo_path = (SERVERS_ROOT / container_id / "console.in").resolve()
         try:
             if not fifo_path.exists():
