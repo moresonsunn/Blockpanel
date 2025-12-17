@@ -3162,13 +3162,17 @@ function App() {
     () => (typesData && typesData.types) || [],
     [typesData]
   );
-  const servers = useMemo(
-    () => (Array.isArray(serversData) ? serversData : []),
-    [serversData]
-  );
 
   // Global data context (use once at top-level; reuse inside callbacks)
   const gd = useGlobalData();
+
+  const servers = useMemo(() => {
+    const globalServers = Array.isArray(gd?.servers) ? gd.servers : [];
+    if (globalServers.length) {
+      return globalServers;
+    }
+    return Array.isArray(serversData) ? serversData : [];
+  }, [gd?.servers, serversData]);
 
   const handleGlobalNavigate = useCallback((item) => {
     if (!item) return;
