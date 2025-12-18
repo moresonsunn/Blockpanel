@@ -12,7 +12,7 @@
   "scheme": "http",
   "icon": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/casaos-appstore/assets/blockpanel-unified-icon.png",
   "thumbnail": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/casaos-appstore/assets/blockpanel-unified-icon.png",
-  "categories": ["Game Servers"],
+  "categories": ["Games"],
   "restart": "unless-stopped",
   "container_list": [
     {
@@ -50,7 +50,7 @@
         {"name": "io.casaos.app", "value": "blockpanel-unified"},
         {"name": "io.casaos.parent", "value": "blockpanel-unified"},
         {"name": "io.casaos.managed", "value": "true"},
-        {"name": "io.casaos.category", "value": "Game Servers"}
+        {"name": "io.casaos.category", "value": "Games"}
       ],
       "health_check": {
         "test": ["CMD", "curl", "-f", "http://localhost:8000/health/quick"],

@@ -11,7 +11,7 @@
   "scheme": "http",
   "icon": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico",
   "thumbnail": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico",
-  "categories": ["Game Servers"],
+  "categories": ["Games"],
   "restart": "unless-stopped",
   "container_list": [
     {
