@@ -1713,7 +1713,6 @@ class DockerManager:
             "io.casaos.subapp": "true",
             "io.casaos.title": name,
             "io.casaos.description": f"Steam server {name}",
-            "casaos": "casaos",
             "origin": "blockpanel",
             "name": name,
             "custom_id": f"{casaos_app_id}-{name}",
