@@ -1,4 +1,4 @@
-FROM openjdk:21-slim
+FROM openjdk:latest
 # Build metadata (populated via build args in CI)
 ARG APP_VERSION=dev
 ARG GIT_COMMIT=unknown
