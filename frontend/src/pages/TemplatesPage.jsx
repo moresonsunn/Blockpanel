@@ -18,6 +18,7 @@ const TMOD_WORLD_DIFFICULTY_OPTIONS = [
 ];
 
 const TMOD_WORLD_ENV_KEY_SET = new Set(['WORLD_NAME', 'WORLD_FILENAME', 'WORLD_SIZE', 'WORLD_DIFFICULTY', 'WORLD_SEED']);
+const STEAM_PER_PAGE = 9;
 
 export default function TemplatesPage({
   API,
@@ -60,6 +61,8 @@ export default function TemplatesPage({
   const [steamGames, setSteamGames] = useState([]);
   const [steamGamesLoading, setSteamGamesLoading] = useState(false);
   const [steamGamesError, setSteamGamesError] = useState('');
+  const [steamPage, setSteamPage] = useState(0);
+  const [steamHasMore, setSteamHasMore] = useState(false);
   const [steamSelectedGame, setSteamSelectedGame] = useState(null);
   const [steamForm, setSteamForm] = useState({ name: '', hostPort: '', env: {} });
   const [steamSubmitting, setSteamSubmitting] = useState(false);
@@ -71,19 +74,25 @@ export default function TemplatesPage({
       setSteamGamesLoading(true);
       setSteamGamesError('');
       try {
-        const response = await fetch(`${API}/steam/games?include_all=true`, { headers: safeAuthHeaders() });
+        const limit = STEAM_PER_PAGE + 1;
+        const offset = Math.max(steamPage * STEAM_PER_PAGE, 0);
+        const response = await fetch(`${API}/steam/games?limit=${limit}&offset=${offset}`, { headers: safeAuthHeaders() });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           const message = data?.detail || `HTTP ${response.status}`;
           throw new Error(message);
         }
         if (!cancelled) {
-          setSteamGames(Array.isArray(data?.games) ? data.games : []);
+          const rawGames = Array.isArray(data?.games) ? data.games : [];
+          const hasExtra = rawGames.length > STEAM_PER_PAGE;
+          setSteamHasMore(hasExtra);
+          setSteamGames(hasExtra ? rawGames.slice(0, STEAM_PER_PAGE) : rawGames);
         }
       } catch (error) {
         if (!cancelled) {
           setSteamGames([]);
           setSteamGamesError(String(error?.message || error));
+          setSteamHasMore(false);
         }
       } finally {
         if (!cancelled) {
@@ -93,9 +102,49 @@ export default function TemplatesPage({
     }
     loadSteamGames();
     return () => {
+                  const isSelected = steamSelectedGame?.slug === game.slug;
+                  return (
+                    <div
+                      key={game.slug || game.name}
+                      className={`bg-white/5 border rounded-lg p-4 space-y-3 transition-all ${
+                        isSelected ? 'border-brand-400/40 bg-brand-500/10 shadow-lg shadow-brand-500/20' : 'border-white/10'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-white font-semibold text-sm sm:text-base">{game.name || game.slug}</div>
+                          <div className="text-xs text-white/50 mt-1 break-words">{game.summary || game.notes || 'Generic dedicated server template.'}</div>
+                        </div>
+                        <span className="text-xs bg-brand-500/15 text-brand-200 px-2 py-0.5 rounded">Linux</span>
+                      </div>
+                      <div className="text-xs text-white/50">
+                        Ports: {(game.ports || []).map((p) => `${p.container}/${(p.protocol || 'tcp').toUpperCase()}`).join(', ') || 'n/a'}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openSteamGameInstaller(game)}
+                        className={`w-full inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                          isSelected ? 'bg-brand-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'
+                        }`}
+                        disabled={steamSubmitting && !isSelected}
+                      >
+                        {isSelected ? 'Selected' : 'Deploy'}
+                      </button>
+                    </div>
+                  );
       cancelled = true;
     };
-  }, [API, safeAuthHeaders]);
+  }, [API, safeAuthHeaders, steamPage]);
+
+  const goToPreviousSteamPage = () => {
+    setSteamPage((prev) => (prev > 0 ? prev - 1 : 0));
+  };
+
+  const goToNextSteamPage = () => {
+    if (steamHasMore) {
+      setSteamPage((prev) => prev + 1);
+    }
+  };
 
   const randomSuffix = () => Math.random().toString(36).slice(2, 6);
 
@@ -867,45 +916,66 @@ export default function TemplatesPage({
           {steamGamesLoading ? (
             <div className="text-sm text-white/60">Loading Steam catalog…</div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {steamGames.map((game) => {
-                const isSelected = steamSelectedGame?.slug === game.slug;
-                return (
-                  <div
-                    key={game.slug || game.name}
-                    className={`bg-white/5 border rounded-lg p-4 space-y-3 transition-all ${
-                      isSelected ? 'border-brand-400/40 bg-brand-500/10 shadow-lg shadow-brand-500/20' : 'border-white/10'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-white font-semibold text-sm sm:text-base">{game.name || game.slug}</div>
-                        <div className="text-xs text-white/50 mt-1 break-words">{game.summary || game.notes || 'Generic dedicated server template.'}</div>
-                      </div>
-                      <span className="text-xs bg-brand-500/15 text-brand-200 px-2 py-0.5 rounded">Linux</span>
-                    </div>
-                    <div className="text-xs text-white/50">
-                      Ports: {(game.ports || []).map((p) => `${p.container}/${(p.protocol || 'tcp').toUpperCase()}`).join(', ') || 'n/a'}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => openSteamGameInstaller(game)}
-                      className={`w-full inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                        isSelected ? 'bg-brand-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {steamGames.map((game) => {
+                  const isSelected = steamSelectedGame?.slug === game.slug;
+                  return (
+                    <div
+                      key={game.slug || game.name}
+                      className={`bg-white/5 border rounded-lg p-4 space-y-3 transition-all ${
+                        isSelected ? 'border-brand-400/40 bg-brand-500/10 shadow-lg shadow-brand-500/20' : 'border-white/10'
                       }`}
-                      disabled={steamSubmitting && !isSelected}
                     >
-                      {isSelected ? 'Selected' : 'Deploy'}
-                    </button>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-white font-semibold text-sm sm:text-base">{game.name || game.slug}</div>
+                          <div className="text-xs text-white/50 mt-1 break-words">{game.summary || game.notes || 'Generic dedicated server template.'}</div>
+                        </div>
+                        <span className="text-xs bg-brand-500/15 text-brand-200 px-2 py-0.5 rounded">Linux</span>
+                      </div>
+                      <div className="text-xs text-white/50">
+                        Ports: {(game.ports || []).map((p) => `${p.container}/${(p.protocol || 'tcp').toUpperCase()}`).join(', ') || 'n/a'}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openSteamGameInstaller(game)}
+                        className={`w-full inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                          isSelected ? 'bg-brand-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'
+                        }`}
+                        disabled={steamSubmitting && !isSelected}
+                      >
+                        {isSelected ? 'Selected' : 'Deploy'}
+                      </button>
+                    </div>
+                  );
+                })}
+                {steamGames.length === 0 && !steamGamesError ? (
+                  <div className="col-span-full bg-white/5 border border-white/10 rounded-lg p-6 text-sm text-white/60 text-center">
+                    No Steam templates available yet. Check back soon.
                   </div>
-                );
-              })}
-              {steamGames.length === 0 && !steamGamesError ? (
-                <div className="col-span-full bg-white/5 border border-white/10 rounded-lg p-6 text-sm text-white/60 text-center">
-                  No Steam templates available yet. Check back soon.
-                </div>
-              ) : null}
-            </div>
+                ) : null}
+              </div>
+              <div className="flex items-center justify-between mt-4">
+                <button
+                  type="button"
+                  onClick={goToPreviousSteamPage}
+                  className="px-3 py-1.5 text-xs rounded border border-white/10 bg-white/5 text-white/70 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white/10 transition"
+                  disabled={steamPage === 0 || steamGamesLoading}
+                >
+                  Previous
+                </button>
+                <span className="text-xs text-white/60">Page {steamPage + 1}</span>
+                <button
+                  type="button"
+                  onClick={goToNextSteamPage}
+                  className="px-3 py-1.5 text-xs rounded border border-white/10 bg-white/5 text-white/70 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white/10 transition"
+                  disabled={!steamHasMore || steamGamesLoading}
+                >
+                  Next
+                </button>
+              </div>
+            </>
           )}
 
           {steamSelectedGame ? (

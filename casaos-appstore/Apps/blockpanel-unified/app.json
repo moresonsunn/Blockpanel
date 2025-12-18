@@ -1,12 +1,13 @@
 {
   "id": "blockpanel-unified",
   "title": "BlockPanel (Unified)",
-  "version": "v0.1.1",
-  "description": "Single image containing controller, frontend, and embedded multi-Java runtime (SQLite).",
-  "tagline": "Minecraft controller (unified image)",
+  "version": "v0.3.2",
+  "description": "Single image with the BlockPanel controller, web UI, and bundled Minecraft runtime (SQLite-backed).",
+  "tagline": "All-in-one Minecraft controller",
   "architecture": ["amd64", "arm64"],
   "author": "BlockPanel Team",
   "site": "https://github.com/moresonsunn/minecraft-server",
+  "source": "https://github.com/moresonsunn/minecraft-server",
   "port_map": "8000",
   "scheme": "http",
   "icon": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/frontend/public/favicon.ico",
@@ -15,11 +16,12 @@
   "restart": "unless-stopped",
   "container_list": [
     {
-    "name": "blockpanel",
-  "image": "moresonsun/blockpanel-unified:latest",
+      "name": "blockpanel",
+      "image": "moresonsun/blockpanel-unified:latest",
       "ports": [
         "8000:8000",
-        "25565:25565"
+        "25565:25565/tcp",
+        "25565:25565/udp"
       ],
       "volumes": [
         {"container": "/data/servers", "host": "blockpanel_servers"},
@@ -28,27 +30,28 @@
       ],
       "envs": [
         {"name": "APP_NAME", "value": "BlockPanel"},
-  {"name": "APP_VERSION", "value": "v0.1.1"},
+        {"name": "APP_VERSION", "value": "v0.3.2"},
         {"name": "RUNTIME_MODE", "value": "local"},
         {"name": "USE_POSTGRES", "value": "false"},
         {"name": "DATABASE_URL", "value": "sqlite:////data/sqlite/minecraft_controller.db"},
         {"name": "SERVERS_CONTAINER_ROOT", "value": "/data/servers"},
-  {"name": "SERVERS_VOLUME_NAME", "value": "blockpanel_servers"},
+        {"name": "SERVERS_VOLUME_NAME", "value": "blockpanel_servers"},
+        {"name": "BLOCKPANEL_RUNTIME_IMAGE", "value": "moresonsun/blockpanel-unified"},
+        {"name": "BLOCKPANEL_RUNTIME_TAG", "value": "latest"},
         {"name": "DOCKER_HOST", "value": "unix:///var/run/docker.sock"},
         {"name": "ENVIRONMENT", "value": "production"},
-  {"name": "SECRET_KEY", "value": "change-me-unified-secret"},
-  {"name": "ALLOWED_ORIGIN_REGEX", "value": ".*"},
-  {"name": "CASAOS_APP_ID", "value": "blockpanel-unified"},
+        {"name": "SECRET_KEY", "value": "change-me-unified-secret"},
+        {"name": "ALLOWED_ORIGIN_REGEX", "value": ".*"},
+        {"name": "CASAOS_APP_ID", "value": "blockpanel-unified"},
+        {"name": "CASAOS_COMPOSE_PROJECT", "value": "blockpanel-unified"},
         {"name": "LOG_LEVEL", "value": "INFO"}
-  , {"name": "BLOCKPANEL_RUNTIME_IMAGE", "value": "moresonsun/blockpanel-unified"}
-  , {"name": "BLOCKPANEL_RUNTIME_TAG", "value": "latest"}
       ],
-  "labels": [
-    {"name": "io.casaos.app", "value": "blockpanel-unified"},
-    {"name": "io.casaos.parent", "value": "blockpanel-unified"},
-    {"name": "io.casaos.managed", "value": "true"},
-    {"name": "io.casaos.category", "value": "Game Servers"}
-  ],
+      "labels": [
+        {"name": "io.casaos.app", "value": "blockpanel-unified"},
+        {"name": "io.casaos.parent", "value": "blockpanel-unified"},
+        {"name": "io.casaos.managed", "value": "true"},
+        {"name": "io.casaos.category", "value": "Game Servers"}
+      ],
       "health_check": {
         "test": ["CMD", "curl", "-f", "http://localhost:8000/health/quick"],
         "interval": "30s",
@@ -59,6 +62,7 @@
     }
   ],
   "tips": {
-    "before_install": "Unified controller + UI. Only panel (8000) and a single default Minecraft port (25565) are mapped. Additional servers get dynamic ports; set a fixed host_port during creation if you need a specific one.",
-    "after_install": "Visit http://<host>:8000 (default admin credentials if unchanged). Immediately change the admin password. Use the Import feature to adopt existing /data/servers/<name> folders."}
+    "before_install": "Controller + UI + runtime in a single container. Mount blockpanel_servers for your world data and keep the Docker socket so the panel can provision servers.",
+    "after_install": "Visit http://<host>:8000 (default admin/admin123) then rotate the password. Use the Import action to adopt existing servers under /data/servers."
+  }
 }
