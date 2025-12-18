@@ -391,6 +391,13 @@ class DockerManager:
         ) from last_exc
 
     def list_servers(self):
+        # Lightweight 2s cache to avoid hammering Docker for dashboard polling.
+        now = time.time()
+        cache_entry = getattr(self, "_list_cache", None)
+        if cache_entry:
+            ts, payload = cache_entry
+            if now - ts <= 2:
+                return payload
         try:
             containers = self.client.containers.list(all=True)
             result = []
@@ -458,6 +465,7 @@ class DockerManager:
                         data_path = None
                     
                     steam_ports: List[Dict[str, object]] = []
+                    steam_port_summary: List[str] = []
                     try:
                         for raw_key, mapping in port_mappings.items():
                             if not isinstance(raw_key, str):
@@ -482,8 +490,11 @@ class DockerManager:
                                 "host_port": host_port,
                                 "host_ip": host_ip,
                             })
+                            if host_port:
+                                steam_port_summary.append(f"{host_port}/{proto.lower()}")
                     except Exception:
                         steam_ports = []
+                        steam_port_summary = []
 
                     result.append({
                         "id": c.id,
@@ -502,6 +513,7 @@ class DockerManager:
                         "primary_host_port": primary_host_port,
                         "data_path": data_path,
                         "steam_ports": steam_ports,
+                        "port_summary": steam_port_summary,
                         "host_port": primary_host_port,
                         "created_at": attrs.get("Created"),
                         # Shorthand keys for UI convenience
@@ -514,6 +526,7 @@ class DockerManager:
                 except Exception as e:
                     logger.warning(f"Error processing container {c.id}: {e}")
                     continue
+            self._list_cache = (now, result)
             return result
         except Exception as e:
             logger.error(f"Error listing servers: {e}")
@@ -753,25 +766,16 @@ class DockerManager:
 
     def get_used_host_ports(self, only_minecraft: bool = True) -> set:
         """
-        Return a set of host ports currently bound by Docker containers.
-        If only_minecraft is True, only include containers labeled with our Minecraft label
-        and only the Minecraft TCP port mapping (container 25565/tcp).
+        Return a set of host ports currently bound by any Docker container.
+        If only_minecraft is True, limit to the Minecraft container port (25565/tcp)
+        but still include bindings from *all* containers to avoid collisions with
+        the controller or CasaOS parent app.
         """
         used: set[int] = set()
         try:
             containers = self.client.containers.list(all=True)
             for c in containers:
                 try:
-                    attrs = c.attrs or {}
-                    labels = (attrs.get("Config", {}) or {}).get("Labels", {}) or {}
-                    is_minecraft = str(labels.get(MINECRAFT_LABEL, "")).lower() == "true"
-                    is_steam = str(labels.get("steam.server", "")).lower() == "true"
-                    if only_minecraft:
-                        if not is_minecraft:
-                            continue
-                    else:
-                        if not (is_minecraft or is_steam):
-                            continue
                     ports = (c.attrs.get("NetworkSettings", {}) or {}).get("Ports", {}) or {}
                     for container_port, bindings in ports.items():
                         if only_minecraft and not str(container_port).startswith(f"{MINECRAFT_PORT}/"):
@@ -790,16 +794,21 @@ class DockerManager:
             pass
         return used
 
-    def pick_available_port(self, preferred: int | None = None, start: int = 25565, end: int = 25999) -> int:
+    def pick_available_port(self, preferred: int | None = None, start: int = 25565, end: int = 25999, allow_fallback: bool = True) -> int:
         """
         Pick an available host port by scanning Docker port mappings.
-        Tries preferred first (if provided and not used), then scans from start..end.
+        - If preferred is provided and free, return it.
+        - If preferred is taken and allow_fallback is False, raise to force the caller to free it.
+        - Otherwise scan for the next free port.
         Note: This only checks Docker-bound ports, not other host processes.
         """
         used = self.get_used_host_ports(only_minecraft=False)
-        if preferred and preferred not in used and 1 <= preferred <= 65535:
-            return preferred
-        # If preferred given but used, start from preferred+1
+        if preferred and 1 <= preferred <= 65535:
+            if preferred not in used:
+                return preferred
+            if not allow_fallback:
+                raise RuntimeError(f"Host port {preferred} is already in use by another container. Free it or choose a different port.")
+        # If preferred given but used (and fallback allowed), start from preferred+1
         scan_start = max(start, (preferred + 1) if preferred else start)
         for p in range(scan_start, end + 1):
             if p not in used:
@@ -959,7 +968,7 @@ class DockerManager:
         selected_host_port: int | None = None
         try:
             if host_port is not None:
-                selected_host_port = self.pick_available_port(preferred=int(host_port), start=MINECRAFT_PORT, end=25999)
+                selected_host_port = self.pick_available_port(preferred=int(host_port), start=MINECRAFT_PORT, end=25999, allow_fallback=False)
             else:
                 selected_host_port = self.pick_available_port(start=MINECRAFT_PORT, end=25999)
         except Exception:
@@ -1127,7 +1136,7 @@ class DockerManager:
         # Choose available host port for existing server if not provided
         try:
             if host_port is not None:
-                selected_host_port = self.pick_available_port(preferred=int(host_port), start=MINECRAFT_PORT, end=25999)
+                selected_host_port = self.pick_available_port(preferred=int(host_port), start=MINECRAFT_PORT, end=25999, allow_fallback=False)
             else:
                 selected_host_port = self.pick_available_port(start=MINECRAFT_PORT, end=25999)
         except Exception:
@@ -1446,8 +1455,9 @@ class DockerManager:
                 preferred = p.get("host")
                 host_val = None
                 if preferred and isinstance(preferred, int) and preferred > 0:
-                    if preferred not in used:
-                        host_val = preferred
+                    if preferred in used:
+                        raise RuntimeError(f"Host port {preferred} is already in use by another container. Free it or choose a different port.")
+                    host_val = preferred
                 else:
                     # Try to keep host port equal to container port when free.
                     if cport not in used and 1 <= cport <= 65535:

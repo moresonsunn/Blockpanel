@@ -71,7 +71,7 @@ export default function TemplatesPage({
       setSteamGamesLoading(true);
       setSteamGamesError('');
       try {
-        const response = await fetch(`${API}/steam/games`, { headers: safeAuthHeaders() });
+        const response = await fetch(`${API}/steam/games?include_all=true`, { headers: safeAuthHeaders() });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           const message = data?.detail || `HTTP ${response.status}`;

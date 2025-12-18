@@ -163,9 +163,22 @@ def _prepare_tmodloader_files(
         pass
 
 @router.get("/games")
-async def list_games(current_user=Depends(require_auth)):
+async def list_games(
+    limit: int = 9,
+    offset: int = 0,
+    include_all: bool = False,
+    current_user=Depends(require_auth),
+):
     games: list[dict] = []
-    for slug, meta in STEAM_GAMES.items():
+    items = list(STEAM_GAMES.items())
+    if not include_all:
+        if offset < 0:
+            offset = 0
+        items = items[offset: offset + limit if limit > 0 else None]
+    else:
+        if offset > 0:
+            items = items[offset:]
+    for slug, meta in items:
         env_defaults = {}
         for key, value in (meta.get("env") or {}).items():
             try:

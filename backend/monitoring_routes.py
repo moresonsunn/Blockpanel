@@ -123,6 +123,7 @@ async def get_system_health(
     try:
         docker_manager = get_docker_manager()
         servers = docker_manager.list_servers()
+        stats_cache = docker_manager.get_bulk_server_stats(ttl_seconds=5)
         
         total_servers = len(servers)
         running_servers = len([s for s in servers if s.get("status") == "running"])
@@ -139,7 +140,7 @@ async def get_system_health(
                 container_id = cast(Optional[str], server.get("id"))
                 if not container_id:
                     continue
-                stats = docker_manager.get_server_stats(container_id)
+                stats = stats_cache.get(container_id) if isinstance(stats_cache, dict) else docker_manager.get_server_stats_cached(container_id)
                 if stats and "memory_limit_mb" in stats and "memory_usage_mb" in stats:
                     total_memory_gb += stats["memory_limit_mb"] / 1024.0
                     used_memory_gb += stats["memory_usage_mb"] / 1024.0
