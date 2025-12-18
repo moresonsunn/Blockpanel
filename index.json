@@ -1,0 +1,34 @@
+{
+  "name": "BlockPanel Store",
+  "description": "BlockPanel controller builds for CasaOS.",
+  "tips": "Add this URL as a Custom Source in CasaOS.",
+  "author": "BlockPanel Team",
+  "source": "https://github.com/moresonsunn/Blockpanel",
+  "version": 2,
+  "apps": [
+    {
+      "id": "blockpanel",
+      "title": "BlockPanel",
+      "description": "Controller + Postgres stack with optional runtime prewarm.",
+      "icon": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico",
+      "index": "Apps/blockpanel/app.json",
+      "port_map": "8000"
+    },
+    {
+      "id": "blockpanel-lite",
+      "title": "BlockPanel (Lite)",
+      "description": "Single-container SQLite build for lightweight setups.",
+      "icon": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico",
+      "index": "Apps/blockpanel-lite/app.json",
+      "port_map": "8000"
+    },
+    {
+      "id": "blockpanel-unified",
+      "title": "BlockPanel (Unified)",
+      "description": "All-in-one image with controller, UI, and runtime.",
+      "icon": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/casaos-appstore/assets/blockpanel-unified-icon.png",
+      "index": "Apps/blockpanel-unified/app.json",
+      "port_map": "8000"
+    }
+  ]
+}
