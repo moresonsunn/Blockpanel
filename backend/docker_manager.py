@@ -1447,10 +1447,13 @@ class DockerManager:
         # Resolve host port bindings
         port_binding: dict[str, int | None] = {}
         used = self.get_used_host_ports(only_minecraft=False)
+        first_protocol: str | None = None
         for p in ports:
             try:
                 cport = int(p.get("container"))
                 proto = (p.get("protocol") or "tcp").lower()
+                if first_protocol is None:
+                    first_protocol = proto
                 key = f"{cport}/{proto}"
                 preferred = p.get("host")
                 host_val = None
@@ -1458,22 +1461,10 @@ class DockerManager:
                     if preferred in used:
                         raise RuntimeError(f"Host port {preferred} is already in use by another container. Free it or choose a different port.")
                     host_val = preferred
+                    used.add(host_val)
                 else:
-                    # Try to keep host port equal to container port when free.
-                    if cport not in used and 1 <= cport <= 65535:
-                        host_val = cport
-                if host_val is None:
-                    # Fallback to dynamic range until we find a free port.
-                    attempts = 0
-                    while True:
-                        candidate = self.pick_available_port(start=DEFAULT_STEAM_PORT_START, end=65000)
-                        attempts += 1
-                        if candidate not in used:
-                            host_val = candidate
-                            break
-                        if attempts > 1000:
-                            raise RuntimeError("Unable to allocate a free host port for Steam container")
-                used.add(host_val)
+                    # Leave host port empty so Docker assigns an available one dynamically.
+                    host_val = None
                 port_binding[key] = host_val
             except Exception as e:
                 logger.warning(f"Failed to bind port {p}: {e}")
@@ -1497,12 +1488,9 @@ class DockerManager:
             "name": name,
             "custom_id": f"{CASAOS_APP_ID}-{name}",
         }
-
-        if port_binding:
-            primary_port = next(iter(port_binding.values()), None)
-            if primary_port is not None:
-                labels["web"] = str(primary_port)
-                labels["protocol"] = "tcp"
+        if first_protocol:
+            labels["protocol"] = first_protocol
+        labels.setdefault("web", "")
 
         if extra_labels:
             for label_key, label_value in extra_labels.items():
@@ -1534,11 +1522,50 @@ class DockerManager:
             **run_kwargs,
         )
 
+        # Refresh the container to gather dynamically assigned host ports.
+        try:
+            container.reload()
+        except Exception:
+            pass
+
+        resolved_ports: dict[str, int] = {}
+        primary_host_port: str | None = None
+        try:
+            port_info = ((getattr(container, "attrs", {}) or {}).get("NetworkSettings", {}) or {}).get("Ports") or {}
+            for key, bindings in port_info.items():
+                if not bindings:
+                    continue
+                host_binding = bindings[0] if isinstance(bindings, list) and bindings else None
+                if not host_binding:
+                    continue
+                host_port = host_binding.get("HostPort")
+                if not host_port:
+                    continue
+                try:
+                    resolved_ports[key] = int(host_port)
+                except Exception:
+                    resolved_ports[key] = host_port
+                if primary_host_port is None:
+                    primary_host_port = str(host_port)
+        except Exception as inspect_err:
+            logger.warning(f"Failed to inspect assigned ports for {name}: {inspect_err}")
+
+        # Update CasaOS-visible labels with the resolved host port so the UI can display it without extra lookups.
+        updated_labels = dict(labels)
+        if primary_host_port:
+            updated_labels["web"] = primary_host_port
+        try:
+            if updated_labels != labels:
+                container.update(labels=updated_labels)
+                labels = updated_labels
+        except Exception as label_update_err:
+            logger.debug(f"Unable to update labels for {name} with resolved port: {label_update_err}")
+
         return {
             "id": container.id,
             "name": container.name,
             "image": image,
-            "ports": port_binding,
+            "ports": resolved_ports or {k: v for k, v in port_binding.items() if v is not None},
             "labels": labels,
             "status": getattr(container, "status", "unknown"),
         }
