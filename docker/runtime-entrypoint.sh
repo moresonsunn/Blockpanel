@@ -133,6 +133,20 @@ else
   echo "DEBUG: Changed to /data: $(pwd)"
 fi
 
+# Ensure the Minecraft server binds to the expected container port.
+# BlockPanel always publishes container port ${SERVER_PORT} (defaults to 25565).
+# Many imported servers have server.properties set to the *host* port; that breaks container port publishing.
+SERVER_PORT="${SERVER_PORT:-25565}"
+if [ -f "server.properties" ]; then
+  # Replace existing server-port line or append if missing.
+  if grep -qE '^\s*server-port\s*=' server.properties; then
+    # GNU sed compatible; keep it simple and overwrite the full value.
+    sed -i -E "s/^\s*server-port\s*=.*/server-port=${SERVER_PORT}/" server.properties || true
+  else
+    echo "server-port=${SERVER_PORT}" >> server.properties
+  fi
+fi
+
 # -------- Incompatible-loader & client-only purge --------
 AUTO_CLIENT_PURGE=${AUTO_CLIENT_PURGE:-1}
 AUTO_INCOMPATIBLE_PURGE=${AUTO_INCOMPATIBLE_PURGE:-1}

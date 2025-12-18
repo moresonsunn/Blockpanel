@@ -1215,6 +1215,9 @@ class DockerManager:
             "SERVER_DIR_NAME": name,
             "MIN_RAM": min_ram,
             "MAX_RAM": max_ram,
+            # Keep the runtime container's Minecraft port stable.
+            # The entrypoint will normalize server.properties to this value.
+            "SERVER_PORT": str(MINECRAFT_PORT),
         }
         if extra_env:
             try:

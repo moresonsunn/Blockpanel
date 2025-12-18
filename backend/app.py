@@ -456,12 +456,96 @@ def import_server(req: ServerImportRequest, current_user: User = Depends(require
         min_ram = fmt(req.min_ram)
         max_ram = fmt(req.max_ram)
         dm = get_docker_manager()
-        extra_env = {}
+        extra_env: dict[str, str] = {}
         if req.java_version:
             if req.java_version not in ["8", "11", "17", "21"]:
                 raise HTTPException(status_code=400, detail="Invalid java_version (allowed: 8,11,17,21)")
             extra_env["JAVA_VERSION"] = req.java_version
             extra_env["JAVA_BIN"] = f"/usr/local/bin/java{req.java_version}"
+
+        # Best-effort detection so imported servers show Type/Version instead of Unknown.
+        # This is intentionally lightweight (no jar introspection), and mirrors the ZIP import behavior.
+        try:
+            from pathlib import Path
+            import json as _json
+            import re as _re
+            server_dir = (SERVERS_ROOT / req.name)
+
+            detected_type: str | None = None
+            detected_version: str | None = None
+            detected_port: int | None = None
+
+            props_file = server_dir / "server.properties"
+            if props_file.exists():
+                try:
+                    for line in props_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                        if line.strip().startswith("server-port="):
+                            port_val = line.split("=", 1)[1].strip()
+                            if port_val.isdigit():
+                                detected_port = int(port_val)
+                            break
+                except Exception:
+                    pass
+
+            # Use common jar naming patterns first.
+            jar_files = [p.name for p in server_dir.glob("*.jar") if p.is_file()]
+            server_jar = server_dir / "server.jar"
+            if server_jar.exists() and server_jar.stat().st_size > 50_000:
+                # Prefer server.jar
+                jar_files = [server_jar.name] + [j for j in jar_files if j != server_jar.name]
+
+            patterns = [
+                ("paper", _re.compile(r"paper-(?P<ver>\d+(?:\.\d+)+)-\d+\.jar", _re.IGNORECASE)),
+                ("purpur", _re.compile(r"purpur-(?P<ver>\d+(?:\.\d+)+)-\d+\.jar", _re.IGNORECASE)),
+                ("fabric", _re.compile(r"fabric-server-launch\.jar", _re.IGNORECASE)),
+                ("neoforge", _re.compile(r"neoforge-(?P<ver>\d+(?:\.\d+)+).*(?:installer|universal)?\.jar", _re.IGNORECASE)),
+                ("forge", _re.compile(r"forge-(?P<ver>\d+(?:\.\d+)+).*(?:installer|universal)?\.jar", _re.IGNORECASE)),
+            ]
+            for jf in jar_files:
+                lower = jf.lower()
+                for t, rgx in patterns:
+                    m = rgx.search(lower)
+                    if m:
+                        detected_type = t
+                        ver = m.groupdict().get("ver")
+                        if ver:
+                            detected_version = ver
+                        break
+                if detected_type:
+                    break
+            if not detected_type and server_jar.exists() and server_jar.stat().st_size > 50_000:
+                # At least indicate it's a Java Minecraft server.
+                detected_type = "vanilla"
+
+            # Update server_meta.json with detection for UI and future restarts.
+            meta_path = server_dir / "server_meta.json"
+            meta: dict = {}
+            if meta_path.exists():
+                try:
+                    meta = _json.loads(meta_path.read_text(encoding="utf-8", errors="ignore") or "{}")
+                except Exception:
+                    meta = {}
+            if detected_type and not extra_env.get("SERVER_TYPE"):
+                extra_env["SERVER_TYPE"] = detected_type
+            if detected_version and not extra_env.get("SERVER_VERSION"):
+                extra_env["SERVER_VERSION"] = detected_version
+            meta.setdefault("name", req.name)
+            if detected_type:
+                meta.setdefault("detected_type", detected_type)
+                meta.setdefault("server_type", detected_type)
+            if detected_version:
+                meta.setdefault("detected_version", detected_version)
+                meta.setdefault("server_version", detected_version)
+            if detected_port is not None:
+                meta.setdefault("detected_port", detected_port)
+            try:
+                meta_path.write_text(_json.dumps(meta, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+        except Exception:
+            # Detection should never block an import.
+            pass
+
         result = dm.create_server_from_existing(
             name=req.name,
             host_port=req.host_port,
