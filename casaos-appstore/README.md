@@ -19,10 +19,20 @@ casaos-appstore/
 ```
 
 ## Update Flow
-1. Tag a new release (e.g., v0.3.3)
-2. Run the helper script (to be added) to regenerate version fields.
-3. Commit & push.
-4. Refresh custom source in CasaOS UI.
+1. Bump manifest metadata (version, images, etc.).
+2. Rebuild the zip package:
+  ```
+  python scripts/package_casaos_store.py
+  ```
+3. Commit the manifest and refreshed `blockpanel.zip`.
+4. Tag a release (e.g., `latest`) and push.
+5. Refresh the custom source in the CasaOS UI.
+
+## GitHub Release Publishing
+1. Push the commit with updated manifests and regenerated archive.
+2. Create (or update) a GitHub release tagged `latest`.
+3. Ensure the `blockpanel.zip` asset is attached automatically via the release (GitHub auto-hosts it at `https://github.com/<org>/<repo>/releases/latest/download/blockpanel.zip`).
+4. Use that URL as the CasaOS custom source.
 
 ## TODO (future automation)
 - CI job to auto-bump version in this index on tag

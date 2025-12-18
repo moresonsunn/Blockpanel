@@ -11,7 +11,7 @@
       "title": "BlockPanel",
       "description": "Full stack (controller + Postgres + optional Redis/Nginx/runtime prewarm).",
       "icon": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/frontend/public/favicon.ico",
-      "index": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/casaos-appstore/Apps/blockpanel/app.json",
+      "index": "Apps/blockpanel/app.json",
       "port_map": "8000"
     },
     {
@@ -19,7 +19,7 @@
       "title": "BlockPanel (Lite)",
       "description": "Single-container SQLite build (simpler, not for heavy production).",
       "icon": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/frontend/public/favicon.ico",
-      "index": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/casaos-appstore/Apps/blockpanel-lite/app.json",
+      "index": "Apps/blockpanel-lite/app.json",
       "port_map": "8000"
     },
     {
@@ -27,7 +27,7 @@
       "title": "BlockPanel (Unified)",
       "description": "All-in-one image (controller + UI + multi-Java runtime) using SQLite.",
       "icon": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/casaos-appstore/assets/blockpanel-unified-icon.png",
-      "index": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/casaos-appstore/Apps/blockpanel-unified/app.json",
+      "index": "Apps/blockpanel-unified/app.json",
       "port_map": "8000"
     }
   ]

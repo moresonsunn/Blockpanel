@@ -1,7 +1,7 @@
 {
   "id": "blockpanel-unified",
   "title": "BlockPanel (Unified)",
-  "version": "v0.3.2",
+  "version": "latest",
   "description": "Single image with the BlockPanel controller, web UI, and bundled Minecraft runtime (SQLite-backed).",
   "tagline": "All-in-one Minecraft controller",
   "architecture": ["amd64", "arm64"],
@@ -30,7 +30,7 @@
       ],
       "envs": [
         {"name": "APP_NAME", "value": "BlockPanel"},
-        {"name": "APP_VERSION", "value": "v0.3.2"},
+        {"name": "APP_VERSION", "value": "latest"},
         {"name": "RUNTIME_MODE", "value": "local"},
         {"name": "USE_POSTGRES", "value": "false"},
         {"name": "DATABASE_URL", "value": "sqlite:////data/sqlite/minecraft_controller.db"},
