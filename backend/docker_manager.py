@@ -1701,18 +1701,6 @@ class DockerManager:
         labels = {
             "steam.server": "true",
             "steam.name": name,
-            # Group alongside the controller for dashboards
-            "com.docker.compose.project": COMPOSE_PROJECT,
-            "com.docker.compose.service": "steam-server",
-            "com.docker.compose.version": "2",
-            "io.casaos.app": casaos_app_id,
-            "io.casaos.parent": casaos_app_id,
-            "io.casaos.managed": "true",
-            "io.casaos.category": CASAOS_CATEGORY,
-            "io.casaos.group": casaos_app_id,
-            "io.casaos.subapp": "true",
-            "io.casaos.title": name,
-            "io.casaos.description": f"Steam server {name}",
             "origin": "blockpanel",
             "name": name,
             "custom_id": f"{casaos_app_id}-{name}",
