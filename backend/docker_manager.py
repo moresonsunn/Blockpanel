@@ -2217,37 +2217,46 @@ class DockerManager:
 
             # --- 1️⃣ Try mcstatus JavaServer.status on mapped Minecraft port (non-intrusive) ---
             try:
-                primary = network_settings.get('25565/tcp') if isinstance(network_settings, dict) else None
+                primary = network_settings.get("25565/tcp") if isinstance(network_settings, dict) else None
                 host_port = None
-                if primary and isinstance(primary, list) and primary and primary[0].get('HostPort'):
+                if primary and isinstance(primary, list) and primary and primary[0].get("HostPort"):
                     try:
-                        host_port = int(primary[0]['HostPort'])
+                        host_port = int(primary[0]["HostPort"])
                     except Exception:
-                        host_port = primary[0].get('HostPort')
+                        host_port = primary[0].get("HostPort")
 
                 if host_port:
-                    try:
-                        from mcstatus import JavaServer
-                        server = JavaServer('localhost', port=host_port)
-                        status = server.status(timeout=2)
-                        online = getattr(status.players, 'online', 0) if status and getattr(status, 'players', None) else 0
-                        casaos_app_id = self._resolve_casaos_app_id()
-                        labels = {
-                        sample = getattr(status.players, 'sample', None) if status and getattr(status, 'players', None) else None
-                        if sample:
-                            "io.casaos.app": casaos_app_id,
-                            "io.casaos.parent": casaos_app_id,
-                        return {"online": online, "max": getattr(status.players, 'max', 0) if status and getattr(status, 'players', None) else 0, "names": names, "method": "mcstatus"}
-                    except Exception as mc_err:
-                            "io.casaos.group": casaos_app_id,
-                        # fallthrough to RCON/other methods
-                        pass
-            except Exception:
-                pass
+                    from mcstatus import JavaServer
+
+                    server = JavaServer("localhost", port=int(host_port))
+                    status = server.status(timeout=2)
+                    players = getattr(status, "players", None)
+
+                    online = int(getattr(players, "online", 0) or 0) if players is not None else 0
+                    maxp = int(getattr(players, "max", 0) or 0) if players is not None else 0
+
+                    names: List[str] = []
+                    sample = getattr(players, "sample", None) if players is not None else None
+                    if sample:
+                        for p in sample:
+                            nm = None
+                            try:
+                                nm = getattr(p, "name", None)
+                            except Exception:
+                                nm = None
+                            if nm is None and isinstance(p, dict):
+                                nm = p.get("name")
+                            if nm:
+                                names.append(str(nm))
+
+                    return {"online": online, "max": maxp, "names": names, "method": "mcstatus"}
+            except Exception as mc_err:
+                logger.debug(f"mcstatus failed for {container_id}: {mc_err}")
 
             # --- 2️⃣ Try RCON if enabled ---
-                            "custom_id": f"{casaos_app_id}-{name}",
+            try:
                 from mcrcon import MCRcon
+
                 rcon_enabled = env_dict.get("ENABLE_RCON", "false").lower() == "true"
                 rcon_password = env_dict.get("RCON_PASSWORD", "")
                 rcon_port_env = env_dict.get("RCON_PORT", "25575")
@@ -2256,37 +2265,34 @@ class DockerManager:
                 for port, mappings in (network_settings or {}).items():
                     if port.endswith("/tcp") and (port.startswith(str(rcon_port_env)) or port.startswith("25575")):
                         if mappings and isinstance(mappings, list) and len(mappings) > 0:
-                            rcon_port = int(mappings[0].get("HostPort")) if mappings[0].get("HostPort") else None
+                            hostp = mappings[0].get("HostPort") if isinstance(mappings[0], dict) else None
+                            rcon_port = int(hostp) if hostp else None
                             break
 
                 if rcon_enabled and rcon_password and rcon_port:
-                    try:
-                        with MCRcon("localhost", rcon_password, port=rcon_port, timeout=2) as mcr:
-                            output = mcr.command("list") or ""
-                            text = str(output)
-                            online = 0
-                            maxp = 0
-                            names: List[str] = []
-                            import re as _re
-                            m = _re.search(r"There are\s+(\d+)\s+of a max of\s+(\d+)\s+players online", text)
-                            if not m:
-                                m = _re.search(r"(\d+)\s*/\s*(\d+)\s*players? online", text)
-                            if m:
-                                online = int(m.group(1))
-                                maxp = int(m.group(2))
-                                colon_idx = text.find(":")
-                                if colon_idx != -1 and colon_idx + 1 < len(text):
-                                    names_str = text[colon_idx + 1:].strip()
-                                    if names_str:
-                                        names = [n.strip() for n in names_str.split(",") if n.strip()]
-                            return {"online": online, "max": maxp, "names": names, "method": "rcon"}
-                    except Exception as rcon_err:
-                        logger.debug(f"RCON list failed for {container_id}: {rcon_err}")
-                        # fallthrough
-                        pass
-            except Exception:
-                # mcrcon not available or other error
-                pass
+                    with MCRcon("localhost", rcon_password, port=rcon_port, timeout=2) as mcr:
+                        output = mcr.command("list") or ""
+                        text = str(output)
+                        online = 0
+                        maxp = 0
+                        names: List[str] = []
+                        import re as _re
+
+                        m = _re.search(r"There are\s+(\d+)\s+of a max of\s+(\d+)\s+players online", text)
+                        if not m:
+                            m = _re.search(r"(\d+)\s*/\s*(\d+)\s*players? online", text)
+                        if m:
+                            online = int(m.group(1))
+                            maxp = int(m.group(2))
+                            colon_idx = text.find(":")
+                            if colon_idx != -1 and colon_idx + 1 < len(text):
+                                names_str = text[colon_idx + 1:].strip()
+                                if names_str:
+                                    names = [n.strip() for n in names_str.split(",") if n.strip()]
+
+                        return {"online": online, "max": maxp, "names": names, "method": "rcon"}
+            except Exception as rcon_err:
+                logger.debug(f"RCON list failed for {container_id}: {rcon_err}")
 
             # --- 3️⃣ Try non-RCON console methods (attach_socket / stdin) for a 'list' command ---
             try:

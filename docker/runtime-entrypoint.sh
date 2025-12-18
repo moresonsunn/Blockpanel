@@ -118,8 +118,25 @@ echo "DEBUG: Current directory before change: $(pwd)"
 echo "DEBUG: /data/servers exists: $([ -d "/data/servers" ] && echo "yes" || echo "no")"
 [ -d "/data/servers" ] && echo "DEBUG: /data/servers contents: $(ls -la /data/servers)"
 
-# Use WORKDIR if set, otherwise fall back to SERVER_DIR_NAME or /data
-if [ -n "$WORKDIR" ] && [ -d "$WORKDIR" ]; then
+has_server_payload() {
+  local d="$1"
+  [ -d "$d" ] || return 1
+  # If the container already started in the mounted server directory (common in CasaOS),
+  # don't blindly cd to /data and lose access to the server jar.
+  [ -f "$d/run.sh" ] && return 0
+  for pat in "server.jar" "*paper*.jar" "*purpur*.jar" "*server*.jar"; do
+    if compgen -G "$d/$pat" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Use current dir if it already looks like a server directory; otherwise use WORKDIR,
+# then fall back to SERVER_DIR_NAME or /data.
+if has_server_payload "$(pwd)"; then
+  echo "DEBUG: Current directory contains server payload; keeping: $(pwd)"
+elif [ -n "$WORKDIR" ] && [ -d "$WORKDIR" ]; then
   cd "$WORKDIR"
   echo "DEBUG: Changed to WORKDIR: $(pwd)"
 elif [ -n "$SERVER_DIR_NAME" ] && [ -d "/data/servers/$SERVER_DIR_NAME" ]; then
