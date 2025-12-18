@@ -1463,8 +1463,12 @@ class DockerManager:
                     host_val = preferred
                     used.add(host_val)
                 else:
-                    # Leave host port empty so Docker assigns an available one dynamically.
-                    host_val = None
+                    # Try to keep host port equal to container port when still available; otherwise fall back to dynamic allocation.
+                    if 1 <= cport <= 65535 and cport not in used:
+                        host_val = cport
+                        used.add(host_val)
+                    else:
+                        host_val = None  # Let Docker assign dynamically
                 port_binding[key] = host_val
             except Exception as e:
                 logger.warning(f"Failed to bind port {p}: {e}")
@@ -1483,6 +1487,8 @@ class DockerManager:
             "io.casaos.category": "Game Servers",
             "io.casaos.group": CASAOS_APP_ID,
             "io.casaos.subapp": "true",
+            "io.casaos.title": name,
+            "io.casaos.description": f"Steam server {name}",
             "casaos": "casaos",
             "origin": "blockpanel",
             "name": name,
