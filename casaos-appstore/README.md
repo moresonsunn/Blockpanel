@@ -5,7 +5,13 @@ This directory provides a self-contained 3rd party CasaOS App Store implementati
 Add the raw URL of `index.json` below to CasaOS Custom Sources to install:
 
 ```
-https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/casaos-appstore/index.json
+https://raw.githubusercontent.com/moresonsunn/Minecraft-Controller/main/casaos-appstore/index.json
+```
+
+Alternatively (recommended), attach `blockpanel.zip` to a GitHub release and use:
+
+```
+https://github.com/moresonsunn/Minecraft-Controller/releases/latest/download/blockpanel.zip
 ```
 
 ## Structure
@@ -14,7 +20,7 @@ casaos-appstore/
   index.json            # App catalog index consumed by CasaOS
   Apps/
     blockpanel/
-      app.json          # Detailed BlockPanel app definition
+      docker-compose.yml # CasaOS manifest (compose + x-casaos metadata)
       icon.png (optional, remote icon used instead)
 ```
 

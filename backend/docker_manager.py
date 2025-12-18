@@ -794,6 +794,73 @@ class DockerManager:
             pass
         return used
 
+    def _get_used_host_ports_by_protocol(self, *, only_minecraft: bool = True) -> dict[str, set[int]]:
+        """Return used host ports grouped by protocol.
+
+        Docker allows binding the same numeric port for TCP and UDP simultaneously,
+        so callers that allocate game server ports should treat them independently.
+        """
+        used_by_proto: dict[str, set[int]] = {"tcp": set(), "udp": set()}
+        try:
+            containers = self.client.containers.list(all=True)
+            for c in containers:
+                try:
+                    ports = (c.attrs.get("NetworkSettings", {}) or {}).get("Ports", {}) or {}
+                    for container_port, bindings in ports.items():
+                        if only_minecraft and not str(container_port).startswith(f"{MINECRAFT_PORT}/"):
+                            continue
+                        proto = "tcp"
+                        try:
+                            parts = str(container_port).split("/", 1)
+                            if len(parts) == 2 and parts[1]:
+                                proto = str(parts[1]).lower()
+                        except Exception:
+                            proto = "tcp"
+                        if proto not in used_by_proto:
+                            used_by_proto[proto] = set()
+                        if bindings and isinstance(bindings, list):
+                            for b in bindings:
+                                hp = b.get("HostPort")
+                                if hp:
+                                    try:
+                                        used_by_proto[proto].add(int(hp))
+                                    except Exception:
+                                        pass
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return used_by_proto
+
+    def _pick_available_port_for_protocol(
+        self,
+        *,
+        proto: str,
+        used_by_proto: dict[str, set[int]],
+        preferred: int | None = None,
+        start: int = 1,
+        end: int = 65535,
+        allow_fallback: bool = True,
+    ) -> int:
+        """Pick an available host port for a specific protocol.
+
+        This intentionally does *not* ask Docker for an ephemeral port.
+        """
+        proto = (proto or "tcp").lower()
+        used = used_by_proto.setdefault(proto, set())
+        if preferred and 1 <= preferred <= 65535:
+            if preferred not in used:
+                return preferred
+            if not allow_fallback:
+                raise RuntimeError(
+                    f"Host port {preferred} ({proto}) is already in use by another container. Free it or choose a different port."
+                )
+        scan_start = max(int(start), (int(preferred) + 1) if preferred else int(start))
+        for p in range(scan_start, int(end) + 1):
+            if p not in used:
+                return p
+        raise RuntimeError(f"No available host ports found for {proto} in the scanned range")
+
     def pick_available_port(self, preferred: int | None = None, start: int = 25565, end: int = 25999, allow_fallback: bool = True) -> int:
         """
         Pick an available host port by scanning Docker port mappings.
@@ -1444,9 +1511,9 @@ class DockerManager:
         """
         self._ensure_client()
 
-        # Resolve host port bindings
-        port_binding: dict[str, int | None] = {}
-        used = self.get_used_host_ports(only_minecraft=False)
+        # Resolve host port bindings (deterministic; never ask Docker for ephemeral ports)
+        port_binding: dict[str, int] = {}
+        used_by_proto = self._get_used_host_ports_by_protocol(only_minecraft=False)
         first_protocol: str | None = None
         for p in ports:
             try:
@@ -1456,19 +1523,25 @@ class DockerManager:
                     first_protocol = proto
                 key = f"{cport}/{proto}"
                 preferred = p.get("host")
-                host_val = None
-                if preferred and isinstance(preferred, int) and preferred > 0:
-                    if preferred in used:
-                        raise RuntimeError(f"Host port {preferred} is already in use by another container. Free it or choose a different port.")
-                    host_val = preferred
-                    used.add(host_val)
+                host_val: int
+                if preferred is not None:
+                    try:
+                        preferred_int = int(preferred)
+                    except Exception:
+                        preferred_int = None
                 else:
-                    # Try to keep host port equal to container port when still available; otherwise fall back to dynamic allocation.
-                    if 1 <= cport <= 65535 and cport not in used:
-                        host_val = cport
-                        used.add(host_val)
-                    else:
-                        host_val = None  # Let Docker assign dynamically
+                    preferred_int = None
+
+                # Default behavior: bind host port == container port; if taken, pick the next free port (same protocol).
+                host_val = self._pick_available_port_for_protocol(
+                    proto=proto,
+                    used_by_proto=used_by_proto,
+                    preferred=(preferred_int if preferred_int and preferred_int > 0 else cport),
+                    start=max(1, cport),
+                    end=65535,
+                    allow_fallback=True if not (preferred_int and preferred_int > 0) else False,
+                )
+                used_by_proto.setdefault(proto, set()).add(host_val)
                 port_binding[key] = host_val
             except Exception as e:
                 logger.warning(f"Failed to bind port {p}: {e}")
@@ -1571,7 +1644,7 @@ class DockerManager:
             "id": container.id,
             "name": container.name,
             "image": image,
-            "ports": resolved_ports or {k: v for k, v in port_binding.items() if v is not None},
+            "ports": resolved_ports or dict(port_binding),
             "labels": labels,
             "status": getattr(container, "status", "unknown"),
         }

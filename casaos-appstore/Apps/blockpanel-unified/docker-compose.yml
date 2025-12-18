@@ -1,0 +1,84 @@
+name: blockpanel-unified
+services:
+  blockpanel:
+    image: moresonsun/blockpanel-unified:latest
+    network_mode: bridge
+    ports:
+      - target: 8000
+        published: "8000"
+        protocol: tcp
+      - target: 25565
+        published: "25565"
+        protocol: tcp
+      - target: 25565
+        published: "25565"
+        protocol: udp
+    environment:
+      APP_NAME: BlockPanel
+      APP_VERSION: latest
+      RUNTIME_MODE: local
+      USE_POSTGRES: "false"
+      DATABASE_URL: sqlite:////data/sqlite/minecraft_controller.db
+      SERVERS_CONTAINER_ROOT: /data/servers
+      SERVERS_VOLUME_NAME: blockpanel_servers
+      BLOCKPANEL_RUNTIME_IMAGE: moresonsun/blockpanel-unified
+      BLOCKPANEL_RUNTIME_TAG: latest
+      DOCKER_HOST: unix:///var/run/docker.sock
+      ENVIRONMENT: production
+      SECRET_KEY: change-me-unified-secret
+      ALLOWED_ORIGIN_REGEX: .*
+      CASAOS_APP_ID: blockpanel-unified
+      CASAOS_COMPOSE_PROJECT: blockpanel-unified
+      LOG_LEVEL: INFO
+    volumes:
+      - type: bind
+        source: /DATA/AppData/$AppID/servers
+        target: /data/servers
+      - type: bind
+        source: /DATA/AppData/$AppID/sqlite
+        target: /data/sqlite
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    restart: unless-stopped
+    x-casaos:
+      ports:
+        - container: "8000"
+          description:
+            en_us: Web UI
+        - container: "25565"
+          description:
+            en_us: Minecraft server port
+      volumes:
+        - container: /data/servers
+          description:
+            en_us: Minecraft servers and worlds
+        - container: /data/sqlite
+          description:
+            en_us: SQLite database storage
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: blockpanel
+  author: BlockPanel Team
+  category: Games
+  developer: BlockPanel Team
+  description:
+    en_us: |
+      Single image with the BlockPanel controller, web UI, and bundled Minecraft runtime (SQLite-backed).
+  icon: https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/casaos-appstore/assets/blockpanel-unified-icon.png
+  screenshot_link: []
+  tagline:
+    en_us: All-in-one Minecraft controller
+  thumbnail: https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/casaos-appstore/assets/blockpanel-unified-icon.png
+  tips:
+    before_install:
+      en_us: Controller + UI + runtime in a single container. Keep the Docker socket so the panel can provision servers.
+    after_install:
+      en_us: Visit http://<host>:8000 (admin/admin123) then rotate the password.
+  title:
+    en_us: BlockPanel (Unified)
+  index: /
+  port_map: "8000"

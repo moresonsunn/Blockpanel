@@ -1,0 +1,81 @@
+name: blockpanel
+services:
+  blockpanel:
+    image: moresonsun/blockypanel:latest
+    network_mode: bridge
+    ports:
+      - target: 8000
+        published: "8000"
+        protocol: tcp
+    environment:
+      APP_NAME: BlockPanel
+      APP_VERSION: latest
+      USE_POSTGRES: "true"
+      DATABASE_URL: postgresql://postgres:postgres123@blockpanel-db:5432/minecraft_controller
+      SERVERS_CONTAINER_ROOT: /data/servers
+      SERVERS_VOLUME_NAME: blockpanel_servers
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - type: bind
+        source: /DATA/AppData/$AppID/servers
+        target: /data/servers
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    depends_on:
+      - blockpanel-db
+    restart: unless-stopped
+    x-casaos:
+      ports:
+        - container: "8000"
+          description:
+            en_us: Web UI
+      volumes:
+        - container: /data/servers
+          description:
+            en_us: Minecraft servers and worlds
+
+  blockpanel-db:
+    image: postgres:15-alpine
+    network_mode: bridge
+    environment:
+      POSTGRES_DB: minecraft_controller
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    volumes:
+      - type: bind
+        source: /DATA/AppData/$AppID/postgres
+        target: /var/lib/postgresql/data
+    restart: unless-stopped
+
+  blockpanel-runtime-prewarm:
+    image: moresonsun/blockypanel-runtime:latest
+    command: ["true"]
+    network_mode: bridge
+    restart: "no"
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: blockpanel
+  author: BlockPanel Team
+  category: Games
+  developer: BlockPanel Team
+  description:
+    en_us: |
+      Manage multiple Minecraft servers (Vanilla, Fabric, Forge, NeoForge, etc.) with a web UI.
+  icon: https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico
+  screenshot_link: []
+  tagline:
+    en_us: Minecraft server controller
+  thumbnail: https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico
+  tips:
+    before_install:
+      en_us: Requires Docker socket mount for creating server containers.
+    after_install:
+      en_us: Visit http://<host>:8000 (admin/admin123 first login). Change password immediately.
+  title:
+    en_us: BlockPanel
+  index: /
+  port_map: "8000"

@@ -1,0 +1,69 @@
+name: blockpanel-lite
+services:
+  blockpanel:
+    image: moresonsun/blockypanel:latest
+    network_mode: bridge
+    ports:
+      - target: 8000
+        published: "8000"
+        protocol: tcp
+    environment:
+      APP_NAME: BlockPanel
+      APP_VERSION: latest
+      USE_POSTGRES: "false"
+      DATABASE_URL: sqlite:///./minecraft_controller.db
+      SERVERS_CONTAINER_ROOT: /data/servers
+      SERVERS_VOLUME_NAME: blockpanel_servers
+      DOCKER_HOST: unix:///var/run/docker.sock
+      ENVIRONMENT: production
+      SECRET_KEY: change-me-single-container-secret
+      LOG_LEVEL: INFO
+    volumes:
+      - type: bind
+        source: /DATA/AppData/$AppID/servers
+        target: /data/servers
+      - type: bind
+        source: /DATA/AppData/$AppID/app
+        target: /app
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    restart: unless-stopped
+    x-casaos:
+      ports:
+        - container: "8000"
+          description:
+            en_us: Web UI
+      volumes:
+        - container: /data/servers
+          description:
+            en_us: Minecraft servers and worlds
+        - container: /app
+          description:
+            en_us: App data (SQLite DB and config)
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: blockpanel
+  author: BlockPanel Team
+  category: Games
+  developer: BlockPanel Team
+  description:
+    en_us: |
+      Single-container BlockPanel using SQLite (no Postgres/Redis/Nginx). Suitable for quick trials.
+  icon: https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico
+  screenshot_link: []
+  tagline:
+    en_us: Minecraft controller (single image)
+  thumbnail: https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico
+  tips:
+    before_install:
+      en_us: Runs everything inside one container using SQLite; not recommended for heavy multi-user deployments.
+    after_install:
+      en_us: Visit http://<host>:8000 (admin/admin123). Consider migrating to full version for production.
+  title:
+    en_us: BlockPanel (Lite)
+  index: /
+  port_map: "8000"
