@@ -1584,40 +1584,118 @@ class DockerManager:
         self._ensure_client()
 
         # Resolve host port bindings (deterministic; never ask Docker for ephemeral ports)
+        # IMPORTANT: Many Steam dedicated servers require related/consecutive ports.
+        # Bind ports as a single block (preserving offsets from the first port) so choosing a
+        # custom host port doesn't break the rest of the required ports.
         port_binding: dict[str, int] = {}
         used_by_proto = self._get_used_host_ports_by_protocol(only_minecraft=False)
         first_protocol: str | None = None
+
+        normalized_ports: list[dict] = []
         for p in ports:
             try:
-                cport = int(p.get("container"))
+                raw_container = p.get("container")
+                if raw_container is None:
+                    raise ValueError("Missing container port")
+                cport = int(raw_container)
                 proto = (p.get("protocol") or "tcp").lower()
                 if first_protocol is None:
                     first_protocol = proto
-                key = f"{cport}/{proto}"
-                preferred = p.get("host")
-                host_val: int
-                if preferred is not None:
+
+                preferred_raw = p.get("host")
+                preferred_int = None
+                if preferred_raw is not None:
                     try:
-                        preferred_int = int(preferred)
+                        preferred_int = int(preferred_raw)
                     except Exception:
                         preferred_int = None
-                else:
-                    preferred_int = None
-
-                # Default behavior: bind host port == container port; if taken, pick the next free port (same protocol).
-                host_val = self._pick_available_port_for_protocol(
-                    proto=proto,
-                    used_by_proto=used_by_proto,
-                    preferred=(preferred_int if preferred_int and preferred_int > 0 else cport),
-                    start=max(1, cport),
-                    end=65535,
-                    allow_fallback=True if not (preferred_int and preferred_int > 0) else False,
-                )
-                used_by_proto.setdefault(proto, set()).add(host_val)
-                port_binding[key] = host_val
+                normalized_ports.append({"cport": cport, "proto": proto, "preferred": preferred_int})
             except Exception as e:
-                logger.warning(f"Failed to bind port {p}: {e}")
+                logger.warning(f"Failed to parse Steam port config {p}: {e}")
                 raise
+
+        # If someone supplied explicit host ports for multiple entries (not just the primary),
+        # keep the older per-port behavior to respect those overrides.
+        explicit_host_count = sum(1 for item in normalized_ports if (item.get("preferred") or 0) > 0)
+        has_non_primary_explicit = any(
+            (item.get("preferred") or 0) > 0 and idx != 0 for idx, item in enumerate(normalized_ports)
+        )
+
+        def _bind_single_port(cport: int, proto: str, preferred: int | None, *, allow_fallback: bool) -> int:
+            host_val = self._pick_available_port_for_protocol(
+                proto=proto,
+                used_by_proto=used_by_proto,
+                preferred=preferred,
+                start=max(1, int(preferred or cport)),
+                end=65535,
+                allow_fallback=allow_fallback,
+            )
+            used_by_proto.setdefault(proto, set()).add(host_val)
+            return host_val
+
+        if has_non_primary_explicit and explicit_host_count > 0:
+            for item in normalized_ports:
+                cport = int(item["cport"])
+                proto = str(item["proto"]).lower()
+                preferred = item.get("preferred")
+                allow_fallback = False if (preferred and preferred > 0) else True
+                host_val = _bind_single_port(cport, proto, (preferred if preferred and preferred > 0 else cport), allow_fallback=allow_fallback)
+                port_binding[f"{cport}/{proto}"] = host_val
+        else:
+            # Block allocation: preserve offsets from the primary port.
+            base_cport = int(normalized_ports[0]["cport"]) if normalized_ports else 0
+            requested_base = normalized_ports[0].get("preferred")
+            strict_base = bool(requested_base and int(requested_base) > 0)
+            base_candidate = int(requested_base) if strict_base else base_cport
+
+            offsets = [int(item["cport"]) - base_cport for item in normalized_ports] if normalized_ports else [0]
+            min_offset = min(offsets) if offsets else 0
+            max_offset = max(offsets) if offsets else 0
+            candidate_min = 1 - min_offset
+            candidate_max = 65535 - max_offset
+            if base_candidate < candidate_min or base_candidate > candidate_max:
+                raise RuntimeError(
+                    f"Host port base {base_candidate} is out of range for this game's port set (valid base: {candidate_min}-{candidate_max})."
+                )
+
+            def _block_is_free(base_host: int) -> bool:
+                for item in normalized_ports:
+                    cport = int(item["cport"])
+                    proto = str(item["proto"]).lower()
+                    desired = base_host + (cport - base_cport)
+                    if desired in used_by_proto.setdefault(proto, set()):
+                        return False
+                return True
+
+            chosen_base = base_candidate
+            if strict_base:
+                if not _block_is_free(chosen_base):
+                    conflicts: list[str] = []
+                    for item in normalized_ports:
+                        cport = int(item["cport"])
+                        proto = str(item["proto"]).lower()
+                        desired = chosen_base + (cport - base_cport)
+                        if desired in used_by_proto.setdefault(proto, set()):
+                            conflicts.append(f"{desired}/{proto}")
+                    raise RuntimeError(
+                        f"Requested host port {chosen_base} cannot be used for '{name}' (conflicts: {', '.join(conflicts)})."
+                    )
+            else:
+                # Find the next base where the whole block fits.
+                start_base = max(chosen_base, candidate_min)
+                b = start_base
+                while b <= candidate_max and not _block_is_free(b):
+                    b += 1
+                if b > candidate_max:
+                    raise RuntimeError("No available host ports found for the Steam server's required port set")
+                chosen_base = b
+
+            for item in normalized_ports:
+                cport = int(item["cport"])
+                proto = str(item["proto"]).lower()
+                host_val = chosen_base + (cport - base_cport)
+                used_by_proto.setdefault(proto, set()).add(host_val)
+                port_binding[f"{cport}/{proto}"] = host_val
 
         casaos_app_id = self._resolve_casaos_app_id()
         labels = {
