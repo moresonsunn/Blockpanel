@@ -1,4 +1,4 @@
-FROM openjdk:latest
+FROM eclipse-temurin:21-jdk
 # Build metadata (populated via build args in CI)
 ARG APP_VERSION=dev
 ARG GIT_COMMIT=unknown
@@ -41,8 +41,8 @@ RUN wget -qO- https://github.com/adoptium/temurin11-binaries/releases/download/j
 RUN wget -qO- https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.9%2B9/OpenJDK17U-jdk_x64_linux_hotspot_17.0.9_9.tar.gz | tar -xz -C /opt/ && \
     ln -sf /opt/jdk-17.0.9+9/bin/java /usr/local/bin/java17
 
-# Create symlink for Java 21 (already installed in base image)
-RUN ln -sf /usr/local/openjdk-21/bin/java /usr/local/bin/java21
+# Create symlink for Java 21 from base Temurin image
+RUN ln -sf /opt/java/openjdk/bin/java /usr/local/bin/java21
 
 # Set default Java version
 ENV JAVA_BIN=/usr/local/bin/java21
