@@ -7,12 +7,6 @@ services:
       - target: 8000
         published: "8000"
         protocol: tcp
-      - target: 25565
-        published: "25565"
-        protocol: tcp
-      - target: 25565
-        published: "25565"
-        protocol: udp
     environment:
       APP_NAME: BlockPanel
       APP_VERSION: latest
@@ -46,9 +40,6 @@ services:
         - container: "8000"
           description:
             en_us: Web UI
-        - container: "25565"
-          description:
-            en_us: Minecraft server port
       volumes:
         - container: /data/servers
           description:

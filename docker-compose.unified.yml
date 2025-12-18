@@ -12,23 +12,6 @@ services:
         - APP_VERSION=${BLOCKPANEL_TAG:-dev}
     ports:
       - "8000:8000"
-      - "25565:25565/tcp"
-      - "25565:25565/udp"
-      - "25566:25566/tcp"
-      - "25566:25566/udp"
-      - "25567:25567/tcp"
-      - "25567:25567/udp"
-      - "25568:25568/tcp"
-      - "25568:25568/udp"
-      - "25569:25569/tcp"
-      - "25569:25569/udp"
-      - "25570:25570/tcp"
-      - "25570:25570/udp"
-      - "25571:25571/tcp"
-      - "25571:25571/udp"
-      - "25572:25572/tcp"
-      - "25572:25572/udp"
-      - "8163:8163/udp"
     environment:
       - APP_NAME=BlockPanel
       - APP_VERSION=latest
@@ -43,7 +26,7 @@ services:
       - ENVIRONMENT=production
       - SECRET_KEY=${SECRET_KEY:-change-me-single-container-secret}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - ADMIN_PASSWORD=YourNewStrongPass123!
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-change-me-admin-password}
       # Prefer regex-based CORS to accommodate CasaOS and dev hosts without quotes parsing issues
       - ALLOWED_ORIGIN_REGEX=.*
       # Temporary debug endpoint enabling /debug/echo-headers (remove or set 0 in production)
@@ -63,7 +46,7 @@ services:
     labels:
       io.casaos.app: "blockpanel-unified"
       io.casaos.managed: "true"
-      io.casaos.category: "Game Servers"
+      io.casaos.category: "Games"
 
 volumes:
   servers_data:

@@ -19,6 +19,7 @@ MINECRAFT_LABEL = "minecraft_server_manager"
 # CasaOS application id to associate child runtime containers with the main app.
 # This helps CasaOS group containers and avoid showing them as standalone "Legacy Apps".
 CASAOS_APP_ID = os.getenv("CASAOS_APP_ID", "blockpanel-unified")
+CASAOS_CATEGORY = os.getenv("CASAOS_CATEGORY", "Games")
 
 # Compose grouping detection: try to read the current controller container's labels and networks
 def _detect_compose_context() -> tuple[str | None, str | None]:
@@ -1076,7 +1077,7 @@ class DockerManager:
             "io.casaos.app": CASAOS_APP_ID,
             "io.casaos.parent": CASAOS_APP_ID,
             "io.casaos.managed": "true",
-            "io.casaos.category": "Game Servers",
+            "io.casaos.category": CASAOS_CATEGORY,
             "io.casaos.group": CASAOS_APP_ID,
             "io.casaos.subapp": "true",
             "casaos": "casaos",
@@ -1336,7 +1337,7 @@ class DockerManager:
                 "io.casaos.app": CASAOS_APP_ID,
                 "io.casaos.parent": CASAOS_APP_ID,
                 "io.casaos.managed": "true",
-                "io.casaos.category": "Game Servers",
+                "io.casaos.category": CASAOS_CATEGORY,
                 "io.casaos.group": CASAOS_APP_ID,
                 "io.casaos.subapp": "true",
                 "casaos": "casaos",
@@ -1557,7 +1558,7 @@ class DockerManager:
             "io.casaos.app": CASAOS_APP_ID,
             "io.casaos.parent": CASAOS_APP_ID,
             "io.casaos.managed": "true",
-            "io.casaos.category": "Game Servers",
+            "io.casaos.category": CASAOS_CATEGORY,
             "io.casaos.group": CASAOS_APP_ID,
             "io.casaos.subapp": "true",
             "io.casaos.title": name,
