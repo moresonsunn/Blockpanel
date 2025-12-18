@@ -29,6 +29,9 @@ services:
       - ALLOWED_ORIGIN_REGEX=.*
       - ENABLE_DEBUG_ENDPOINTS=1
       - CASAOS_APP_ID=blockpanel-unified
+      # CasaOS v2 compose apps (Steam servers)
+      - CASAOS_API_BASE=${CASAOS_API_BASE:-}
+      - CASAOS_API_TOKEN=${CASAOS_API_TOKEN:-}
     volumes:
       - servers_data:/data/servers
       - sqlite_data:/data/sqlite

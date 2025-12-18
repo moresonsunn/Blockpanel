@@ -22,6 +22,9 @@ services:
       SECRET_KEY: change-me-unified-secret
       ALLOWED_ORIGIN_REGEX: .*
       LOG_LEVEL: INFO
+      # CasaOS v2 compose apps (Steam servers)
+      CASAOS_API_BASE: http://172.17.0.1/v2/app_management
+      CASAOS_API_TOKEN: ""
     volumes:
       - type: bind
         source: /DATA/AppData/$AppID/servers

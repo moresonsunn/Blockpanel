@@ -33,6 +33,9 @@ services:
       - ENABLE_DEBUG_ENDPOINTS=1
       # Optional override; when running under CasaOS this is auto-detected from container labels.
       - CASAOS_APP_ID=${CASAOS_APP_ID:-}
+      # CasaOS v2 compose apps (Steam servers)
+      - CASAOS_API_BASE=${CASAOS_API_BASE:-}
+      - CASAOS_API_TOKEN=${CASAOS_API_TOKEN:-}
     volumes:
       - servers_data:/data/servers
       - sqlite_data:/data/sqlite
