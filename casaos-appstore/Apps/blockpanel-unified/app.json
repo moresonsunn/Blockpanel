@@ -10,8 +10,8 @@
   "source": "https://github.com/moresonsunn/minecraft-server",
   "port_map": "8000",
   "scheme": "http",
-  "icon": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/frontend/public/favicon.ico",
-  "thumbnail": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/frontend/public/favicon.ico",
+  "icon": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/casaos-appstore/assets/blockpanel-unified-icon.png",
+  "thumbnail": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/casaos-appstore/assets/blockpanel-unified-icon.png",
   "categories": ["Game Servers"],
   "restart": "unless-stopped",
   "container_list": [
