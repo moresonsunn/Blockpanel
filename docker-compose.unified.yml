@@ -31,8 +31,8 @@ services:
       - ALLOWED_ORIGIN_REGEX=.*
       # Temporary debug endpoint enabling /debug/echo-headers (remove or set 0 in production)
       - ENABLE_DEBUG_ENDPOINTS=1
-      # Ensure runtime containers can be associated with the CasaOS app to avoid "Legacy App" display
-      - CASAOS_APP_ID=blockpanel-unified
+      # Optional override; when running under CasaOS this is auto-detected from container labels.
+      - CASAOS_APP_ID=${CASAOS_APP_ID:-}
     volumes:
       - servers_data:/data/servers
       - sqlite_data:/data/sqlite

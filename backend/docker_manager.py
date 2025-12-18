@@ -17,16 +17,46 @@ logger = logging.getLogger(__name__)
 
 MINECRAFT_LABEL = "minecraft_server_manager"
 # CasaOS application id to associate child runtime containers with the main app.
-# This helps CasaOS group containers and avoid showing them as standalone "Legacy Apps".
-CASAOS_APP_ID = os.getenv("CASAOS_APP_ID", "blockpanel-unified")
+# IMPORTANT: CasaOS usually assigns its own internal app ID when installing apps.
+# Hardcoding an ID (e.g., "blockpanel-unified") often causes child containers to be shown as "Legacy App".
+DEFAULT_CASAOS_APP_ID = "blockpanel-unified"
+_CASAOS_APP_ID_ENV = (os.getenv("CASAOS_APP_ID") or "").strip()
 CASAOS_CATEGORY = os.getenv("CASAOS_CATEGORY", "Games")
+
+
+def _detect_self_container_id() -> str | None:
+    """Best-effort detection of the current container ID.
+
+    - In Docker, HOSTNAME is often the short container ID.
+    - /proc/self/cgroup commonly includes a long 64-hex container id.
+    """
+    try:
+        host = (os.getenv("HOSTNAME") or "").strip()
+        if host and re.fullmatch(r"[0-9a-fA-F]{8,64}", host):
+            return host
+    except Exception:
+        pass
+
+    try:
+        cgroup_path = "/proc/self/cgroup"
+        if os.path.exists(cgroup_path):
+            text = Path(cgroup_path).read_text(encoding="utf-8", errors="ignore")
+            m = re.search(r"([0-9a-f]{64})", text)
+            if m:
+                return m.group(1)
+            m2 = re.search(r"docker[-/]{1}([0-9a-f]{12,64})", text)
+            if m2:
+                return m2.group(1)
+    except Exception:
+        pass
+
+    return None
 
 # Compose grouping detection: try to read the current controller container's labels and networks
 def _detect_compose_context() -> tuple[str | None, str | None]:
     try:
         _client = docker.from_env()
-        # HOSTNAME is usually the container ID (short) in Docker
-        _self_id = os.getenv("HOSTNAME")
+        _self_id = _detect_self_container_id()
         if not _self_id:
             return None, None
         _self = _client.containers.get(_self_id)
@@ -48,7 +78,7 @@ def _detect_compose_context() -> tuple[str | None, str | None]:
         return None, None
 
 _detected_project, _detected_network = _detect_compose_context()
-COMPOSE_PROJECT = _detected_project or os.getenv("COMPOSE_PROJECT_NAME") or os.getenv("CASAOS_COMPOSE_PROJECT") or CASAOS_APP_ID
+COMPOSE_PROJECT = _detected_project or os.getenv("COMPOSE_PROJECT_NAME") or os.getenv("CASAOS_COMPOSE_PROJECT") or (_CASAOS_APP_ID_ENV or DEFAULT_CASAOS_APP_ID)
 COMPOSE_RUNTIME_SERVICE = os.getenv("COMPOSE_RUNTIME_SERVICE", "minecraft-runtime")
 COMPOSE_NETWORK = _detected_network or os.getenv("COMPOSE_NETWORK") or (f"{os.getenv('COMPOSE_PROJECT_NAME')}_default" if os.getenv("COMPOSE_PROJECT_NAME") else None)
 RUNTIME_IMAGE = (
@@ -352,6 +382,40 @@ class DockerManager:
         self.client = self._init_client()
         # Simple in-memory caches
         self._stats_cache: dict[str, tuple[float, dict]] = {}
+        self._cached_casaos_app_id: str | None = None
+
+    def _resolve_casaos_app_id(self) -> str:
+        """Resolve the CasaOS app id used to group child containers.
+
+        Preference order:
+        1) Detect from controller container labels (io.casaos.app / io.casaos.parent)
+        2) Fall back to CASAOS_APP_ID env (if set)
+        3) Fall back to DEFAULT_CASAOS_APP_ID
+        """
+        if self._cached_casaos_app_id:
+            return self._cached_casaos_app_id
+
+        try:
+            self_id = _detect_self_container_id()
+            if self_id:
+                c = self.client.containers.get(self_id)
+                labels = (c.attrs.get("Config", {}) or {}).get("Labels", {}) or {}
+                detected = (labels.get("io.casaos.app") or labels.get("io.casaos.parent") or "").strip()
+                if detected:
+                    self._cached_casaos_app_id = detected
+                    return detected
+
+                # Secondary fallback: some installs might only expose compose metadata
+                compose_project = (labels.get("com.docker.compose.project") or "").strip()
+                if compose_project:
+                    self._cached_casaos_app_id = compose_project
+                    return compose_project
+        except Exception:
+            pass
+
+        fallback = (os.getenv("CASAOS_APP_ID") or "").strip() or DEFAULT_CASAOS_APP_ID
+        self._cached_casaos_app_id = fallback
+        return fallback
 
     def _ensure_client(self) -> None:
         """Ensure the Docker client is ready; recreate it if the connection dropped."""
@@ -1064,6 +1128,8 @@ class DockerManager:
         except Exception:
             pass
 
+        casaos_app_id = self._resolve_casaos_app_id()
+
         # 5) Labels for metadata
         labels = {
             MINECRAFT_LABEL: "true",
@@ -1074,16 +1140,16 @@ class DockerManager:
             "com.docker.compose.service": COMPOSE_RUNTIME_SERVICE,
             "com.docker.compose.version": "2",
             # CasaOS grouping to avoid Legacy App classification
-            "io.casaos.app": CASAOS_APP_ID,
-            "io.casaos.parent": CASAOS_APP_ID,
+            "io.casaos.app": casaos_app_id,
+            "io.casaos.parent": casaos_app_id,
             "io.casaos.managed": "true",
             "io.casaos.category": CASAOS_CATEGORY,
-            "io.casaos.group": CASAOS_APP_ID,
+            "io.casaos.group": casaos_app_id,
             "io.casaos.subapp": "true",
             "casaos": "casaos",
             "origin": "blockpanel",
             "name": name,
-            "custom_id": f"{CASAOS_APP_ID}-{name}",
+            "custom_id": f"{casaos_app_id}-{name}",
             "protocol": "tcp",
             # Optional: generic metadata that some dashboards honor
             "org.opencontainers.image.title": "BlockPanel Runtime",
@@ -1301,12 +1367,14 @@ class DockerManager:
                 template_info.get("loader_version"),
                 source_template_info.get("loader_version"),
             )
+            casaos_app_id = self._resolve_casaos_app_id()
+
             custom_id_guess = _first_non_empty(
                 (extra_labels or {}).get("custom_id") if extra_labels else None,
                 meta.get("custom_id"),
                 template_info.get("custom_id"),
                 source_template_info.get("custom_id"),
-            ) or f"{CASAOS_APP_ID}-{name}"
+            ) or f"{casaos_app_id}-{name}"
 
             def _ensure_env_var(key: str, value: str | None):
                 if value is None:
@@ -1337,11 +1405,11 @@ class DockerManager:
                 "com.docker.compose.service": COMPOSE_RUNTIME_SERVICE,
                 "com.docker.compose.version": "2",
                 # CasaOS grouping to avoid Legacy App classification
-                "io.casaos.app": CASAOS_APP_ID,
-                "io.casaos.parent": CASAOS_APP_ID,
+                "io.casaos.app": casaos_app_id,
+                "io.casaos.parent": casaos_app_id,
                 "io.casaos.managed": "true",
                 "io.casaos.category": CASAOS_CATEGORY,
-                "io.casaos.group": CASAOS_APP_ID,
+                "io.casaos.group": casaos_app_id,
                 "io.casaos.subapp": "true",
                 "casaos": "casaos",
                 "origin": "blockpanel",
@@ -1551,6 +1619,7 @@ class DockerManager:
                 logger.warning(f"Failed to bind port {p}: {e}")
                 raise
 
+        casaos_app_id = self._resolve_casaos_app_id()
         labels = {
             "steam.server": "true",
             "steam.name": name,
@@ -1558,18 +1627,18 @@ class DockerManager:
             "com.docker.compose.project": COMPOSE_PROJECT,
             "com.docker.compose.service": "steam-server",
             "com.docker.compose.version": "2",
-            "io.casaos.app": CASAOS_APP_ID,
-            "io.casaos.parent": CASAOS_APP_ID,
+            "io.casaos.app": casaos_app_id,
+            "io.casaos.parent": casaos_app_id,
             "io.casaos.managed": "true",
             "io.casaos.category": CASAOS_CATEGORY,
-            "io.casaos.group": CASAOS_APP_ID,
+            "io.casaos.group": casaos_app_id,
             "io.casaos.subapp": "true",
             "io.casaos.title": name,
             "io.casaos.description": f"Steam server {name}",
             "casaos": "casaos",
             "origin": "blockpanel",
             "name": name,
-            "custom_id": f"{CASAOS_APP_ID}-{name}",
+            "custom_id": f"{casaos_app_id}-{name}",
         }
         if first_protocol:
             labels["protocol"] = first_protocol
@@ -2162,21 +2231,22 @@ class DockerManager:
                         server = JavaServer('localhost', port=host_port)
                         status = server.status(timeout=2)
                         online = getattr(status.players, 'online', 0) if status and getattr(status, 'players', None) else 0
-                        names = []
+                        casaos_app_id = self._resolve_casaos_app_id()
+                        labels = {
                         sample = getattr(status.players, 'sample', None) if status and getattr(status, 'players', None) else None
                         if sample:
-                            names = [p.name if hasattr(p, 'name') else (p.get('name') if isinstance(p, dict) else None) for p in sample]
-                            names = [n for n in names if n]
+                            "io.casaos.app": casaos_app_id,
+                            "io.casaos.parent": casaos_app_id,
                         return {"online": online, "max": getattr(status.players, 'max', 0) if status and getattr(status, 'players', None) else 0, "names": names, "method": "mcstatus"}
                     except Exception as mc_err:
-                        logger.debug(f"mcstatus query failed for container {container_id}: {mc_err}")
+                            "io.casaos.group": casaos_app_id,
                         # fallthrough to RCON/other methods
                         pass
             except Exception:
                 pass
 
             # --- 2️⃣ Try RCON if enabled ---
-            try:
+                            "custom_id": f"{casaos_app_id}-{name}",
                 from mcrcon import MCRcon
                 rcon_enabled = env_dict.get("ENABLE_RCON", "false").lower() == "true"
                 rcon_password = env_dict.get("RCON_PASSWORD", "")

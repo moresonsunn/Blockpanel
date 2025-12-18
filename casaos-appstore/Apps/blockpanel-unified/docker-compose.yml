@@ -21,8 +21,6 @@ services:
       ENVIRONMENT: production
       SECRET_KEY: change-me-unified-secret
       ALLOWED_ORIGIN_REGEX: .*
-      CASAOS_APP_ID: blockpanel-unified
-      CASAOS_COMPOSE_PROJECT: blockpanel-unified
       LOG_LEVEL: INFO
     volumes:
       - type: bind
