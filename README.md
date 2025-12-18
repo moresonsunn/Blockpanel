@@ -136,6 +136,8 @@ And open an issue with that output.
 | SERVERS_CONTAINER_ROOT | Container path for servers data | /data/servers |
 | SERVERS_HOST_ROOT | Absolute host path (for bind mapping) | (inferred) |
 | SERVERS_VOLUME_NAME | Named volume (if using volumes) | minecraft-server_mc_servers_data |
+| CASAOS_API_BASE | CasaOS AppManagement API base for v2 compose installs (Steam servers) | (auto-probed) |
+| CASAOS_API_TOKEN | CasaOS auth token used as `Authorization` header for API calls | (unset) |
 
 Frontend build-time override: set `REACT_APP_APP_NAME` to change displayed branding.
 
@@ -218,6 +220,33 @@ Add the raw URL to `casaos-appstore/index.json` as a custom source in CasaOS, th
 2. Copy its world/server directory into the BlockPanel servers volume (visible in the unified container at `/data/servers/<name>`).
 3. Call `POST /api/servers/import` with `{ "name": "<name>" }` (optionally `host_port`, `java_version`).
 4. Start the server from the UI.
+
+### CasaOS Token + Base API (for Steam as CasaOS v2 Apps)
+
+Steam servers can be installed as CasaOS v2 *compose apps* (so they don't show up as "Legacy-App" containers). To enable this, BlockPanel needs:
+
+- `CASAOS_API_TOKEN`: CasaOS auth token (copied from the browser)
+- `CASAOS_API_BASE`: CasaOS AppManagement base URL (usually `http://<casaos-ip>/v2/app_management`)
+
+**How to get `CASAOS_API_TOKEN` (fastest method)**
+1. Open CasaOS in your browser and sign in.
+2. Press `F12` → open **Network**.
+3. Refresh the page.
+4. Click any request to your CasaOS host (for example `/v2/...`).
+5. In **Request Headers**, copy the full `authorization` header value.
+
+The value is typically a JWT that looks like `eyJhbGciOi...` (no extra prefix). Paste it into `CASAOS_API_TOKEN`.
+
+**How to choose `CASAOS_API_BASE`**
+- If the controller container can reach CasaOS via LAN IP, use:
+  - `http://<casaos-ip>/v2/app_management`
+- If the controller runs on the same Docker host and LAN routing is restricted, use:
+  - `http://172.17.0.1/v2/app_management`
+
+If `CASAOS_API_BASE` is not set, BlockPanel will probe common defaults (`host.docker.internal`, `gateway.docker.internal`, then `172.17.0.1`).
+
+**Security note**
+Treat `CASAOS_API_TOKEN` like a password. If you pasted it into chat/logs, rotate it (log out / re-login) and update the env var.
 
 ### Environment Quick Reference
 | Variable | Purpose |

@@ -262,15 +262,33 @@ async def install_steam_server(payload: SteamInstallRequest, current_user=Depend
 
     dm = DockerManager()
     try:
-        result = dm.create_steam_container(
-            name=payload.name,
-            image=image,
-            ports=ports,
-            env=env,
-            volume=volume,
-            restart_policy=restart_policy,
-            extra_labels={"steam.game": game},
-        )
+        result = None
+        compose_error: str | None = None
+        try:
+            result = dm.create_steam_compose_app(
+                name=payload.name,
+                image=image,
+                ports=ports,
+                env=env,
+                volume=volume,
+                restart_policy=restart_policy,
+                extra_labels={"steam.game": game},
+            )
+        except Exception as exc:
+            compose_error = str(exc)
+
+        if result is None:
+            result = dm.create_steam_container(
+                name=payload.name,
+                image=image,
+                ports=ports,
+                env=env,
+                volume=volume,
+                restart_policy=restart_policy,
+                extra_labels={"steam.game": game},
+            )
+            if compose_error:
+                result["casaos_compose_error"] = compose_error
         container_id = result.get("id")
         steam_ports: list[dict] = []
         meta_path = server_root / "server_meta.json"

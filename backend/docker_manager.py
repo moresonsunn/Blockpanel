@@ -89,6 +89,12 @@ RUNTIME_IMAGE = (
 MINECRAFT_PORT = 25565
 DEFAULT_STEAM_PORT_START = 20000
 
+# CasaOS AppManagement (compose apps) integration for Steam servers.
+# When configured, Steam servers can be installed as CasaOS v2 compose apps to avoid the
+# "Legacy-App" section in CasaOS.
+CASAOS_API_BASE = (os.getenv("CASAOS_API_BASE") or "").strip()
+CASAOS_API_TOKEN = (os.getenv("CASAOS_API_TOKEN") or "").strip()
+
 # --- Helper functions for direct jar download fallback ---
 
 def download_file(url: str, dest: Path, min_size: int = 1024 * 100, max_retries: int = 3, diagnostics: list | None = None):
@@ -1785,6 +1791,350 @@ class DockerManager:
             "ports": resolved_ports or dict(port_binding),
             "labels": labels,
             "status": getattr(container, "status", "unknown"),
+        }
+
+    def _resolve_casaos_api_base(self) -> str | None:
+        """Return a CasaOS AppManagement base URL (ending in /v2/app_management) if configured.
+
+        Prefer explicit CASAOS_API_BASE; otherwise try common Docker hostnames.
+        """
+        if CASAOS_API_BASE:
+            return CASAOS_API_BASE.rstrip("/")
+
+        candidates = [
+            "http://host.docker.internal/v2/app_management",
+            "http://gateway.docker.internal/v2/app_management",
+            "http://172.17.0.1/v2/app_management",
+        ]
+        for base in candidates:
+            try:
+                r = requests.get(f"{base}/compose", timeout=2)
+                if r.status_code in (200, 401, 403):
+                    return base.rstrip("/")
+            except Exception:
+                continue
+        return None
+
+    def _resolve_steam_port_binding(self, ports: list[dict]) -> dict[str, int]:
+        """Resolve host port bindings for Steam servers.
+
+        Returns a dict in Docker SDK port binding format: {"27015/udp": 27015, ...}
+        Preserves offsets from the primary port when only a single preferred host port is provided.
+        """
+        port_binding: dict[str, int] = {}
+        used_by_proto = self._get_used_host_ports_by_protocol(only_minecraft=False)
+
+        normalized_ports: list[dict] = []
+        for p in ports or []:
+            raw_container = p.get("container")
+            if raw_container is None:
+                raise ValueError(f"Missing container port in: {p}")
+            cport = int(raw_container)
+            proto = (p.get("protocol") or "tcp").lower()
+            preferred_raw = p.get("host")
+            preferred_int = None
+            if preferred_raw is not None:
+                try:
+                    preferred_int = int(preferred_raw)
+                except Exception:
+                    preferred_int = None
+            normalized_ports.append({"cport": cport, "proto": proto, "preferred": preferred_int})
+
+        explicit_host_count = sum(1 for item in normalized_ports if (item.get("preferred") or 0) > 0)
+        has_non_primary_explicit = any(
+            (item.get("preferred") or 0) > 0 and idx != 0 for idx, item in enumerate(normalized_ports)
+        )
+
+        def _bind_single_port(cport: int, proto: str, preferred: int | None, *, allow_fallback: bool) -> int:
+            host_val = self._pick_available_port_for_protocol(
+                proto=proto,
+                used_by_proto=used_by_proto,
+                preferred=preferred,
+                start=max(1, int(preferred or cport)),
+                end=65535,
+                allow_fallback=allow_fallback,
+            )
+            used_by_proto.setdefault(proto, set()).add(host_val)
+            return host_val
+
+        if has_non_primary_explicit and explicit_host_count > 0:
+            for item in normalized_ports:
+                cport = int(item["cport"])
+                proto = str(item["proto"]).lower()
+                preferred = item.get("preferred")
+                allow_fallback = False if (preferred and preferred > 0) else True
+                host_val = _bind_single_port(
+                    cport,
+                    proto,
+                    (preferred if preferred and preferred > 0 else cport),
+                    allow_fallback=allow_fallback,
+                )
+                port_binding[f"{cport}/{proto}"] = host_val
+        else:
+            base_cport = int(normalized_ports[0]["cport"]) if normalized_ports else 0
+            requested_base = normalized_ports[0].get("preferred")
+            strict_base = bool(requested_base and int(requested_base) > 0)
+            base_candidate = int(requested_base) if strict_base else base_cport
+
+            offsets = [int(item["cport"]) - base_cport for item in normalized_ports] if normalized_ports else [0]
+            min_offset = min(offsets) if offsets else 0
+            max_offset = max(offsets) if offsets else 0
+            candidate_min = 1 - min_offset
+            candidate_max = 65535 - max_offset
+            if base_candidate < candidate_min or base_candidate > candidate_max:
+                raise RuntimeError(
+                    f"Host port base {base_candidate} is out of range for this game's port set (valid base: {candidate_min}-{candidate_max})."
+                )
+
+            def _block_is_free(base_host: int) -> bool:
+                for item in normalized_ports:
+                    cport = int(item["cport"])
+                    proto = str(item["proto"]).lower()
+                    desired = base_host + (cport - base_cport)
+                    if desired in used_by_proto.setdefault(proto, set()):
+                        return False
+                return True
+
+            chosen_base = base_candidate
+            if strict_base:
+                if not _block_is_free(chosen_base):
+                    conflicts: list[str] = []
+                    for item in normalized_ports:
+                        cport = int(item["cport"])
+                        proto = str(item["proto"]).lower()
+                        desired = chosen_base + (cport - base_cport)
+                        if desired in used_by_proto.setdefault(proto, set()):
+                            conflicts.append(f"{desired}/{proto}")
+                    raise RuntimeError(
+                        f"Requested host port {chosen_base} cannot be used (conflicts: {', '.join(conflicts)})."
+                    )
+            else:
+                start_base = max(chosen_base, candidate_min)
+                b = start_base
+                while b <= candidate_max and not _block_is_free(b):
+                    b += 1
+                if b > candidate_max:
+                    raise RuntimeError("No available host ports found for the Steam server's required port set")
+                chosen_base = b
+
+            for item in normalized_ports:
+                cport = int(item["cport"])
+                proto = str(item["proto"]).lower()
+                host_val = chosen_base + (cport - base_cport)
+                used_by_proto.setdefault(proto, set()).add(host_val)
+                port_binding[f"{cport}/{proto}"] = host_val
+
+        return port_binding
+
+    def create_steam_compose_app(
+        self,
+        *,
+        name: str,
+        image: str,
+        ports: list[dict],
+        env: dict | None = None,
+        volume: dict | None = None,
+        command: list[str] | None = None,
+        restart_policy: dict | None = None,
+        extra_labels: dict | None = None,
+    ) -> dict:
+        """Install a Steam server as a CasaOS v2 compose app.
+
+        Requires CASAOS_API_TOKEN to be configured (and optionally CASAOS_API_BASE).
+        This avoids the container showing under CasaOS "Legacy-App".
+        """
+        base = self._resolve_casaos_api_base()
+        if not base:
+            raise RuntimeError("CasaOS API base not reachable; set CASAOS_API_BASE")
+
+        token = CASAOS_API_TOKEN
+        if not token:
+            raise RuntimeError("CASAOS_API_TOKEN not set; cannot install compose app")
+
+        # Compute port bindings.
+        port_binding = self._resolve_steam_port_binding(ports)
+
+        # Compose ports list.
+        compose_ports: list[str] = []
+        first_host_port: str | None = None
+        first_protocol: str | None = None
+        for key, host_port in port_binding.items():
+            cport, proto = key.split("/", 1)
+            proto = (proto or "tcp").lower()
+            compose_ports.append(f"{host_port}:{cport}/{proto}")
+            if first_host_port is None:
+                first_host_port = str(host_port)
+                first_protocol = proto
+
+        casaos_app_id = self._resolve_casaos_app_id()
+
+        # Labels for BlockPanel discovery.
+        labels = {
+            "steam.server": "true",
+            "steam.name": name,
+            "origin": "blockpanel",
+            "name": name,
+            "custom_id": f"{casaos_app_id}-{name}",
+        }
+        if first_protocol:
+            labels["protocol"] = first_protocol
+        labels.setdefault("web", first_host_port or "")
+        if extra_labels:
+            for k, v in extra_labels.items():
+                try:
+                    labels[str(k)] = str(v)
+                except Exception:
+                    pass
+
+        # Volumes.
+        compose_volumes: list[str] = []
+        if volume and volume.get("host") and volume.get("container"):
+            host_path = str(volume["host"])
+            container_path = str(volume["container"])
+            # Default to rw.
+            compose_volumes.append(f"{host_path}:{container_path}:rw")
+
+        # Environment.
+        env_map = {str(k): str(v) for k, v in (env or {}).items() if v is not None}
+
+        # Compose app id / project name. Keep it deterministic and CasaOS-friendly.
+        def _slugify(raw: str) -> str:
+            raw = (raw or "").strip().lower()
+            out = []
+            for ch in raw:
+                if ch.isalnum() or ch in ("-", "_"):
+                    out.append(ch)
+                else:
+                    out.append("-")
+            s = "".join(out).strip("-")
+            while "--" in s:
+                s = s.replace("--", "-")
+            return s or "steam-server"
+
+        app_id = _slugify(f"steam-{name}")
+        service_name = "server"
+
+        # Minimal Compose YAML with x-casaos.
+        # Use YAML-friendly indentation and avoid external deps.
+        yaml_lines: list[str] = []
+        yaml_lines.append(f"name: {app_id}")
+        yaml_lines.append("x-casaos:")
+        yaml_lines.append(f"  main: {service_name}")
+        yaml_lines.append("  category: Games")
+        yaml_lines.append("  title:")
+        yaml_lines.append(f"    en_us: {name}")
+        if first_host_port:
+            yaml_lines.append(f"  port_map: \"{first_host_port}\"")
+        yaml_lines.append("services:")
+        yaml_lines.append(f"  {service_name}:")
+        yaml_lines.append(f"    image: {image}")
+        yaml_lines.append(f"    container_name: {name}")
+        yaml_lines.append("    restart: unless-stopped")
+        if compose_ports:
+            yaml_lines.append("    ports:")
+            for p in compose_ports:
+                yaml_lines.append(f"      - \"{p}\"")
+        if env_map:
+            yaml_lines.append("    environment:")
+            for k, v in env_map.items():
+                # Quote values to avoid YAML parsing surprises.
+                vv = v.replace('"', '\\"')
+                yaml_lines.append(f"      {k}: \"{vv}\"")
+        if compose_volumes:
+            yaml_lines.append("    volumes:")
+            for v in compose_volumes:
+                yaml_lines.append(f"      - \"{v}\"")
+        if command:
+            yaml_lines.append("    command:")
+            for part in command:
+                part = str(part).replace('"', '\\"')
+                yaml_lines.append(f"      - \"{part}\"")
+        yaml_lines.append("    labels:")
+        for k, v in labels.items():
+            vv = str(v).replace('"', '\\"')
+            yaml_lines.append(f"      {k}: \"{vv}\"")
+
+        compose_yaml = "\n".join(yaml_lines) + "\n"
+
+        headers = {
+            "Authorization": token,
+            "Content-Type": "application/yaml",
+        }
+
+        # Install the compose app.
+        url = f"{base}/compose?check_port_conflict=true"
+        resp = requests.post(url, data=compose_yaml.encode("utf-8"), headers=headers, timeout=15)
+        if resp.status_code >= 400:
+            # CasaOS versions differ in expected request format; retry with common JSON shapes.
+            json_errors: list[str] = [f"yaml:{resp.status_code}:{resp.text}"]
+            json_url = f"{base}/compose?check_port_conflict=true"
+            json_headers = {
+                "Authorization": token,
+                "Content-Type": "application/json",
+            }
+            payloads = [
+                {"compose": compose_yaml},
+                {"docker_compose_yml": compose_yaml},
+                {"name": app_id, "compose": compose_yaml},
+                {"name": app_id, "docker_compose_yml": compose_yaml},
+            ]
+            for payload in payloads:
+                try:
+                    jr = requests.post(json_url, json=payload, headers=json_headers, timeout=15)
+                    if jr.status_code < 400:
+                        resp = jr
+                        break
+                    json_errors.append(f"json:{jr.status_code}:{jr.text}")
+                except Exception as exc:
+                    json_errors.append(f"json:exception:{exc}")
+            if resp.status_code >= 400:
+                raise RuntimeError(
+                    "CasaOS compose install failed; set CASAOS_API_BASE/CASAOS_API_TOKEN and verify API format. "
+                    + " | ".join(json_errors[-3:])
+                )
+
+        # Best-effort: wait briefly for the container to appear.
+        self._ensure_client()
+        container = None
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            try:
+                container = self.client.containers.get(name)
+                break
+            except Exception:
+                time.sleep(0.5)
+
+        resolved_ports: dict[str, int] = {}
+        status = "unknown"
+        if container is not None:
+            try:
+                container.reload()
+                status = getattr(container, "status", "unknown")
+                port_info = ((getattr(container, "attrs", {}) or {}).get("NetworkSettings", {}) or {}).get("Ports") or {}
+                for key, bindings in port_info.items():
+                    if not bindings:
+                        continue
+                    host_binding = bindings[0] if isinstance(bindings, list) and bindings else None
+                    if not host_binding:
+                        continue
+                    host_port = host_binding.get("HostPort")
+                    if not host_port:
+                        continue
+                    try:
+                        resolved_ports[key] = int(host_port)
+                    except Exception:
+                        resolved_ports[key] = host_port
+            except Exception:
+                pass
+
+        return {
+            "id": getattr(container, "id", None) if container is not None else None,
+            "name": name,
+            "image": image,
+            "ports": resolved_ports or {k: v for k, v in port_binding.items()},
+            "labels": labels,
+            "status": status,
+            "casaos_compose_app": app_id,
         }
 
 
