@@ -1709,6 +1709,23 @@ class DockerManager:
             "steam.name": name,
             "origin": "blockpanel",
         }
+        # CasaOS: group Steam child containers under the BlockPanel app so they don't
+        # appear as standalone "Legacy Apps". Keep this minimal (no web/custom_id/name)
+        # to avoid creating app tiles.
+        try:
+            if casaos_app_id:
+                labels.update(
+                    {
+                        "io.casaos.app": casaos_app_id,
+                        "io.casaos.parent": casaos_app_id,
+                        "io.casaos.managed": "true",
+                        "io.casaos.category": CASAOS_CATEGORY,
+                        "io.casaos.group": casaos_app_id,
+                        "io.casaos.subapp": "true",
+                    }
+                )
+        except Exception:
+            pass
         if first_protocol:
             labels["protocol"] = first_protocol
         # Intentionally omit CasaOS-facing "web" metadata; this helps avoid the container
