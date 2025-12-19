@@ -389,6 +389,42 @@ class DockerManager:
         # Simple in-memory caches
         self._stats_cache: dict[str, tuple[float, dict]] = {}
         self._cached_casaos_app_id: str | None = None
+        # Optional: run Steam servers on a separate Docker engine (e.g., remote host or DinD)
+        # so they don't show up in CasaOS (which enumerates the host Docker engine).
+        self._steam_docker_host: str | None = (os.getenv("STEAM_DOCKER_HOST") or "").strip() or None
+        self._steam_client: docker.DockerClient | None = None
+
+    def _get_steam_client(self) -> docker.DockerClient | None:
+        host = (self._steam_docker_host or "").strip()
+        if not host:
+            return None
+        if self._steam_client is not None:
+            return self._steam_client
+        try:
+            self._steam_client = docker.DockerClient(base_url=host)
+            return self._steam_client
+        except Exception as exc:
+            logger.warning(f"Failed to init STEAM_DOCKER_HOST client ({host}): {exc}")
+            self._steam_client = None
+            return None
+
+    def _iter_docker_clients(self):
+        """Yield available Docker clients as (client, engine_name)."""
+        yield (self.client, "host")
+        steam = self._get_steam_client()
+        if steam is not None:
+            yield (steam, "steam")
+
+    def _get_container_any(self, container_id_or_name: str):
+        """Lookup a container across all configured Docker engines."""
+        last_exc: Exception | None = None
+        for client, _engine in self._iter_docker_clients():
+            try:
+                return client.containers.get(container_id_or_name)
+            except Exception as exc:
+                last_exc = exc
+                continue
+        raise last_exc or docker.errors.NotFound("Container not found")
 
     def _resolve_casaos_app_id(self) -> str:
         """Resolve the CasaOS app id used to group child containers.
@@ -470,10 +506,26 @@ class DockerManager:
             if now - ts <= 2:
                 return payload
         try:
-            containers = self.client.containers.list(all=True)
-            result = []
-            for c in containers:
+            containers_by_engine: list[tuple[str, object]] = []
+            for client, engine in self._iter_docker_clients():
                 try:
+                    for c in client.containers.list(all=True):
+                        containers_by_engine.append((engine, c))
+                except Exception as e:
+                    logger.warning(f"Failed listing containers from engine '{engine}': {e}")
+
+            result = []
+            seen_ids: set[str] = set()
+            for engine, c in containers_by_engine:
+                try:
+                    try:
+                        cid = getattr(c, "id", None)
+                        if cid and cid in seen_ids:
+                            continue
+                        if cid:
+                            seen_ids.add(cid)
+                    except Exception:
+                        pass
                     attrs = c.attrs or {}
                     config = attrs.get("Config", {})
                     network = attrs.get("NetworkSettings", {})
@@ -587,6 +639,7 @@ class DockerManager:
                         "port_summary": steam_port_summary,
                         "host_port": primary_host_port,
                         "created_at": attrs.get("Created"),
+                        "engine": engine,
                         # Shorthand keys for UI convenience
                         "type": server_type,
                         "version": server_version,
@@ -608,7 +661,7 @@ class DockerManager:
         Returns the server type and version for a given container.
         """
         try:
-            container = self.client.containers.get(container_id)
+            container = self._get_container_any(container_id)
             labels = getattr(container, "labels", {})
             server_kind = "minecraft"
             server_type = labels.get("mc.type")
@@ -653,7 +706,7 @@ class DockerManager:
         Returns comprehensive server information for a given container.
         """
         try:
-            container = self.client.containers.get(container_id)
+            container = self._get_container_any(container_id)
             attrs = container.attrs or {}
             config = attrs.get("Config", {})
             network = attrs.get("NetworkSettings", {})
@@ -835,7 +888,7 @@ class DockerManager:
         # Mount the entire servers volume to /data/servers, then the container will look for /data/servers/server_name/
         return {SERVERS_VOLUME_NAME: {"bind": "/data/servers", "mode": "rw"}}
 
-    def get_used_host_ports(self, only_minecraft: bool = True) -> set:
+    def get_used_host_ports(self, only_minecraft: bool = True, *, client: docker.DockerClient | None = None) -> set:
         """
         Return a set of host ports currently bound by any Docker container.
         If only_minecraft is True, limit to the Minecraft container port (25565/tcp)
@@ -844,7 +897,8 @@ class DockerManager:
         """
         used: set[int] = set()
         try:
-            containers = self.client.containers.list(all=True)
+            active_client = client or self.client
+            containers = active_client.containers.list(all=True)
             for c in containers:
                 try:
                     ports = (c.attrs.get("NetworkSettings", {}) or {}).get("Ports", {}) or {}
@@ -865,7 +919,12 @@ class DockerManager:
             pass
         return used
 
-    def _get_used_host_ports_by_protocol(self, *, only_minecraft: bool = True) -> dict[str, set[int]]:
+    def _get_used_host_ports_by_protocol(
+        self,
+        *,
+        only_minecraft: bool = True,
+        client: docker.DockerClient | None = None,
+    ) -> dict[str, set[int]]:
         """Return used host ports grouped by protocol.
 
         Docker allows binding the same numeric port for TCP and UDP simultaneously,
@@ -873,7 +932,8 @@ class DockerManager:
         """
         used_by_proto: dict[str, set[int]] = {"tcp": set(), "udp": set()}
         try:
-            containers = self.client.containers.list(all=True)
+            active_client = client or self.client
+            containers = active_client.containers.list(all=True)
             for c in containers:
                 try:
                     ports = (c.attrs.get("NetworkSettings", {}) or {}).get("Ports", {}) or {}
@@ -1589,12 +1649,26 @@ class DockerManager:
         """
         self._ensure_client()
 
+        # Prefer a dedicated Docker engine for Steam when configured.
+        # This allows hiding Steam containers from CasaOS by not creating them
+        # on the host Docker engine CasaOS enumerates.
+        client = self._get_steam_client() or self.client
+
         # Resolve host port bindings (deterministic; never ask Docker for ephemeral ports)
         # IMPORTANT: Many Steam dedicated servers require related/consecutive ports.
         # Bind ports as a single block (preserving offsets from the first port) so choosing a
         # custom host port doesn't break the rest of the required ports.
         port_binding: dict[str, int] = {}
-        used_by_proto = self._get_used_host_ports_by_protocol(only_minecraft=False)
+        used_by_proto = self._get_used_host_ports_by_protocol(only_minecraft=False, client=client)
+        # If Steam runs on a different engine but still binds ports on the same host network
+        # (e.g., Docker-in-Docker with network_mode: host), also avoid collisions with host-engine ports.
+        if client is not self.client:
+            try:
+                host_used = self._get_used_host_ports_by_protocol(only_minecraft=False, client=self.client)
+                for proto, ports_set in (host_used or {}).items():
+                    used_by_proto.setdefault(proto, set()).update(ports_set or set())
+            except Exception:
+                pass
         first_protocol: str | None = None
 
         normalized_ports: list[dict] = []
@@ -1746,7 +1820,11 @@ class DockerManager:
         if restart_policy:
             run_kwargs["restart_policy"] = restart_policy
 
-        container = self.client.containers.run(
+        effective_network = None
+        if client is self.client:
+            effective_network = COMPOSE_NETWORK if COMPOSE_NETWORK else None
+
+        container = client.containers.run(
             image,
             name=name,
             detach=True,
@@ -1755,7 +1833,7 @@ class DockerManager:
             environment={k: str(v) for k, v in (env or {}).items()},
             ports=port_binding,
             volumes=volume_mounts,
-            network=COMPOSE_NETWORK if COMPOSE_NETWORK else None,
+            network=effective_network,
             command=command,
             labels=labels,
             **run_kwargs,
@@ -1798,6 +1876,7 @@ class DockerManager:
             "ports": resolved_ports or dict(port_binding),
             "labels": labels,
             "status": getattr(container, "status", "unknown"),
+            "engine": "steam" if client is not self.client else "host",
         }
 
     def _resolve_casaos_api_base(self) -> str | None:
@@ -2173,7 +2252,7 @@ class DockerManager:
         """Start the container and attempt a lightweight readiness check.
         Does not block for long; callers can poll logs/status if needed.
         """
-        container = self.client.containers.get(container_id)
+        container = self._get_container_any(container_id)
         try:
             container.start()
             # Briefly wait and refresh status
@@ -2187,7 +2266,7 @@ class DockerManager:
         """Gracefully stop the Minecraft server inside the container.
         Attempts in order: RCON -> attach_socket -> stdin, then Docker stop/kill as fallback.
         """
-        container = self.client.containers.get(container_id)
+        container = self._get_container_any(container_id)
         try:
             container.reload()
         except Exception:
@@ -2240,7 +2319,7 @@ class DockerManager:
         return self.start_server(container_id)
 
     def kill_server(self, container_id):
-        container = self.client.containers.get(container_id)
+        container = self._get_container_any(container_id)
         container.kill()
         return {"id": container.id, "status": container.status}
 
@@ -2252,7 +2331,7 @@ class DockerManager:
         name_hint = str(container_id)
         # Remove container first
         try:
-            container = self.client.containers.get(container_id)
+            container = self._get_container_any(container_id)
             try:
                 name_hint = getattr(container, 'name', name_hint)
             except Exception:
@@ -2437,7 +2516,7 @@ class DockerManager:
         return {"old_name": old_name, "new_name": new_name, "container": result}
 
     def get_server_logs(self, container_id, tail: int = 200):
-        container = self.client.containers.get(container_id)
+        container = self._get_container_any(container_id)
         logs = container.logs(tail=tail).decode(errors="ignore")
         return {"id": container.id, "logs": logs}
 
@@ -2446,7 +2525,7 @@ class DockerManager:
         Sendet einen Befehl an den Minecraft-Server im Container.
         Versucht zuerst RCON, dann attach_socket, dann stdin-Fallback.
         """
-        container = self.client.containers.get(container_id)
+        container = self._get_container_any(container_id)
 
         try:
             # --- 1️⃣ RCON versuchen ---
@@ -2541,7 +2620,7 @@ class DockerManager:
         If stats are not available (container not running or Docker not responding), returns an error message.
         """
         try:
-            container = self.client.containers.get(container_id)
+            container = self._get_container_any(container_id)
             container.reload()
             if container.status != "running":
                 return {
@@ -2655,7 +2734,7 @@ class DockerManager:
         method will be one of: 'mcstatus', 'rcon', 'attach_socket', 'stdin', 'logs', 'none'
         """
         try:
-            container = self.client.containers.get(container_id)
+            container = self._get_container_any(container_id)
             env_vars = container.attrs.get("Config", {}).get("Env", [])
             env_dict = dict(var.split("=", 1) for var in env_vars if "=" in var)
 

@@ -248,12 +248,34 @@ If `CASAOS_API_BASE` is not set, BlockPanel will probe common defaults (`host.do
 **Security note**
 Treat `CASAOS_API_TOKEN` like a password. If you pasted it into chat/logs, rotate it (log out / re-login) and update the env var.
 
+### Hiding Steam Servers From CasaOS
+
+If Steam servers are created on the **same Docker engine** CasaOS uses, CasaOS can still list them under **Legacy Apps / Docker** even if you set `io.casaos.*` labels.
+
+To keep Steam servers visible only inside BlockPanel, run Steam containers on a **different Docker engine** and point BlockPanel at it:
+
+- `STEAM_DOCKER_HOST`: Docker daemon URL used *only* for Steam servers (example: `tcp://<remote-docker-host>:2375`).
+
+This is the only reliable approach because CasaOS enumerates containers from its Docker engine.
+
+**No separate machine? (Single-host option)**
+
+Use a Docker-in-Docker sidecar as the Steam engine:
+
+- Run a `docker:dind` container in `network_mode: host` and `privileged: true`
+- Expose its daemon on `tcp://0.0.0.0:23750`
+- Mount the same `/data/servers` path into it so Steam containers can bind-mount server data
+- Set BlockPanel: `STEAM_DOCKER_HOST=tcp://172.17.0.1:23750`
+
+The CasaOS appstore manifest for the unified app includes an example `steam_engine` service wired this way.
+
 ### Environment Quick Reference
 | Variable | Purpose |
 |----------|---------|
 | ADMIN_PASSWORD | Sets/overrides admin password at startup (>=8 chars) |
 | ALLOWED_ORIGIN_REGEX | Broad CORS (use `.*` initially, tighten later) |
 | BLOCKPANEL_RUNTIME_IMAGE/TAG | Image & tag used for spawned runtime servers |
+| STEAM_DOCKER_HOST | Optional separate Docker engine for Steam servers (keeps them out of CasaOS) |
 | SERVERS_VOLUME_NAME | Docker volume name for servers data |
 | SERVERS_CONTAINER_ROOT | In-container path for servers (default `/data/servers`) |
 

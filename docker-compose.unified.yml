@@ -36,6 +36,8 @@ services:
       # CasaOS v2 compose apps (Steam servers)
       - CASAOS_API_BASE=${CASAOS_API_BASE:-}
       - CASAOS_API_TOKEN=${CASAOS_API_TOKEN:-}
+      # Optional: run Steam servers on a separate Docker engine so CasaOS can't list them
+      - STEAM_DOCKER_HOST=${STEAM_DOCKER_HOST:-}
     volumes:
       - servers_data:/data/servers
       - sqlite_data:/data/sqlite
