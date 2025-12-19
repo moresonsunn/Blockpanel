@@ -385,10 +385,10 @@ export default function TemplatesPage({
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 animate-fade-in">
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-3">
-          <FaLayerGroup className="text-brand-500" /> Templates & Modpacks
+          <FaLayerGroup className="text-brand-500" /> <span className="gradient-text-brand">Templates & Modpacks</span>
         </h1>
         <p className="text-white/70 mt-2">Import modpack server packs or search and install from providers</p>
       </div>

@@ -267,8 +267,14 @@ export default function MonitoringPage() {
     : '—';
 
   return (
-    <div className="min-h-screen p-6">
+    <div className="p-6 animate-fade-in">
       <div className="max-w-6xl mx-auto space-y-6">
+        <div>
+          <div className="text-sm uppercase tracking-wide text-white/50">Server Status</div>
+          <h1 className="text-3xl font-bold mt-1"><span className="gradient-text-brand">Monitoring</span></h1>
+          <p className="text-white/70 mt-2">Live health, alerts, integrity checks, and logs preview.</p>
+        </div>
+
         {error && (
           <div className="rounded bg-red-500/10 border border-red-500/40 text-red-200 text-sm px-4 py-3">
             {error}
@@ -315,7 +321,7 @@ export default function MonitoringPage() {
                       <div className="text-xs text-white/60">Status: {s.status}</div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => openServer(s)} className="px-3 py-1 rounded bg-slate-600 hover:bg-slate-500 text-sm">Open</button>
+                      <button onClick={() => openServer(s)} className="px-3 py-1 rounded bg-brand-500 hover:bg-brand-600 text-sm text-white">Open</button>
                     </div>
                   </div>
                 ))}
@@ -353,7 +359,7 @@ export default function MonitoringPage() {
                     <div>Uptime: {selected.data?.uptime_seconds ? `${Math.round(selected.data.uptime_seconds)}s` : '—'}</div>
                     <div>Last exit code: {selected.data?.last_exit_code ?? '—'}</div>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <button onClick={() => restartServer(selected.server)} className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-sm">Restart</button>
+                      <button onClick={() => restartServer(selected.server)} className="px-3 py-1 rounded bg-white/10 hover:bg-white/20 text-sm text-white/80 border border-white/10">Restart</button>
                       <button
                         onClick={() => {
                           if (!selected.logs) return;
@@ -362,7 +368,7 @@ export default function MonitoringPage() {
                             w.document.write(`<pre style="white-space:pre-wrap;font-family:monospace;padding:16px;">${selected.logs.replace(/</g, '&lt;')}</pre>`);
                           }
                         }}
-                        className="px-3 py-1 rounded bg-slate-600 hover:bg-slate-500 text-sm"
+                        className="px-3 py-1 rounded bg-white/10 hover:bg-white/20 text-sm text-white/80 border border-white/10"
                       >Logs Preview</button>
                     </div>
                     {selected.logs ? (

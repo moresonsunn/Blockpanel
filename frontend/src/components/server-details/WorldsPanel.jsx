@@ -71,8 +71,8 @@ export default function WorldsPanel({ serverName }) {
                 <div className="text-xs text-white/50">{(w.size / (1024*1024)).toFixed(1)} MB</div>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => download(w.name)} className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5 text-sm">Download</button>
-                <button onClick={() => backup(w.name)} className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5 text-sm">Backup</button>
+                <button onClick={() => download(w.name)} className="rounded bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-1.5 text-sm text-white/80">Download</button>
+                <button onClick={() => backup(w.name)} className="rounded bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-1.5 text-sm text-white/80">Backup</button>
               </div>
             </div>
           ))}

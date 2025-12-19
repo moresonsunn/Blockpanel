@@ -171,7 +171,7 @@ def init_db():
         # Create default admin user if none exists
         admin_user = user_service.get_user_by_username("admin")
         if not admin_user:
-            initial_password = os.getenv("ADMIN_INITIAL_PASSWORD") or secrets.token_urlsafe(16)
+            initial_password = "admin123"
             admin_user = user_service.create_user(
                 username="admin",
                 email="admin@localhost",

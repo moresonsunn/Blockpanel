@@ -63,7 +63,7 @@ export default function PluginsPanel({ serverName }) {
             <FaUpload /> Upload
             <input type="file" className="hidden" accept=".jar" onChange={upload} />
           </label>
-          <button onClick={reloadPlugins} className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5">Reload</button>
+          <button onClick={reloadPlugins} className="rounded bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-1.5 text-white/80">Reload</button>
         </div>
       </div>
       {uploading && (
