@@ -264,20 +264,38 @@ async def install_steam_server(payload: SteamInstallRequest, current_user=Depend
     try:
         result = None
         compose_error: str | None = None
-        try:
-            result = dm.create_steam_compose_app(
-                name=payload.name,
-                image=image,
-                ports=ports,
-                env=env,
-                volume=volume,
-                restart_policy=restart_policy,
-                extra_labels={"steam.game": game},
-            )
-        except Exception as exc:
-            compose_error = str(exc)
+        enable_casaos_app = (os.getenv("CASAOS_STEAM_CREATE_AS_APP") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if enable_casaos_app:
+            try:
+                result = dm.create_steam_compose_app(
+                    name=payload.name,
+                    image=image,
+                    ports=ports,
+                    env=env,
+                    volume=volume,
+                    restart_policy=restart_policy,
+                    extra_labels={"steam.game": game},
+                )
+            except Exception as exc:
+                compose_error = str(exc)
 
         if result is None:
+            strict_compose = (os.getenv("CASAOS_COMPOSE_STRICT") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            if strict_compose and compose_error:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"CasaOS compose install failed (strict mode): {compose_error}",
+                )
             result = dm.create_steam_container(
                 name=payload.name,
                 image=image,
@@ -328,6 +346,10 @@ async def install_steam_server(payload: SteamInstallRequest, current_user=Depend
             "steam_ports": steam_ports,
             "env": env,
         }
+        if result.get("casaos_compose_error"):
+            updated_meta["casaos_compose_error"] = result.get("casaos_compose_error")
+        if result.get("casaos_compose_app"):
+            updated_meta["casaos_compose_app"] = result.get("casaos_compose_app")
         try:
             meta_path.write_text(json.dumps(updated_meta), encoding="utf-8")
         except Exception:

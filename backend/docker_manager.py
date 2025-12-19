@@ -1708,12 +1708,11 @@ class DockerManager:
             "steam.server": "true",
             "steam.name": name,
             "origin": "blockpanel",
-            "name": name,
-            "custom_id": f"{casaos_app_id}-{name}",
         }
         if first_protocol:
             labels["protocol"] = first_protocol
-        labels.setdefault("web", "")
+        # Intentionally omit CasaOS-facing "web" metadata; this helps avoid the container
+        # being surfaced as a first-class CasaOS app tile.
 
         if extra_labels:
             for label_key, label_value in extra_labels.items():
@@ -1773,16 +1772,7 @@ class DockerManager:
         except Exception as inspect_err:
             logger.warning(f"Failed to inspect assigned ports for {name}: {inspect_err}")
 
-        # Update CasaOS-visible labels with the resolved host port so the UI can display it without extra lookups.
-        updated_labels = dict(labels)
-        if primary_host_port:
-            updated_labels["web"] = primary_host_port
-        try:
-            if updated_labels != labels:
-                container.update(labels=updated_labels)
-                labels = updated_labels
-        except Exception as label_update_err:
-            logger.debug(f"Unable to update labels for {name} with resolved port: {label_update_err}")
+        # Do not update container labels with resolved ports; BlockPanel reads ports directly.
 
         return {
             "id": container.id,
@@ -1794,12 +1784,37 @@ class DockerManager:
         }
 
     def _resolve_casaos_api_base(self) -> str | None:
-        """Return a CasaOS AppManagement base URL (ending in /v2/app_management) if configured.
+        """Return a CasaOS AppManagement base URL (ending in /v2/app_management).
+
+        Supports CASAOS_API_BASE set to any of:
+        - http(s)://host
+        - http(s)://host/v2
+        - http(s)://host/v2/app_management
+        - http(s)://host/v2/app_management/compose
 
         Prefer explicit CASAOS_API_BASE; otherwise try common Docker hostnames.
         """
+
+        def _normalize_base(raw: str) -> str:
+            raw = (raw or "").strip().rstrip("/")
+            if not raw:
+                return raw
+            if "://" not in raw and not raw.startswith("/"):
+                raw = f"http://{raw}"
+            if raw.endswith("/compose"):
+                raw = raw[: -len("/compose")]
+            if raw.endswith("/v2/app_management"):
+                return raw
+            if raw.endswith("/v2"):
+                return f"{raw}/app_management"
+            marker = "/v2/app_management"
+            if marker in raw:
+                idx = raw.index(marker)
+                return raw[: idx + len(marker)]
+            return f"{raw}/v2/app_management"
+
         if CASAOS_API_BASE:
-            return CASAOS_API_BASE.rstrip("/")
+            return _normalize_base(CASAOS_API_BASE)
 
         candidates = [
             "http://host.docker.internal/v2/app_management",
@@ -1808,6 +1823,7 @@ class DockerManager:
         ]
         for base in candidates:
             try:
+                base = _normalize_base(base)
                 r = requests.get(f"{base}/compose", timeout=2)
                 if r.status_code in (200, 401, 403):
                     return base.rstrip("/")
@@ -1951,6 +1967,13 @@ class DockerManager:
         if not token:
             raise RuntimeError("CASAOS_API_TOKEN not set; cannot install compose app")
 
+        auth_values: list[str] = []
+        token_stripped = token.strip()
+        if token_stripped:
+            auth_values.append(token_stripped)
+        if token_stripped and not token_stripped.lower().startswith("bearer "):
+            auth_values.append(f"Bearer {token_stripped}")
+
         # Compute port bindings.
         port_binding = self._resolve_steam_port_binding(ports)
 
@@ -2056,42 +2079,33 @@ class DockerManager:
 
         compose_yaml = "\n".join(yaml_lines) + "\n"
 
-        headers = {
-            "Authorization": token,
-            "Content-Type": "application/yaml",
-        }
-
         # Install the compose app.
+        # CasaOS AppManagement v2 expects raw compose YAML in the request body.
         url = f"{base}/compose?check_port_conflict=true"
-        resp = requests.post(url, data=compose_yaml.encode("utf-8"), headers=headers, timeout=15)
-        if resp.status_code >= 400:
-            # CasaOS versions differ in expected request format; retry with common JSON shapes.
-            json_errors: list[str] = [f"yaml:{resp.status_code}:{resp.text}"]
-            json_url = f"{base}/compose?check_port_conflict=true"
-            json_headers = {
-                "Authorization": token,
-                "Content-Type": "application/json",
+        resp = None
+        last_exc: Exception | None = None
+        for auth in auth_values or [token_stripped]:
+            headers = {
+                "Authorization": auth,
+                "Content-Type": "application/yaml",
             }
-            payloads = [
-                {"compose": compose_yaml},
-                {"docker_compose_yml": compose_yaml},
-                {"name": app_id, "compose": compose_yaml},
-                {"name": app_id, "docker_compose_yml": compose_yaml},
-            ]
-            for payload in payloads:
-                try:
-                    jr = requests.post(json_url, json=payload, headers=json_headers, timeout=15)
-                    if jr.status_code < 400:
-                        resp = jr
-                        break
-                    json_errors.append(f"json:{jr.status_code}:{jr.text}")
-                except Exception as exc:
-                    json_errors.append(f"json:exception:{exc}")
-            if resp.status_code >= 400:
-                raise RuntimeError(
-                    "CasaOS compose install failed; set CASAOS_API_BASE/CASAOS_API_TOKEN and verify API format. "
-                    + " | ".join(json_errors[-3:])
-                )
+            try:
+                resp = requests.post(url, data=compose_yaml.encode("utf-8"), headers=headers, timeout=15)
+            except Exception as exc:
+                last_exc = exc
+                continue
+            if resp.status_code not in (401, 403):
+                break
+
+        if resp is None:
+            raise RuntimeError(f"CasaOS compose install request failed: {last_exc}")
+
+        if resp.status_code >= 400:
+            body = (resp.text or "").strip()
+            raise RuntimeError(
+                f"CasaOS compose install failed: HTTP {resp.status_code} at {url}. "
+                f"Response: {body[:2000]}"
+            )
 
         # Best-effort: wait briefly for the container to appear.
         self._ensure_client()
