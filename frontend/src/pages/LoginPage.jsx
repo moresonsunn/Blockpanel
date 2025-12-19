@@ -28,30 +28,30 @@ export default function LoginPage({
   error,
   loading,
 }) {
-  const orbitRadius = useMemo(() => ({ '--orbit-radius': '160px' }), []);
+  const orbitRadiusNear = useMemo(() => ({ '--orbit-radius': 'clamp(220px, 22vw, 320px)' }), []);
+  const orbitRadiusFar = useMemo(() => ({ '--orbit-radius': 'clamp(300px, 30vw, 460px)' }), []);
 
   return (
-    <div className="min-h-screen bg-ink bg-hero-gradient flex w-full">
-      <div className="min-h-screen flex items-center justify-center w-full">
-        <div className="max-w-md w-full mx-4">
-          <div className="relative">
-            {/* Orbiting Discord "ad" links */}
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <OrbitLink
-                className="animate-orbit"
-                style={{ ...orbitRadius, '--orbit-duration': '10s' }}
-              >
-                Join our Discord
-              </OrbitLink>
-              <OrbitLink
-                className="animate-orbit-reverse"
-                style={{ ...orbitRadius, '--orbit-duration': '14s', '--orbit-radius': '210px' }}
-              >
-                Support • Updates
-              </OrbitLink>
-            </div>
+    <div className="min-h-screen bg-ink bg-hero-gradient flex w-full relative overflow-visible">
+      {/* Orbiting Discord "ads" behind the login card */}
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-0">
+        <OrbitLink
+          className="animate-orbit"
+          style={{ ...orbitRadiusNear, '--orbit-duration': '10s' }}
+        >
+          Join our Discord
+        </OrbitLink>
+        <OrbitLink
+          className="animate-orbit-reverse"
+          style={{ ...orbitRadiusFar, '--orbit-duration': '14s' }}
+        >
+          Support • Updates
+        </OrbitLink>
+      </div>
 
-            <div className="rounded-xl glassmorphism-strong p-6 space-y-4 animate-fade-in">
+      <div className="min-h-screen flex items-center justify-center w-full relative z-10">
+        <div className="max-w-md w-full mx-4">
+          <div className="rounded-xl glassmorphism-strong p-6 space-y-4 animate-fade-in">
               <div className="text-center mb-6 animate-slide-up">
                 <div className="w-16 h-16 bg-brand-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-card animate-glow">
                   <FaServer className="text-2xl text-white" />
@@ -113,7 +113,6 @@ export default function LoginPage({
                 </div>
               </form>
             </div>
-          </div>
         </div>
       </div>
     </div>
