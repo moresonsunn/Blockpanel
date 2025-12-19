@@ -146,10 +146,12 @@
 
 .animate-orbit {
   animation: orbit var(--orbit-duration, 10s) linear infinite;
+  will-change: transform;
 }
 
 .animate-orbit-reverse {
   animation: orbit var(--orbit-duration, 14s) linear infinite reverse;
+  will-change: transform;
 }
 
 @media (prefers-reduced-motion: reduce) {

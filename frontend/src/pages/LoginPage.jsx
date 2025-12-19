@@ -28,25 +28,51 @@ export default function LoginPage({
   error,
   loading,
 }) {
-  const orbitRadiusNear = useMemo(() => ({ '--orbit-radius': 'clamp(220px, 22vw, 320px)' }), []);
-  const orbitRadiusFar = useMemo(() => ({ '--orbit-radius': 'clamp(300px, 30vw, 460px)' }), []);
+  const sideOffset = useMemo(() => ({ '--ad-offset': 'clamp(240px, 30vw, 420px)' }), []);
 
   return (
-    <div className="min-h-screen bg-ink bg-hero-gradient flex w-full relative overflow-visible">
-      {/* Orbiting Discord "ads" behind the login card */}
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-0">
-        <OrbitLink
-          className="animate-orbit"
-          style={{ ...orbitRadiusNear, '--orbit-duration': '10s' }}
+    <div className="min-h-screen bg-ink bg-hero-gradient flex w-full relative overflow-hidden">
+      {/* Side promos (kept away from the form; hidden on small screens) */}
+      <div className="pointer-events-none absolute inset-0 z-0 hidden md:block">
+        <div
+          className="absolute left-1/2 top-1/2"
+          style={{ ...sideOffset, transform: 'translate(calc(-50% - var(--ad-offset)), -50%)' }}
         >
-          Join our Discord
-        </OrbitLink>
-        <OrbitLink
-          className="animate-orbit-reverse"
-          style={{ ...orbitRadiusFar, '--orbit-duration': '14s' }}
+          <div className="pointer-events-none" style={{ transform: 'rotate(-6deg)' }}>
+            <div className="pointer-events-auto animate-float">
+              <OrbitLink>
+                Join our Discord
+              </OrbitLink>
+            </div>
+          </div>
+          <div className="mt-4 pointer-events-none" style={{ transform: 'rotate(4deg)' }}>
+            <div className="pointer-events-auto animate-bounce-subtle">
+              <OrbitLink>
+                Support • Updates
+              </OrbitLink>
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="absolute left-1/2 top-1/2"
+          style={{ ...sideOffset, transform: 'translate(calc(-50% + var(--ad-offset)), -50%)' }}
         >
-          Support • Updates
-        </OrbitLink>
+          <div className="pointer-events-none" style={{ transform: 'rotate(7deg)' }}>
+            <div className="pointer-events-auto animate-float">
+              <OrbitLink>
+                Events • Giveaways
+              </OrbitLink>
+            </div>
+          </div>
+          <div className="mt-4 pointer-events-none" style={{ transform: 'rotate(-3deg)' }}>
+            <div className="pointer-events-auto animate-bounce-subtle">
+              <OrbitLink>
+                Get help fast
+              </OrbitLink>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="min-h-screen flex items-center justify-center w-full relative z-10">
