@@ -92,6 +92,15 @@
   }
 }
 
+@keyframes orbit {
+  from {
+    transform: rotate(0deg) translateX(var(--orbit-radius, 160px)) rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg) translateX(var(--orbit-radius, 160px)) rotate(-360deg);
+  }
+}
+
 /* Apply animations using Tailwind utilities */
 .animate-fade-in {
   animation: fade-in 0.6s ease-out;
@@ -133,6 +142,21 @@
 
 .animate-bounce-subtle {
   animation: bounce-subtle 2s ease-in-out infinite;
+}
+
+.animate-orbit {
+  animation: orbit var(--orbit-duration, 10s) linear infinite;
+}
+
+.animate-orbit-reverse {
+  animation: orbit var(--orbit-duration, 14s) linear infinite reverse;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-orbit,
+  .animate-orbit-reverse {
+    animation: none !important;
+  }
 }
 
 /* Glassmorphism effect */

@@ -1,3 +1,5 @@
+import LoginPage from './pages/LoginPage';
+import MustChangePasswordPage from './pages/MustChangePasswordPage';
 // --- New: Rename server button component ---
 function RenameServerButton({ currentName, onRenamed }) {
   const [open, setOpen] = useState(false);
@@ -3431,59 +3433,47 @@ function App() {
 
   if (!isAuthenticated) {
     return (
-  <div className="min-h-screen bg-ink bg-hero-gradient flex w-full">
-        <div className="min-h-screen flex items-center justify-center w-full">
-          <div className="max-w-md w-full mx-4">
-            <div className="rounded-xl bg-black/30 border border-white/10 p-6 space-y-4">
-              <div className="text-center mb-6">
-                <div className="w-16 h-16 bg-brand-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <FaServer className="text-2xl text-white" />
-                </div>
-                <h1 className="text-2xl font-bold text-white">{APP_NAME}</h1>
-                <p className="text-white/70 mt-2">Please sign in to continue</p>
-              </div>
-              
-              {loginError && (
-                <div className="bg-red-500/10 border border-red-500/20 text-red-300 p-3 rounded-lg text-sm">
-                  {loginError}
-                </div>
-              )}
-              
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-white/70 mb-2">Username</label>
-                  <input
-                    type="text"
-                    className="w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-white placeholder-white/50"
-                    placeholder="Enter your username"
-                    value={loginUsername}
-                    onChange={(e) => setLoginUsername(e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-white/70 mb-2">Password</label>
-                  <input
-                    type="password"
-                    className="w-full rounded-md bg-white/5 border border-white/10 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500 text-white placeholder-white/50"
-                    placeholder="Enter your password"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    required
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={loginLoading}
-                  className="w-full py-3 rounded-md bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white font-medium transition-colors"
-                >
-                  {loginLoading ? 'Signing in...' : 'Sign In'}
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
+      <LoginPage
+        appName={APP_NAME}
+        username={loginUsername}
+        password={loginPassword}
+        onUsernameChange={setLoginUsername}
+        onPasswordChange={setLoginPassword}
+        onSubmit={handleLogin}
+        error={loginError}
+        loading={loginLoading}
+      />
+    );
+  }
+
+  if (isAuthenticated && !currentUser) {
+    return (
+      <div className="min-h-screen bg-ink bg-hero-gradient flex w-full items-center justify-center">
+        <div className="text-white/70">Loading…</div>
       </div>
+    );
+  }
+
+  if (isAuthenticated && currentUser && currentUser.must_change_password) {
+    return (
+      <MustChangePasswordPage
+        appName={APP_NAME}
+        apiBaseUrl={API}
+        onComplete={async () => {
+          try {
+            const r = await fetch(`${API}/auth/me`);
+            if (r.ok) {
+              const user = await r.json();
+              setCurrentUser(user);
+            } else {
+              setCurrentUser((prev) => (prev ? { ...prev, must_change_password: false } : prev));
+            }
+          } catch (_) {
+            setCurrentUser((prev) => (prev ? { ...prev, must_change_password: false } : prev));
+          }
+        }}
+        onLogout={handleLogout}
+      />
     );
   }
 

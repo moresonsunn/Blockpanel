@@ -48,6 +48,7 @@ class UserResponse(BaseModel):
     email: str
     role: str
     is_active: bool
+    must_change_password: bool
     created_at: datetime
     last_login: Optional[datetime]
     
