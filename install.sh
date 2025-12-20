@@ -65,7 +65,7 @@ if [[ "$EDGE" == "false" && -n "$VERSION" ]]; then
   echo "Pinning images to $VERSION"
   # Replace :latest with :$VERSION
   run sed -i.bak "s#${NAMESPACE}/lynx:latest#${NAMESPACE}/lynx:${VERSION}#" docker-compose.yml || true
-  run sed -i.bak "s#${NAMESPACE}/lynx-runtime:latest#${NAMESPACE}/lynx-runtime:${VERSION}#" docker-compose.yml || true
+  # Single-image deployment: controller and runtime use the same image.
   # Replace APP_VERSION env if present
   run sed -i.bak "s#APP_VERSION=v[^\n]*#APP_VERSION=${VERSION}#" docker-compose.yml || true
 fi

@@ -58,9 +58,7 @@ if (-not $Edge -and $Version) {
   Invoke-Step 'Replace controller image tag' {
     (Get-Content docker-compose.yml) -replace "$namespace/lynx:latest", "$namespace/lynx:$Version" | Set-Content docker-compose.yml
   }
-  Invoke-Step 'Replace runtime image tag' {
-    (Get-Content docker-compose.yml) -replace "$namespace/lynx-runtime:latest", "$namespace/lynx-runtime:$Version" | Set-Content docker-compose.yml
-  }
+  # Single-image deployment: controller and runtime use the same image.
   Invoke-Step 'Replace APP_VERSION env' {
     (Get-Content docker-compose.yml) -replace 'APP_VERSION=v[0-9A-Za-z\.\-]+', "APP_VERSION=$Version" | Set-Content docker-compose.yml
   }

@@ -10,11 +10,10 @@ variables:
   DOCKER_DRIVER: overlay2
   DOCKER_TLS_CERTDIR: ""  # Disable TLS for docker:dind
   # Docker Hub namespace abstraction. Override DOCKERHUB_NAMESPACE (and optionally the *REPO vars) in CI/CD settings.
-  # If DOCKERHUB_REPO / DOCKERHUB_RUNTIME_REPO are unset, they will be derived at runtime as:
-  #   ${DOCKERHUB_NAMESPACE}/lynx  and  ${DOCKERHUB_NAMESPACE}/lynx-runtime
+  # If DOCKERHUB_REPO is unset, it will be derived at runtime as:
+  #   ${DOCKERHUB_NAMESPACE}/lynx
   DOCKERHUB_NAMESPACE: "moresonsun"
   # DOCKERHUB_REPO: ""                # (optional explicit override)
-  # DOCKERHUB_RUNTIME_REPO: ""        # (optional explicit override)
 
 cache:
   paths:
@@ -57,7 +56,6 @@ build:image:
     # Ensure buildx is isolated per job
     DOCKER_BUILDKIT: "1"
     CONTROLLER_DOCKERFILE: docker/controller.Dockerfile
-    RUNTIME_DOCKERFILE: docker/runtime.Dockerfile
   before_script:
     - docker info
     # Enable buildx
@@ -82,13 +80,10 @@ build:image:
       # Derive Docker Hub repo names if not explicitly provided (run-time logic)
       : "${DOCKERHUB_NAMESPACE:=moresonsun}"
       if [ -z "$DOCKERHUB_REPO" ]; then DOCKERHUB_REPO="${DOCKERHUB_NAMESPACE}/lynx"; fi
-      if [ -z "$DOCKERHUB_RUNTIME_REPO" ]; then DOCKERHUB_RUNTIME_REPO="${DOCKERHUB_NAMESPACE}/lynx-runtime"; fi
       # Ensure Dockerfiles exist
       [ -f "$CONTROLLER_DOCKERFILE" ] || { echo "Missing $CONTROLLER_DOCKERFILE"; exit 1; }
-      [ -f "$RUNTIME_DOCKERFILE" ] || { echo "Missing $RUNTIME_DOCKERFILE"; exit 1; }
       CONTROLLER_IMAGE="$CI_REGISTRY_IMAGE"
-      RUNTIME_IMAGE="${CI_REGISTRY_IMAGE}/runtime"
-      echo "Controller image: $CONTROLLER_IMAGE"; echo "Runtime image: $RUNTIME_IMAGE"
+      echo "Controller image: $CONTROLLER_IMAGE"
       # Build controller (API + frontend static files)
       docker buildx build \
         --platform linux/amd64,linux/arm64 \
@@ -98,34 +93,19 @@ build:image:
         --build-arg APP_VERSION=$VERSION \
         --build-arg GIT_COMMIT=$GIT_SHA \
         --push .
-      # Build runtime (multi-Java runtime)
-      docker buildx build \
-        --platform linux/amd64,linux/arm64 \
-        -f "$RUNTIME_DOCKERFILE" \
-        -t "$RUNTIME_IMAGE:$VERSION" \
-        -t "$RUNTIME_IMAGE:latest" \
-        --build-arg APP_VERSION=$VERSION \
-        --build-arg GIT_COMMIT=$GIT_SHA \
-        --push .
       # Optional Docker Hub mirror (controller only, extend as needed)
       if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_PASSWORD" ]; then \
         echo "Mirroring controller image to Docker Hub: $DOCKERHUB_REPO"; \
         docker buildx build --platform linux/amd64,linux/arm64 -f "$CONTROLLER_DOCKERFILE" \
           -t "$DOCKERHUB_REPO:$VERSION" -t "$DOCKERHUB_REPO:latest" \
           --build-arg APP_VERSION=$VERSION --build-arg GIT_COMMIT=$GIT_SHA --push .; \
-        echo "Mirroring runtime image to Docker Hub: $DOCKERHUB_RUNTIME_REPO"; \
-        docker buildx build --platform linux/amd64,linux/arm64 -f "$RUNTIME_DOCKERFILE" \
-          -t "$DOCKERHUB_RUNTIME_REPO:$VERSION" -t "$DOCKERHUB_RUNTIME_REPO:latest" \
-          --build-arg APP_VERSION=$VERSION --build-arg GIT_COMMIT=$GIT_SHA --push .; \
       fi
       echo $VERSION > build_version.txt
       echo $CONTROLLER_IMAGE > controller_image.txt
-      echo $RUNTIME_IMAGE > runtime_image.txt
   artifacts:
     paths:
       - build_version.txt
       - controller_image.txt
-      - runtime_image.txt
 
 release:
   stage: release
@@ -154,10 +134,6 @@ release:
           url: "$CI_REGISTRY_IMAGE:latest"
         - name: Versioned Image
           url: "$CI_REGISTRY_IMAGE:${CI_COMMIT_TAG#v}"
-        - name: Runtime Multi-arch Image (latest)
-          url: "$CI_REGISTRY_IMAGE/runtime:latest"
-        - name: Runtime Versioned Image
-          url: "$CI_REGISTRY_IMAGE/runtime:${CI_COMMIT_TAG#v}"
   artifacts:
     paths:
       - RELEASE_NOTES.md

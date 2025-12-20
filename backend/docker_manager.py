@@ -29,7 +29,7 @@ def _is_unified_image_name(image: str | None) -> bool:
     if not s:
         return False
     # Treat the single DockerHub repo (moresonsun/lynx) as the unified image.
-    # Match both namespaced and local tags, but avoid matching lynx-runtime.
+    # Match both namespaced and local tags, but avoid matching other helper images.
     base = s.split("@", 1)[0]
     repo = base.split(":", 1)[0]
     return repo == "lynx" or repo.endswith("/lynx")

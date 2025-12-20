@@ -2,7 +2,6 @@ name: lynx
 services:
   lynx:
     image: moresonsun/lynx:latest
-    network_mode: bridge
     ports:
       - target: 8000
         published: "8000"
@@ -15,6 +14,9 @@ services:
       SERVERS_CONTAINER_ROOT: /data/servers
       SERVERS_VOLUME_NAME: lynx_servers
       DOCKER_HOST: unix:///var/run/docker.sock
+      # Ensure child containers (Minecraft runtime / Steam servers) are grouped under the correct CasaOS app
+      # so they don't appear as standalone "Legacy Apps".
+      CASAOS_APP_ID: $AppID
       # CasaOS v2 compose apps (Steam servers)
       CASAOS_API_BASE: http://172.17.0.1/v2/app_management
       CASAOS_API_TOKEN: ""
@@ -40,7 +42,6 @@ services:
 
   lynx-db:
     image: postgres:15-alpine
-    network_mode: bridge
     environment:
       POSTGRES_DB: minecraft_controller
       POSTGRES_USER: postgres
@@ -50,12 +51,6 @@ services:
         source: /DATA/AppData/$AppID/postgres
         target: /var/lib/postgresql/data
     restart: unless-stopped
-
-  lynx-runtime-prewarm:
-    image: moresonsun/lynx-runtime:latest
-    command: ["true"]
-    network_mode: bridge
-    restart: "no"
 
 x-casaos:
   architectures:

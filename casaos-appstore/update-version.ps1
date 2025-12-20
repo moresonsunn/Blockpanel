@@ -10,7 +10,6 @@ $content = Get-Content $mainApp -Raw | ConvertFrom-Json
 $content.version = $Version
 $content.container_list[0].envs | Where-Object { $_.name -eq 'APP_VERSION' } | ForEach-Object { $_.value = $Version }
 $content.container_list[0].image = "moresonsun/lynx:$Version"
-$content.container_list[2].image = "moresonsun/lynx-runtime:$Version"
 $content | ConvertTo-Json -Depth 8 | Set-Content $mainApp -NoNewline
 
 Write-Host "Updated CasaOS app manifests to $Version" -ForegroundColor Green

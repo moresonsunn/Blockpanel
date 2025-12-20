@@ -1,17 +1,33 @@
 {
-  "name": "Lynx Store",
-  "description": "Single-app 3rd party store delivering the Lynx Minecraft server controller.",
+  "name": "BlockPanel Store",
+  "description": "Single-app 3rd party store delivering the BlockPanel Minecraft server controller.",
   "tips": "Add this URL as a Custom Source in CasaOS.",
-  "author": "Lynx Team",
-  "source": "https://github.com/moresonsunn/Lynx",
+  "author": "BlockPanel Team",
+  "source": "https://github.com/moresonsunn/Blockpanel",
   "version": 2,
   "apps": [
     {
-      "id": "lynx",
-      "title": "Lynx",
-      "description": "Lynx Minecraft server controller.",
-      "icon": "https://raw.githubusercontent.com/moresonsunn/Lynx/main/frontend/public/favicon.ico",
-      "index": "Apps/lynx/docker-compose.yml",
+      "id": "blockpanel",
+      "title": "BlockPanel",
+      "description": "Full stack (controller + Postgres + optional Redis/Nginx/runtime prewarm).",
+      "icon": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico",
+      "index": "Apps/blockpanel/docker-compose.yml",
+      "port_map": "8000"
+    },
+    {
+      "id": "blockpanel-lite",
+      "title": "BlockPanel (Lite)",
+      "description": "Single-container SQLite build (simpler, not for heavy production).",
+      "icon": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico",
+      "index": "Apps/blockpanel-lite/docker-compose.yml",
+      "port_map": "8000"
+    },
+    {
+      "id": "blockpanel-unified",
+      "title": "BlockPanel (Unified)",
+      "description": "All-in-one image (controller + UI + multi-Java runtime) using SQLite.",
+      "icon": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/casaos-appstore/assets/blockpanel-unified-icon.png",
+      "index": "Apps/blockpanel-unified/docker-compose.yml",
       "port_map": "8000"
     }
   ]

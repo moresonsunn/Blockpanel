@@ -21,7 +21,7 @@ Brand / Org Override: set `DOCKERHUB_NAMESPACE=lynx` (or explicitly set `DOCKERH
 
 GitLab Container Registry (when pipeline runs with `GITLAB_PUSH=true`):
 - Controller: `registry.gitlab.com/kyzen4/lynx/lynx:latest`
-- Runtime: `registry.gitlab.com/kyzen4/lynx/lynx-runtime:latest`
+
 
 Release tags (when pushing annotated git tags like `v0.1.0`) will also publish versioned images once available.
 

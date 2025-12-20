@@ -1,8 +1,8 @@
 // Centralized branding configuration for the frontend.
 // Allows overriding via build-time env: REACT_APP_APP_NAME
-// Falls back to Lynx if unspecified.
+// Falls back to BlockPanel if unspecified.
 
-export const APP_NAME = process.env.REACT_APP_APP_NAME || 'Lynx';
+export const APP_NAME = process.env.REACT_APP_APP_NAME || 'BlockPanel';
 
 export function applyDocumentBranding() {
   if (typeof document !== 'undefined') {

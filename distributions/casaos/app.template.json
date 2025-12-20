@@ -53,15 +53,6 @@
         {"container": "/var/lib/postgresql/data", "host": "lynx_dbdata"}
       ],
       "restart": "unless-stopped"
-    },
-    {
-      "name": "lynx-runtime-prewarm",
-      "image": "moresonsun/lynx-runtime:__VERSION__",
-      "container_name": "lynx-runtime-prewarm",
-      "command": ["true"],
-      "restart": "no",
-      "tips": "Optional: pulls the runtime image early so first server creation is faster. Safe to remove.",
-      "depends_on": []
     }
   ],
   "tips": {
