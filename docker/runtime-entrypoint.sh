@@ -151,7 +151,7 @@ else
 fi
 
 # Ensure the Minecraft server binds to the expected container port.
-# BlockPanel always publishes container port ${SERVER_PORT} (defaults to 25565).
+# Lynx always publishes container port ${SERVER_PORT} (defaults to 25565).
 # Many imported servers have server.properties set to the *host* port; that breaks container port publishing.
 SERVER_PORT="${SERVER_PORT:-25565}"
 if [ -f "server.properties" ]; then

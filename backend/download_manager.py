@@ -13,7 +13,7 @@ def stream_download(url: str, dest_file: Path):
 
     headers = {
         # Some hosts require a UA; also helps avoid being flagged as a bot
-        "User-Agent": "BlockPanel/1.0 (+https://github.com/moresonsunn/minecraft-server)",
+        "User-Agent": "Lynx/1.0 (+https://github.com/moresonsunn/Lynx)",
         # Be explicit we expect a binary JAR but accept common fallbacks
         "Accept": "application/java-archive, application/octet-stream, */*",
     }

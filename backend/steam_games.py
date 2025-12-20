@@ -137,7 +137,7 @@ BASE_STEAM_GAMES = {
         ],
         "env": {
             "RUST_SERVER_NAME": "Rust Server",
-            "RUST_SERVER_DESCRIPTION": "Managed by BlockPanel",
+            "RUST_SERVER_DESCRIPTION": "Managed by Lynx",
             "RUST_SERVER_MAXPLAYERS": 32,
             "RUST_RCON_PASSWORD": "change-me",
             "PUID": 1000,

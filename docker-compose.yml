@@ -1,26 +1,26 @@
-# Default compose file for BlockPanel unified deployment
+# Default compose file for Lynx deployment
 # Build & run:
 #   docker compose up -d --build
 
 services:
-  blockpanel:
-    image: moresonsun/blockpanel-unified:latest
+  lynx:
+    image: moresonsun/lynx:latest
     build:
       context: .
       dockerfile: docker/controller-unified.Dockerfile
       args:
-        - APP_VERSION=${BLOCKPANEL_TAG:-dev}
+        - APP_VERSION=${LYNX_TAG:-dev}
     ports:
       - "8000:8000"
     environment:
-      - APP_NAME=BlockPanel
+      - APP_NAME=Lynx
       - APP_VERSION=latest
       - USE_POSTGRES=false
       - DATABASE_URL=sqlite:////data/sqlite/minecraft_controller.db
       - SERVERS_CONTAINER_ROOT=/data/servers
       - SERVERS_VOLUME_NAME=minecraft-controller_servers_data
-      - BLOCKPANEL_RUNTIME_IMAGE=moresonsun/blockpanel-unified
-      - BLOCKPANEL_RUNTIME_TAG=latest
+      - LYNX_RUNTIME_IMAGE=moresonsun/lynx
+      - LYNX_RUNTIME_TAG=latest
       - DOCKER_HOST=unix:///var/run/docker.sock
       - ENVIRONMENT=production
       - SECRET_KEY=${SECRET_KEY:-change-me-single-container-secret}
@@ -28,7 +28,7 @@ services:
       - ADMIN_PASSWORD=YourNewStrongPass123!
       - ALLOWED_ORIGIN_REGEX=.*
       - ENABLE_DEBUG_ENDPOINTS=1
-      - CASAOS_APP_ID=blockpanel-unified
+      - CASAOS_APP_ID=lynx
       # CasaOS v2 compose apps (Steam servers)
       - CASAOS_API_BASE=${CASAOS_API_BASE:-}
       - CASAOS_API_TOKEN=${CASAOS_API_TOKEN:-}
@@ -43,7 +43,7 @@ services:
       retries: 5
     restart: unless-stopped
     labels:
-      io.casaos.app: "blockpanel-unified"
+      io.casaos.app: "lynx"
       io.casaos.managed: "true"
       io.casaos.category: "Game Servers"
 

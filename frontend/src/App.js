@@ -143,6 +143,7 @@ import {
   FaNewspaper,
   FaCalendarAlt,
   FaStopwatch,
+  FaBars,
   FaBackward,
   FaForward,
   FaPause,
@@ -1501,7 +1502,7 @@ function AdvancedUserManagementPageImpl() {
   }
 
   return (
-    <div className="p-6 space-y-6 animate-fade-in">
+    <div className="p-4 sm:p-6 space-y-6 animate-fade-in">
       {/* Header with tabs */}
       <div className="flex items-center justify-between">
         <div>
@@ -2310,7 +2311,7 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
     <div className="min-h-screen bg-transparent">
       {/* Clean Linear-inspired header */}
       <div className="border-b border-white/10 bg-ink/80 backdrop-blur supports-[backdrop-filter]:bg-ink/60">
-        <div className="max-w-6xl mx-auto px-6 py-6">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-semibold gradient-text-brand mb-1">Overview</h1>
@@ -2337,37 +2338,37 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
         </div>
       </div>
       
-      <div className="max-w-6xl mx-auto px-6 py-8 space-y-8 animate-fade-in">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8 animate-fade-in">
 
         {/* Simplified Stats */}
-        <div className="grid grid-cols-4 gap-6">
-          <div className="glassmorphism rounded-xl p-5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
+          <div className="glassmorphism rounded-xl p-4 sm:p-5">
             <div className="text-sm text-white/60 mb-1">Servers</div>
             <div className="flex items-baseline gap-2">
-              <div className="text-2xl font-medium text-white">
+              <div className="text-xl sm:text-2xl font-medium text-white">
                 {runningServers}
               </div>
               <div className="text-sm text-white/40">/ {totalServers}</div>
             </div>
           </div>
           
-          <div className="glassmorphism rounded-xl p-5">
+          <div className="glassmorphism rounded-xl p-4 sm:p-5">
             <div className="text-sm text-white/60 mb-1">CPU</div>
-            <div className="text-2xl font-medium text-white">
+            <div className="text-xl sm:text-2xl font-medium text-white">
               {`${avgCpuPercent.toFixed(0)}%`}
             </div>
           </div>
           
-          <div className="glassmorphism rounded-xl p-5">
+          <div className="glassmorphism rounded-xl p-4 sm:p-5">
             <div className="text-sm text-white/60 mb-1">Memory</div>
-            <div className="text-2xl font-medium text-white">
+            <div className="text-xl sm:text-2xl font-medium text-white">
               {`${(totalMemoryMB / 1024).toFixed(1)}GB`}
             </div>
           </div>
           
-          <div className="glassmorphism rounded-xl p-5">
+          <div className="glassmorphism rounded-xl p-4 sm:p-5">
             <div className="text-sm text-white/60 mb-1">Issues</div>
-            <div className="text-2xl font-medium text-white">
+            <div className="text-xl sm:text-2xl font-medium text-white">
               {criticalAlerts + warningAlerts}
             </div>
           </div>
@@ -2385,7 +2386,7 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
                 <div className="flex items-center gap-3 mb-2">
                   {p.icon_url ? <img src={p.icon_url} alt="" className="w-8 h-8 rounded"/> : <div className="w-8 h-8 bg-white/10 rounded"/>}
                   <div>
-                    <div className="text-white font-medium truncate max-w-[220px]" title={p.name}>{p.name}</div>
+                    <div className="text-white font-medium truncate max-w-[200px] sm:max-w-[220px]" title={p.name}>{p.name}</div>
                     <div className="text-xs text-white/60">Modrinth • {typeof p.downloads==='number'?`⬇ ${Intl.NumberFormat().format(p.downloads)}`:''}</div>
                   </div>
                 </div>
@@ -2403,8 +2404,8 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
 
         {/* Install Wizard Modal */}
         {installOpen && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-            <div className="bg-ink border border-white/10 rounded-lg p-6 w-full max-w-2xl">
+          <div className="fixed inset-0 bg-black/60 flex items-start sm:items-center justify-center z-50 p-4">
+            <div className="bg-ink border border-white/10 rounded-lg p-4 sm:p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
                 <div className="text-lg font-semibold">Install Modpack{installPack?.name ? `: ${installPack.name}` : ''}</div>
                 <button onClick={() => { setInstallOpen(false); setInstallPack(null); }} className="text-white/60 hover:text-white">Close</button>
@@ -2424,7 +2425,7 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
                   <label className="block text-xs text-white/60 mb-1">Host Port (optional)</label>
                   <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={hostPort} onChange={e=>setHostPort(e.target.value)} placeholder="25565" />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-white/60 mb-1">Min RAM</label>
                     <input className="w-full rounded bg-white/5 border border-white/10 px-3 py-2 text-white" value={minRam} onChange={e=>setMinRam(e.target.value)} onBlur={()=>{ const v = normalizeRamInput(minRam); if (v) setMinRam(v); }} />
@@ -2493,7 +2494,7 @@ const DashboardPage = React.memo(function DashboardPage({ onNavigate }) {
                   return (
                     <div 
                       key={server.id}
-                      className="flex items-center justify-between p-4 hover:bg-white/5 cursor-pointer transition-colors"
+                      className="flex flex-col sm:flex-row sm:items-center items-start justify-between p-4 gap-3 hover:bg-white/5 cursor-pointer transition-colors"
                       onClick={() => onNavigate && onNavigate('servers')}
                     >
                       <div className="flex items-center gap-3">
@@ -2757,7 +2758,7 @@ function ServersPage({
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3">
+          <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-3">
             <FaServer className="text-brand-500" /> <span className="gradient-text-brand">Server Management</span>
           </h1>
           <p className="text-white/70 mt-2">Create and manage your Minecraft servers</p>
@@ -2765,7 +2766,7 @@ function ServersPage({
       </div>
 
       {/* Servers List */}
-      <div className="bg-white/5 border border-white/10 rounded-lg p-6 space-y-4">
+      <div className="bg-white/5 border border-white/10 rounded-lg p-4 sm:p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-semibold">Your Servers</h3>
           <div className="flex items-center gap-3 text-xs text-white/60">
@@ -3515,8 +3516,8 @@ function App() {
     );
   }
 
-  return (
-      <div className="min-h-screen bg-ink bg-hero-gradient flex">
+    return (
+      <div className="min-h-screen bg-ink bg-hero-gradient flex overflow-hidden">
       {/* Sidebar */}
       {isAuthenticated && (() => {
         // Sidebar content reused for desktop and mobile overlay
@@ -3610,7 +3611,7 @@ function App() {
       })()}
       
       {/* Main Content */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Top Header */}
         {isAuthenticated && (
           <header className="border-b border-white/10 bg-ink/80 backdrop-blur supports-[backdrop-filter]:bg-ink/60">
@@ -3619,16 +3620,20 @@ function App() {
                 <button
                   onClick={() => setSidebarOpen(!sidebarOpen)}
                   className="p-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-                  aria-label={sidebarOpen ? 'Collapse navigation' : 'Expand navigation'}
+                  aria-label={
+                    isMobile
+                      ? (sidebarOpen ? 'Close navigation' : 'Open navigation')
+                      : (sidebarOpen ? 'Collapse navigation' : 'Expand navigation')
+                  }
                 >
-                  {sidebarOpen ? <FaBackward /> : <FaForward />}
+                  {isMobile ? <FaBars /> : (sidebarOpen ? <FaBackward /> : <FaForward />)}
                 </button>
                 <h1 className="text-lg font-semibold text-white">
                   {sidebarItems.find(item => item.id === currentPage)?.label || 'Dashboard'}
                 </h1>
               </div>
-              <div className="flex items-center gap-2 sm:gap-3">
-                <GlobalSearchBar onNavigate={handleGlobalNavigate} className="w-40 sm:w-64 md:w-80" />
+              <div className="flex items-center gap-2 sm:gap-3 flex-1 justify-end min-w-0">
+                <GlobalSearchBar onNavigate={handleGlobalNavigate} className="w-full max-w-[10rem] sm:max-w-[16rem] md:max-w-[20rem]" />
                 <div className="hidden sm:block text-sm text-white/70">
                   Welcome back, {currentUser?.username || 'User'}
                 </div>
@@ -3638,7 +3643,7 @@ function App() {
         )}
 
         {/* Main Content Area */}
-        <main className="flex-1">
+        <main className="flex-1 min-h-0 overflow-y-auto">
           {renderCurrentPage()}
         </main>
       </div>
@@ -3701,11 +3706,11 @@ function UsersTab({
           <table className="w-full">
             <thead className="bg-white/10">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">User</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Role</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Last Login</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Actions</th>
+                <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">User</th>
+                <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Role</th>
+                <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Status</th>
+                <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Last Login</th>
+                <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
@@ -3713,7 +3718,7 @@ function UsersTab({
                 const userRole = safeRoles.find(r => r.name === user.role);
                 return (
                   <tr key={user.id} className="hover:bg-white/5">
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-3 sm:px-6 py-4 whitespace-normal sm:whitespace-nowrap">
                       <div className="flex items-center">
                         <div 
                           className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold"
@@ -3728,7 +3733,7 @@ function UsersTab({
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <div 
                           className="w-3 h-3 rounded-full"
@@ -3739,7 +3744,7 @@ function UsersTab({
                         </span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                         user.is_active
                           ? 'bg-green-500/20 text-green-300 border border-green-500/30'
@@ -3748,10 +3753,10 @@ function UsersTab({
                         {user.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-white/70">
+                    <td className="px-3 sm:px-6 py-4 whitespace-normal sm:whitespace-nowrap text-sm text-white/70">
                       {user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => setSelectedUser(user)}

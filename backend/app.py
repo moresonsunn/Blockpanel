@@ -442,7 +442,7 @@ class ServerImportRequest(BaseModel):
 @app.post("/servers/import")
 @app.post("/api/servers/import")
 def import_server(req: ServerImportRequest, current_user: User = Depends(require_auth)):
-    """Adopt an existing server directory into BlockPanel without re-downloading jars.
+    """Adopt an existing server directory into Lynx without re-downloading jars.
 
     The directory must already exist at /data/servers/{name} (inside container) / host volume.
     Optional: specify a host_port to bind the Minecraft port; otherwise auto-assign.

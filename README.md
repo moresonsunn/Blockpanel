@@ -1,11 +1,11 @@
-# BlockPanel (Minecraft Server Manager)
+# Lynx (Minecraft Server Manager)
 
-![GitLab CI](https://gitlab.com/kyzen4/blockpanel/badges/main/pipeline.svg)
-![GitHub CI](https://github.com/blockypanel/Blockpanel/actions/workflows/ci.yml/badge.svg)
-![Docker Pulls](https://img.shields.io/docker/pulls/moresonsun/blockypanel)
+![GitLab CI](https://gitlab.com/kyzen4/lynx/badges/main/pipeline.svg)
+![GitHub CI](https://github.com/moresonsunn/Lynx/actions/workflows/ci.yml/badge.svg)
+![Docker Pulls](https://img.shields.io/docker/pulls/moresonsun/lynx)
 ![Architecture](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-blue)
 
-BlockPanel is a modern web-based controller to create, manage, monitor, and automate multiple Minecraft servers using Docker containers. Inspired by Crafty but focused on:
+Lynx is a modern web-based controller to create, manage, monitor, and automate multiple Minecraft servers using Docker containers. Inspired by Crafty but focused on:
 - Fast, preload-first UI (React + Tailwind)
 - Multi-provider support (Vanilla, Paper, Purpur, Fabric, Forge, NeoForge)
 - Declarative server creation with loader + installer resolution
@@ -14,14 +14,14 @@ BlockPanel is a modern web-based controller to create, manage, monitor, and auto
 - Role & permission management (users, roles, audit logs)
 - REST API + future extensibility
 
-Single unified Docker image (multi-arch: linux/amd64 + linux/arm64) is published (default namespace: `moresonsun`):
-- Unified (controller + UI + embedded multi-Java runtime): `moresonsun/blockpanel-unified:latest`
+Single Docker image (multi-arch: linux/amd64 + linux/arm64) is published (default namespace: `moresonsun`):
+- Image (controller + UI + embedded multi-Java runtime): `moresonsun/lynx:latest`
 
-Brand / Org Override: If/when a dedicated Docker Hub org `blockypanel` is created, set `DOCKERHUB_NAMESPACE=blockypanel` (or explicitly set `DOCKERHUB_REPO` / `DOCKERHUB_RUNTIME_REPO`) in CI to publish under that namespace without code changes.
+Brand / Org Override: set `DOCKERHUB_NAMESPACE=lynx` (or explicitly set `DOCKERHUB_REPO` / `DOCKERHUB_RUNTIME_REPO`) in CI to publish under a dedicated namespace without code changes.
 
 GitLab Container Registry (when pipeline runs with `GITLAB_PUSH=true`):
-- Controller: `registry.gitlab.com/kyzen4/blockpanel/blockpanel:latest`
-- Runtime: `registry.gitlab.com/kyzen4/blockpanel/blockpanel-runtime:latest`
+- Controller: `registry.gitlab.com/kyzen4/lynx/lynx:latest`
+- Runtime: `registry.gitlab.com/kyzen4/lynx/lynx-runtime:latest`
 
 Release tags (when pushing annotated git tags like `v0.1.0`) will also publish versioned images once available.
 
@@ -47,7 +47,7 @@ Release tags (when pushing annotated git tags like `v0.1.0`) will also publish v
 
 ## Project Structure
 ```
-minecraft-server/
+Minecraft-Controller/
   backend/
   frontend/
   docker/
@@ -62,12 +62,12 @@ minecraft-server/
 
 1. Clone repo (optional if just using images):
 ```
-git clone https://github.com/blockypanel/Blockpanel.git  # (Repo path stable even if Docker namespace differs)
-cd Blockpanel
+git clone https://github.com/moresonsunn/Lynx.git
+cd Minecraft-Controller
 ```
 2. Pull image:
 ```
-docker pull moresonsun/blockpanel-unified:latest
+docker pull moresonsun/lynx:latest
 ```
 3. (Optional) Adjust `docker-compose.yml` to pin a version tag instead of :latest.
 4. Launch (build locally if modifying sources):
@@ -81,7 +81,7 @@ Data persists under `./data/servers/` (or mapped volume). Each server runs in it
 ## Local Development
 Build unified image locally:
 ```
-docker build -t blockpanel-unified:dev -f docker/controller-unified.Dockerfile .
+docker build -t lynx:dev -f docker/controller-unified.Dockerfile .
 ```
 Run:
 ```
@@ -105,8 +105,8 @@ Common causes & fixes:
 - Corrupted buildx builder instance.
   Fix:
   ```
-  docker buildx rm blockpanelx  # or the failing builder name
-  docker buildx create --name blockpanelx --use
+  docker buildx rm lynxx  # or the failing builder name
+  docker buildx create --name lynxx --use
   docker buildx inspect --bootstrap
   ```
 - WSL2 backend networking hiccup (less common now).
@@ -115,7 +115,7 @@ Common causes & fixes:
 If the error occurs only with the dev override + `--build` but manual `docker build` works:
 1. Ensure BuildKit is enabled (unset `DOCKER_BUILDKIT` or set it to `1`).
 2. Run a manual build once (as you did) to populate the local image, then `docker compose ... up -d` without `--build` while you diagnose.
-3. Run `docker compose config` to confirm the merged file shows the expected `blockpanel-dev-controller:latest` image and not the remote one.
+3. Run `docker compose config` to confirm the merged file shows the expected `lynx-dev-controller:latest` image and not the remote one.
 
 If problems persist, capture:
 ```
@@ -131,7 +131,7 @@ And open an issue with that output.
 ## Environment Variables
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| APP_NAME | Branding for UI/backend `/branding` | BlockPanel |
+| APP_NAME | Branding for UI/backend `/branding` | Lynx |
 | APP_VERSION | Optional version string exposed at `/branding` | 0.1.0 |
 | SERVERS_CONTAINER_ROOT | Container path for servers data | /data/servers |
 | SERVERS_HOST_ROOT | Absolute host path (for bind mapping) | (inferred) |
@@ -146,14 +146,14 @@ Frontend build-time override: set `REACT_APP_APP_NAME` to change displayed brand
 
 ## Building Image Manually
 ```
-docker build -t blockpanel-unified:dev -f docker/controller-unified.Dockerfile .
+docker build -t lynx:dev -f docker/controller-unified.Dockerfile .
 ```
 
 ### Publishing the unified `latest` tag
-Runtime container launches default to the `moresonsun/blockpanel-unified:latest` image. Build and push that tag whenever you cut a release so modpack installs and containerized servers can start without manual rebuilds:
+Runtime container launches default to the `moresonsun/lynx:latest` image. Build and push that tag whenever you cut a release so modpack installs and containerized servers can start without manual rebuilds:
 ```
-docker build -t moresonsun/blockpanel-unified:latest -f docker/controller-unified.Dockerfile .
-docker push moresonsun/blockpanel-unified:latest
+docker build -t moresonsun/lynx:latest -f docker/controller-unified.Dockerfile .
+docker push moresonsun/lynx:latest
 ```
 If you publish additional versioned tags (for example `v0.1.1`), push them alongside `latest`, but keep `latest` updated to the newest stable build.
 
@@ -161,7 +161,7 @@ If you publish additional versioned tags (for example `v0.1.1`), push them along
 The CI workflow uses `docker/setup-buildx-action` and `docker/build-push-action` to publish `linux/amd64, linux/arm64` manifests. Local multi-arch emulate build example:
 ```
 docker buildx create --name bp --use
-docker buildx build -f docker/controller-unified.Dockerfile -t moresonsun/blockpanel-unified:test --platform linux/amd64,linux/arm64 --push .
+docker buildx build -f docker/controller-unified.Dockerfile -t moresonsun/lynx:test --platform linux/amd64,linux/arm64 --push .
 ```
 
 ## Releasing
@@ -175,31 +175,23 @@ git push --tags
 
 Push to GitHub (primary) and mirror to GitLab (or add GitLab as a second remote) to leverage both registries:
 ```
-git remote add gitlab https://gitlab.com/kyzen4/blockpanel.git
+git remote add gitlab https://gitlab.com/kyzen4/lynx.git
 git push gitlab main
 ```
 Set GitLab CI/CD variables:
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN`
-- (optional) `GITLAB_PUSH=true` to publish images to `registry.gitlab.com/kyzen4/blockpanel/*`.
+- (optional) `GITLAB_PUSH=true` to publish images to `registry.gitlab.com/kyzen4/lynx/*`.
 
 Run a tagged release on either platform (`vX.Y.Z`) to produce versioned images in both registries.
 
 Pulling by version:
 ```
-docker pull moresonsun/blockpanel-unified:v0.1.1
+docker pull moresonsun/lynx:v0.1.1
 ```
-
 ## Namespace & Branding Strategy
 
-Current Docker Hub default namespace: `moresonsun`.
-
-Future branding (planned): a dedicated `blockypanel` organization. When ready:
-1. Create org + public repos `blockpanel` and `blockpanel-runtime`.
-2. In CI/CD variables set `DOCKERHUB_NAMESPACE=blockypanel` (or explicit `DOCKERHUB_REPO` / `DOCKERHUB_RUNTIME_REPO`).
-3. Tag a new release; images will appear under the new org while existing tags in `moresonsun/*` remain for backwards compatibility.
-
-Consumers who want to stay on the old namespace need not change anything until you announce deprecation.
+Current Docker Hub default namespace: `moresonsun`. If you publish under a different org, set `DOCKERHUB_NAMESPACE` in CI.
 
 ## Roadmap (Excerpt)
 - Websocket or SSE live logs (reduce polling)
@@ -213,17 +205,17 @@ Consumers who want to stay on the old namespace need not change anything until y
 The unified image is optimized for CasaOS by exposing only the panel/API port (8000) and optionally a single default server port (25565). Avoid mapping large static port ranges; runtime containers will dynamically bind Minecraft ports as you create servers.
 
 ### Add Custom Store
-Add the raw URL to `casaos-appstore/index.json` as a custom source in CasaOS, then install "BlockPanel (Unified)".
+Add the raw URL to `casaos-appstore/index.json` as a custom source in CasaOS, then install "Lynx (Unified)".
 
 ### Import Existing Server
 1. Stop any legacy standalone Minecraft container.
-2. Copy its world/server directory into the BlockPanel servers volume (visible in the unified container at `/data/servers/<name>`).
+2. Copy its world/server directory into the Lynx servers volume (visible in the unified container at `/data/servers/<name>`).
 3. Call `POST /api/servers/import` with `{ "name": "<name>" }` (optionally `host_port`, `java_version`).
 4. Start the server from the UI.
 
 ### CasaOS Token + Base API (for Steam as CasaOS v2 Apps)
 
-Steam servers can be installed as CasaOS v2 *compose apps* (so they don't show up as "Legacy-App" containers). To enable this, BlockPanel needs:
+Steam servers can be installed as CasaOS v2 *compose apps* (so they don't show up as "Legacy-App" containers). To enable this, Lynx needs:
 
 - `CASAOS_API_TOKEN`: CasaOS auth token (copied from the browser)
 - `CASAOS_API_BASE`: CasaOS AppManagement base URL (usually `http://<casaos-ip>/v2/app_management`)
@@ -243,7 +235,7 @@ The value is typically a JWT that looks like `eyJhbGciOi...` (no extra prefix). 
 - If the controller runs on the same Docker host and LAN routing is restricted, use:
   - `http://172.17.0.1/v2/app_management`
 
-If `CASAOS_API_BASE` is not set, BlockPanel will probe common defaults (`host.docker.internal`, `gateway.docker.internal`, then `172.17.0.1`).
+If `CASAOS_API_BASE` is not set, Lynx will probe common defaults (`host.docker.internal`, `gateway.docker.internal`, then `172.17.0.1`).
 
 **Security note**
 Treat `CASAOS_API_TOKEN` like a password. If you pasted it into chat/logs, rotate it (log out / re-login) and update the env var.
@@ -252,7 +244,7 @@ Treat `CASAOS_API_TOKEN` like a password. If you pasted it into chat/logs, rotat
 
 If Steam servers are created on the **same Docker engine** CasaOS uses, CasaOS can still list them under **Legacy Apps / Docker** even if you set `io.casaos.*` labels.
 
-To keep Steam servers visible only inside BlockPanel, run Steam containers on a **different Docker engine** and point BlockPanel at it:
+To keep Steam servers visible only inside Lynx, run Steam containers on a **different Docker engine** and point Lynx at it:
 
 - `STEAM_DOCKER_HOST`: Docker daemon URL used *only* for Steam servers (example: `tcp://<remote-docker-host>:2375`).
 
@@ -265,7 +257,7 @@ Use a Docker-in-Docker sidecar as the Steam engine:
 - Run a `docker:dind` container in `network_mode: host` and `privileged: true`
 - Expose its daemon on `tcp://0.0.0.0:23750`
 - Mount the same `/data/servers` path into it so Steam containers can bind-mount server data
-- Set BlockPanel: `STEAM_DOCKER_HOST=tcp://172.17.0.1:23750`
+- Set Lynx: `STEAM_DOCKER_HOST=tcp://172.17.0.1:23750`
 
 The CasaOS appstore manifest for the unified app includes an example `steam_engine` service wired this way.
 
@@ -274,7 +266,7 @@ The CasaOS appstore manifest for the unified app includes an example `steam_engi
 |----------|---------|
 | ADMIN_PASSWORD | Sets/overrides admin password at startup (>=8 chars) |
 | ALLOWED_ORIGIN_REGEX | Broad CORS (use `.*` initially, tighten later) |
-| BLOCKPANEL_RUNTIME_IMAGE/TAG | Image & tag used for spawned runtime servers |
+| LYNX_RUNTIME_IMAGE/TAG | Image & tag used for spawned runtime servers (legacy: `BLOCKPANEL_RUNTIME_IMAGE/TAG`) |
 | STEAM_DOCKER_HOST | Optional separate Docker engine for Steam servers (keeps them out of CasaOS) |
 | SERVERS_VOLUME_NAME | Docker volume name for servers data |
 | SERVERS_CONTAINER_ROOT | In-container path for servers (default `/data/servers`) |
@@ -305,9 +297,9 @@ Currently unlicensed (all rights reserved) unless updated. Add a LICENSE file be
 > Ultra-Quick Install (Controller only, ephemeral DB fallback)
 >
 > 1. Pull image (or rely on on-demand pull):
->    docker pull moresonsun/blockypanel:latest
+>    docker pull moresonsun/lynx:latest
 > 2. Start with compose (build not required unless modifying source):
->    curl -L https://raw.githubusercontent.com/blockypanel/Blockpanel/main/docker-compose.min.yml -o docker-compose.yml
+>    curl -L https://raw.githubusercontent.com/moresonsunn/Lynx/main/docker-compose.yml -o docker-compose.yml
 >    docker compose up -d controller
 >
 > Or if you cloned the repo already:

@@ -1,19 +1,19 @@
-name: blockpanel
+name: lynx
 services:
-  blockpanel:
-    image: moresonsun/blockypanel:latest
+  lynx:
+    image: moresonsun/lynx:latest
     network_mode: bridge
     ports:
       - target: 8000
         published: "8000"
         protocol: tcp
     environment:
-      APP_NAME: BlockPanel
+      APP_NAME: Lynx
       APP_VERSION: latest
       USE_POSTGRES: "true"
-      DATABASE_URL: postgresql://postgres:postgres123@blockpanel-db:5432/minecraft_controller
+      DATABASE_URL: postgresql://postgres:postgres123@lynx-db:5432/minecraft_controller
       SERVERS_CONTAINER_ROOT: /data/servers
-      SERVERS_VOLUME_NAME: blockpanel_servers
+      SERVERS_VOLUME_NAME: lynx_servers
       DOCKER_HOST: unix:///var/run/docker.sock
       # CasaOS v2 compose apps (Steam servers)
       CASAOS_API_BASE: http://172.17.0.1/v2/app_management
@@ -26,7 +26,7 @@ services:
         source: /var/run/docker.sock
         target: /var/run/docker.sock
     depends_on:
-      - blockpanel-db
+      - lynx-db
     restart: unless-stopped
     x-casaos:
       ports:
@@ -38,7 +38,7 @@ services:
           description:
             en_us: Minecraft servers and worlds
 
-  blockpanel-db:
+  lynx-db:
     image: postgres:15-alpine
     network_mode: bridge
     environment:
@@ -51,8 +51,8 @@ services:
         target: /var/lib/postgresql/data
     restart: unless-stopped
 
-  blockpanel-runtime-prewarm:
-    image: moresonsun/blockypanel-runtime:latest
+  lynx-runtime-prewarm:
+    image: moresonsun/lynx-runtime:latest
     command: ["true"]
     network_mode: bridge
     restart: "no"
@@ -61,24 +61,24 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  main: blockpanel
-  author: BlockPanel Team
+  main: lynx
+  author: Lynx Team
   category: Games
-  developer: BlockPanel Team
+  developer: Lynx Team
   description:
     en_us: |
       Manage multiple Minecraft servers (Vanilla, Fabric, Forge, NeoForge, etc.) with a web UI.
-  icon: https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico
+  icon: https://raw.githubusercontent.com/moresonsunn/Lynx/main/frontend/public/favicon.ico
   screenshot_link: []
   tagline:
     en_us: Minecraft server controller
-  thumbnail: https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico
+  thumbnail: https://raw.githubusercontent.com/moresonsunn/Lynx/main/frontend/public/favicon.ico
   tips:
     before_install:
       en_us: Requires Docker socket mount for creating server containers.
     after_install:
       en_us: Visit http://<host>:8000 (admin/admin123 first login). Change password immediately.
   title:
-    en_us: BlockPanel
+    en_us: Lynx
   index: /
   port_map: "8000"

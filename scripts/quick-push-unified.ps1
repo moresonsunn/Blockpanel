@@ -1,6 +1,6 @@
 <#!
 .SYNOPSIS
-  Quick multi-arch build & push for the unified BlockPanel image.
+  Quick multi-arch build & push for the unified Lynx image.
 .DESCRIPTION
   Builds docker/controller-unified.Dockerfile for linux/amd64 + linux/arm64 and pushes
   tags (latest + provided tag + short sha + date) to Docker Hub.
@@ -48,7 +48,7 @@ $fullSha  = (git rev-parse HEAD).Trim()
 $dateTag  = (Get-Date -Format 'yyyyMMdd')
 if (-not $Tag -or $Tag -eq '') { $Tag = $shortSha; Warn "No -Tag provided; using commit short SHA '$Tag'" }
 
-$repo = "$Namespace/blockpanel-unified"
+$repo = "$Namespace/lynx"
 Info "Repository: $repo | Tag: $Tag | Short: $shortSha | Date: $dateTag"
 
 # Login if token provided (skip if already logged in)

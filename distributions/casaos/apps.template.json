@@ -1,10 +1,10 @@
 [
   {
-    "id": "blockpanel",
-    "title": "BlockPanel",
+    "id": "lynx",
+    "title": "Lynx",
     "description": "Manage multiple Minecraft servers with a web UI.",
     "version": "__VERSION__",
-    "icon": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/frontend/public/favicon.ico",
-    "index": "https://raw.githubusercontent.com/moresonsunn/minecraft-server/main/distributions/casaos/app.json"
+    "icon": "https://raw.githubusercontent.com/moresonsunn/Lynx/main/frontend/public/favicon.ico",
+    "index": "https://raw.githubusercontent.com/moresonsunn/Lynx/main/distributions/casaos/app.json"
   }
 ]

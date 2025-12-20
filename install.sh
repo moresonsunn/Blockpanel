@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# BlockPanel quick installer (Linux/macOS) - pulls a specified or latest version and launches via docker compose.
+# Lynx quick installer (Linux/macOS) - pulls a specified or latest version and launches via docker compose.
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/blockypanel/Blockpanel/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/blockypanel/Blockpanel/main/install.sh | bash -s -- -v v0.1.1
+#   curl -fsSL https://raw.githubusercontent.com/moresonsunn/Lynx/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/moresonsunn/Lynx/main/install.sh | bash -s -- -v v0.1.1
 # Options:
 #   -v|--version <tag>   Use a specific released tag (defaults to latest)
-#   -d|--dir <path>      Target directory (default: ./blockpanel)
+#   -d|--dir <path>      Target directory (default: ./lynx)
 #   --no-start           Download assets but do not run docker compose up
 #   --edge               Use :latest images instead of a tagged release
 #   --dry-run            Show actions only
 #   --skip-chown         Skip ownership adjustment on data dir
 
 VERSION=""
-TARGET_DIR="blockpanel"
+TARGET_DIR="lynx"
 NO_START="false"
 EDGE="false"
 DRY="false"
 SKIP_CHOWN="false"
-GITHUB_REPO="blockypanel/Blockpanel"  # Source repository (GitHub)
-NAMESPACE="${BLOCKPANEL_NAMESPACE:-moresonsun}"  # Docker image namespace (override with BLOCKPANEL_NAMESPACE env)
+GITHUB_REPO="moresonsunn/Lynx"  # Source repository (GitHub)
+NAMESPACE="${LYNX_NAMESPACE:-${BLOCKPANEL_NAMESPACE:-moresonsun}}"  # Docker image namespace (override with LYNX_NAMESPACE)
 RAW_BASE="https://raw.githubusercontent.com/${GITHUB_REPO}"
 BRANCH="main"
 
@@ -63,9 +63,9 @@ run curl -fsSL "$COMPOSE_URL" -o docker-compose.yml
 
 if [[ "$EDGE" == "false" && -n "$VERSION" ]]; then
   echo "Pinning images to $VERSION"
-  # Replace :latest with :$VERSION for controller and runtime images
-  run sed -i.bak "s#${NAMESPACE}/blockypanel:latest#${NAMESPACE}/blockypanel:${VERSION}#" docker-compose.yml || true
-  run sed -i.bak "s#${NAMESPACE}/blockypanel-runtime:latest#${NAMESPACE}/blockypanel-runtime:${VERSION}#" docker-compose.yml || true
+  # Replace :latest with :$VERSION
+  run sed -i.bak "s#${NAMESPACE}/lynx:latest#${NAMESPACE}/lynx:${VERSION}#" docker-compose.yml || true
+  run sed -i.bak "s#${NAMESPACE}/lynx-runtime:latest#${NAMESPACE}/lynx-runtime:${VERSION}#" docker-compose.yml || true
   # Replace APP_VERSION env if present
   run sed -i.bak "s#APP_VERSION=v[^\n]*#APP_VERSION=${VERSION}#" docker-compose.yml || true
 fi
@@ -91,5 +91,5 @@ fi
 run docker compose pull
 run docker compose up -d
 
-echo "\nBlockPanel is starting. Access it at: http://localhost:8000"
+echo "\nLynx is starting. Access it at: http://localhost:8000"
 [[ "$EDGE" == "true" ]] && echo "(Edge build: using :latest images)" || echo "(Pinned release: ${VERSION})"

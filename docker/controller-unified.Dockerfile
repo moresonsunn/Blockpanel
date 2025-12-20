@@ -1,4 +1,4 @@
-# Unified BlockPanel image: backend API + built frontend + embedded multi-Java runtime
+# Unified Lynx image: backend API + built frontend + embedded multi-Java runtime
 # This eliminates the separate runtime image for single-container deployments.
 
 FROM node:20-alpine AS ui
@@ -17,8 +17,8 @@ WORKDIR /app
 ARG APP_VERSION=dev
 ARG GIT_COMMIT=unknown
 
-LABEL org.opencontainers.image.title="BlockPanel Unified" \
-      org.opencontainers.image.description="BlockPanel controller + static frontend + embedded multi-Java runtime" \
+LABEL org.opencontainers.image.title="Lynx Unified" \
+    org.opencontainers.image.description="Lynx controller + static frontend + embedded multi-Java runtime" \
       org.opencontainers.image.version=$APP_VERSION \
       org.opencontainers.image.revision=$GIT_COMMIT \
       org.opencontainers.image.source="https://github.com/moresonsun/Minecraft-Controller" \
@@ -63,8 +63,9 @@ RUN mkdir -p /data/servers /data/sqlite
 ENV PORT=8000
 EXPOSE 8000 25565
 
-# Provide an internal marker so backend can detect unified mode (optional future use)
-ENV BLOCKPANEL_UNIFIED_IMAGE=1
+# Provide an internal marker so backend can detect unified mode
+ENV LYNX_UNIFIED_IMAGE=1 \
+    BLOCKPANEL_UNIFIED_IMAGE=1
 
 # Uvicorn startup (same as controller base)
 CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

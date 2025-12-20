@@ -23,8 +23,8 @@ ARG APP_VERSION=dev
 ARG GIT_COMMIT=unknown
 
 # OCI standard labels for better provenance in registries
-LABEL org.opencontainers.image.title="BlockPanel Controller" \
-    org.opencontainers.image.description="BlockPanel (Minecraft server controller) - backend API + bundled static frontend" \
+LABEL org.opencontainers.image.title="Lynx Controller" \
+    org.opencontainers.image.description="Lynx (Minecraft server controller) - backend API + bundled static frontend" \
     org.opencontainers.image.version=$APP_VERSION \
     org.opencontainers.image.revision=$GIT_COMMIT \
     org.opencontainers.image.source="https://github.com/moresonsun/Minecraft-Controller" \

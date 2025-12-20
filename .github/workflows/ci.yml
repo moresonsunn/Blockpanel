@@ -179,10 +179,10 @@ jobs:
         platforms: linux/amd64,linux/arm64
         push: ${{ steps.meta.outputs.push_images == 'true' }}
         tags: |
-          ${{ steps.meta.outputs.image_prefix }}/blockpanel-runtime:latest
-          ${{ steps.meta.outputs.image_prefix }}/blockpanel-runtime:${{ steps.meta.outputs.short_sha }}
-          ${{ steps.meta.outputs.image_prefix }}/blockpanel-runtime:${{ steps.meta.outputs.date_tag }}
-          ${{ steps.meta.outputs.include_release_tag == 'true' && format('{0}/blockpanel-runtime:{1}', steps.meta.outputs.image_prefix, steps.meta.outputs.version_tag) || '' }}
+          ${{ steps.meta.outputs.image_prefix }}/lynx-runtime:latest
+          ${{ steps.meta.outputs.image_prefix }}/lynx-runtime:${{ steps.meta.outputs.short_sha }}
+          ${{ steps.meta.outputs.image_prefix }}/lynx-runtime:${{ steps.meta.outputs.date_tag }}
+          ${{ steps.meta.outputs.include_release_tag == 'true' && format('{0}/lynx-runtime:{1}', steps.meta.outputs.image_prefix, steps.meta.outputs.version_tag) || '' }}
         build-args: |
           APP_VERSION=${{ steps.meta.outputs.app_version }}
           GIT_COMMIT=${{ github.sha }}
@@ -197,10 +197,10 @@ jobs:
         platforms: linux/amd64,linux/arm64
         push: ${{ steps.meta.outputs.push_images == 'true' }}
         tags: |
-          ${{ steps.meta.outputs.image_prefix }}/blockpanel:latest
-          ${{ steps.meta.outputs.image_prefix }}/blockpanel:${{ steps.meta.outputs.short_sha }}
-          ${{ steps.meta.outputs.image_prefix }}/blockpanel:${{ steps.meta.outputs.date_tag }}
-          ${{ steps.meta.outputs.include_release_tag == 'true' && format('{0}/blockpanel:{1}', steps.meta.outputs.image_prefix, steps.meta.outputs.version_tag) || '' }}
+          ${{ steps.meta.outputs.image_prefix }}/lynx:latest
+          ${{ steps.meta.outputs.image_prefix }}/lynx:${{ steps.meta.outputs.short_sha }}
+          ${{ steps.meta.outputs.image_prefix }}/lynx:${{ steps.meta.outputs.date_tag }}
+          ${{ steps.meta.outputs.include_release_tag == 'true' && format('{0}/lynx:{1}', steps.meta.outputs.image_prefix, steps.meta.outputs.version_tag) || '' }}
         build-args: |
           APP_VERSION=${{ steps.meta.outputs.app_version }}
           GIT_COMMIT=${{ github.sha }}
@@ -209,8 +209,8 @@ jobs:
 
     - name: Test Docker Compose configuration (uses newly built local tags)
       run: |
-        sed -i "s#mc-controller:latest#${{ secrets.DOCKERHUB_USERNAME }}/blockpanel:latest#g" docker-compose.yml || true
-        sed -i "s#mc-runtime:latest#${{ secrets.DOCKERHUB_USERNAME }}/blockpanel-runtime:latest#g" docker-compose.yml || true
+        sed -i "s#mc-controller:latest#${{ secrets.DOCKERHUB_USERNAME }}/lynx:latest#g" docker-compose.yml || true
+        sed -i "s#mc-runtime:latest#${{ secrets.DOCKERHUB_USERNAME }}/lynx-runtime:latest#g" docker-compose.yml || true
         docker compose config
 
     - name: Run Docker integration test
@@ -255,8 +255,8 @@ jobs:
     - name: (Placeholder) Production deployment
       run: |
         echo "Images already pushed:"
-        echo "  ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel:latest"
-        echo "  ${{ secrets.DOCKERHUB_USERNAME }}/blockpanel-runtime:latest"
+        echo "  ${{ secrets.DOCKERHUB_USERNAME }}/lynx:latest"
+        echo "  ${{ secrets.DOCKERHUB_USERNAME }}/lynx-runtime:latest"
         echo "Implement infra-specific rollout here (e.g., ssh to host and run docker compose pull && up -d)."
 
   release-assets:
@@ -283,8 +283,8 @@ jobs:
           # Source (repo) SBOM
           syft dir:. -o spdx-json=sbom-source.spdx.json || true
           # Image SBOMs (ignore failures if images are private/unavailable yet)
-          syft "$IMAGE_PREFIX/blockpanel:$VERSION" -o spdx-json=sbom-image-controller.spdx.json || true
-          syft "$IMAGE_PREFIX/blockpanel-runtime:$VERSION" -o spdx-json=sbom-image-runtime.spdx.json || true
+          syft "$IMAGE_PREFIX/lynx:$VERSION" -o spdx-json=sbom-image-controller.spdx.json || true
+          syft "$IMAGE_PREFIX/lynx-runtime:$VERSION" -o spdx-json=sbom-image-runtime.spdx.json || true
       - name: Generate checksums
         run: |
           sha256sum docker-compose.yml > checksums.txt
@@ -321,14 +321,14 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'image'
-          image-ref: '${{ steps.meta.outputs.prefix }}/blockpanel:${{ github.ref_name }}'
+          image-ref: '${{ steps.meta.outputs.prefix }}/lynx:${{ github.ref_name }}'
           format: 'table'
           exit-code: '0'
       - name: Scan controller image (fail on HIGH/CRITICAL)
         run: |
           VERSION=${GITHUB_REF##*/}
           IMAGE_PREFIX='${{ steps.meta.outputs.prefix }}'
-          trivy image --severity HIGH,CRITICAL --exit-code 1 "$IMAGE_PREFIX/blockpanel:$VERSION" || {
+          trivy image --severity HIGH,CRITICAL --exit-code 1 "$IMAGE_PREFIX/lynx:$VERSION" || {
             echo 'Controller image has HIGH/CRITICAL vulnerabilities.'
             exit 1
           }
@@ -336,7 +336,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF##*/}
           IMAGE_PREFIX='${{ steps.meta.outputs.prefix }}'
-          trivy image --severity HIGH,CRITICAL --exit-code 1 "$IMAGE_PREFIX/blockpanel-runtime:$VERSION" || {
+          trivy image --severity HIGH,CRITICAL --exit-code 1 "$IMAGE_PREFIX/lynx-runtime:$VERSION" || {
             echo 'Runtime image has HIGH/CRITICAL vulnerabilities.'
             exit 1
           }

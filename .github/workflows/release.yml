@@ -13,7 +13,7 @@ jobs:
       contents: write      # create release & upload assets
       packages: read
     env:
-      IMAGE_NAME: moresonsun/blockpanel-unified
+      IMAGE_NAME: moresonsun/lynx
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -90,7 +90,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: BlockPanel ${{ steps.meta.outputs.tag }}
+          name: Lynx ${{ steps.meta.outputs.tag }}
           draft: false
           prerelease: false
           generate_release_notes: true

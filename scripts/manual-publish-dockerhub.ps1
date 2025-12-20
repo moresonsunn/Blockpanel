@@ -1,6 +1,6 @@
 <#!
 .SYNOPSIS
-  Manual multi-arch publish of BlockPanel images to Docker Hub (PowerShell version).
+  Manual multi-arch publish of Lynx images to Docker Hub (PowerShell version).
 .DESCRIPTION
   Builds and pushes both runtime and controller images for linux/amd64 and linux/arm64.
   Tags applied: latest, <Version>, <short_sha>, <date_tag>.
@@ -56,13 +56,13 @@ $dateTag  = (Get-Date -Format 'yyyyMMdd')
 if (-not $Version -or $Version -eq '') { $Version = $shortSha; Write-Warn "No -Version provided; using commit short SHA '$Version'" }
 $appVersion = $Version
 
-$unifiedRepo = "$Namespace/blockpanel-unified"
+$unifiedRepo = "$Namespace/lynx"
 
 Write-Step "Docker Hub login ($($env:DOCKERHUB_USERNAME))"
 $env:DOCKERHUB_TOKEN | docker login -u $env:DOCKERHUB_USERNAME --password-stdin | Out-Null
 
 # Ensure buildx builder exists
-$builderName = 'blockpanel-publisher'
+$builderName = 'lynx-publisher'
 $existing = docker buildx ls | Select-String $builderName -ErrorAction SilentlyContinue
 if (-not $existing) {
   Write-Step "Creating buildx builder '$builderName'"

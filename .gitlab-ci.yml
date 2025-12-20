@@ -11,7 +11,7 @@ variables:
   DOCKER_TLS_CERTDIR: ""  # Disable TLS for docker:dind
   # Docker Hub namespace abstraction. Override DOCKERHUB_NAMESPACE (and optionally the *REPO vars) in CI/CD settings.
   # If DOCKERHUB_REPO / DOCKERHUB_RUNTIME_REPO are unset, they will be derived at runtime as:
-  #   ${DOCKERHUB_NAMESPACE}/blockypanel  and  ${DOCKERHUB_NAMESPACE}/blockypanel-runtime
+  #   ${DOCKERHUB_NAMESPACE}/lynx  and  ${DOCKERHUB_NAMESPACE}/lynx-runtime
   DOCKERHUB_NAMESPACE: "moresonsun"
   # DOCKERHUB_REPO: ""                # (optional explicit override)
   # DOCKERHUB_RUNTIME_REPO: ""        # (optional explicit override)
@@ -78,11 +78,11 @@ build:image:
       # Determine version/tag
       if [ -n "$CI_COMMIT_TAG" ]; then VERSION=${CI_COMMIT_TAG#v}; else VERSION="${CI_COMMIT_SHORT_SHA}"; fi
       GIT_SHA=$CI_COMMIT_SHORT_SHA
-      echo "Building BlockPanel images version: $VERSION (commit $GIT_SHA)"
+      echo "Building Lynx images version: $VERSION (commit $GIT_SHA)"
       # Derive Docker Hub repo names if not explicitly provided (run-time logic)
       : "${DOCKERHUB_NAMESPACE:=moresonsun}"
-      if [ -z "$DOCKERHUB_REPO" ]; then DOCKERHUB_REPO="${DOCKERHUB_NAMESPACE}/blockypanel"; fi
-      if [ -z "$DOCKERHUB_RUNTIME_REPO" ]; then DOCKERHUB_RUNTIME_REPO="${DOCKERHUB_NAMESPACE}/blockypanel-runtime"; fi
+      if [ -z "$DOCKERHUB_REPO" ]; then DOCKERHUB_REPO="${DOCKERHUB_NAMESPACE}/lynx"; fi
+      if [ -z "$DOCKERHUB_RUNTIME_REPO" ]; then DOCKERHUB_RUNTIME_REPO="${DOCKERHUB_NAMESPACE}/lynx-runtime"; fi
       # Ensure Dockerfiles exist
       [ -f "$CONTROLLER_DOCKERFILE" ] || { echo "Missing $CONTROLLER_DOCKERFILE"; exit 1; }
       [ -f "$RUNTIME_DOCKERFILE" ] || { echo "Missing $RUNTIME_DOCKERFILE"; exit 1; }

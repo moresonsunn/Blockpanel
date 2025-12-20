@@ -33,5 +33,5 @@ except Exception:
 SERVERS_VOLUME_NAME = os.environ.get("SERVERS_VOLUME_NAME", "minecraft-server_mc_servers_data")
 
 # Branding / application identity
-APP_NAME = os.environ.get("APP_NAME", "BlockPanel")
+APP_NAME = os.environ.get("APP_NAME", "Lynx")
 APP_VERSION = os.environ.get("APP_VERSION", "dev")

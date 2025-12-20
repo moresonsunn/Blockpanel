@@ -18,10 +18,21 @@ logger = logging.getLogger(__name__)
 MINECRAFT_LABEL = "minecraft_server_manager"
 # CasaOS application id to associate child runtime containers with the main app.
 # IMPORTANT: CasaOS usually assigns its own internal app ID when installing apps.
-# Hardcoding an ID (e.g., "blockpanel-unified") often causes child containers to be shown as "Legacy App".
-DEFAULT_CASAOS_APP_ID = "blockpanel-unified"
+# Hardcoding an ID can cause child containers to be shown as "Legacy App" in some CasaOS setups.
+DEFAULT_CASAOS_APP_ID = "lynx"
 _CASAOS_APP_ID_ENV = (os.getenv("CASAOS_APP_ID") or "").strip()
 CASAOS_CATEGORY = os.getenv("CASAOS_CATEGORY", "Games")
+
+
+def _is_unified_image_name(image: str | None) -> bool:
+    s = (image or "").strip().lower()
+    if not s:
+        return False
+    # Treat the single DockerHub repo (moresonsun/lynx) as the unified image.
+    # Match both namespaced and local tags, but avoid matching lynx-runtime.
+    base = s.split("@", 1)[0]
+    repo = base.split(":", 1)[0]
+    return repo == "lynx" or repo.endswith("/lynx")
 
 
 def _detect_self_container_id() -> str | None:
@@ -81,11 +92,9 @@ _detected_project, _detected_network = _detect_compose_context()
 COMPOSE_PROJECT = _detected_project or os.getenv("COMPOSE_PROJECT_NAME") or os.getenv("CASAOS_COMPOSE_PROJECT") or (_CASAOS_APP_ID_ENV or DEFAULT_CASAOS_APP_ID)
 COMPOSE_RUNTIME_SERVICE = os.getenv("COMPOSE_RUNTIME_SERVICE", "minecraft-runtime")
 COMPOSE_NETWORK = _detected_network or os.getenv("COMPOSE_NETWORK") or (f"{os.getenv('COMPOSE_PROJECT_NAME')}_default" if os.getenv("COMPOSE_PROJECT_NAME") else None)
-RUNTIME_IMAGE = (
-    f"{os.getenv('BLOCKPANEL_RUNTIME_IMAGE')}:{os.getenv('BLOCKPANEL_RUNTIME_TAG', 'latest')}"
-    if os.getenv('BLOCKPANEL_RUNTIME_IMAGE')
-    else "mc-runtime:latest"
-)
+_runtime_image = (os.getenv("LYNX_RUNTIME_IMAGE") or os.getenv("BLOCKPANEL_RUNTIME_IMAGE") or "").strip()
+_runtime_tag = (os.getenv("LYNX_RUNTIME_TAG") or os.getenv("BLOCKPANEL_RUNTIME_TAG") or "latest").strip() or "latest"
+RUNTIME_IMAGE = f"{_runtime_image}:{_runtime_tag}" if _runtime_image else "mc-runtime:latest"
 MINECRAFT_PORT = 25565
 DEFAULT_STEAM_PORT_START = 20000
 
@@ -1213,13 +1222,13 @@ class DockerManager:
             "io.casaos.group": casaos_app_id,
             "io.casaos.subapp": "true",
             "casaos": "casaos",
-            "origin": "blockpanel",
+            "origin": "lynx",
             "name": name,
             "custom_id": f"{casaos_app_id}-{name}",
             "protocol": "tcp",
             # Optional: generic metadata that some dashboards honor
-            "org.opencontainers.image.title": "BlockPanel Runtime",
-            "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
+            "org.opencontainers.image.title": "Lynx Runtime",
+            "org.opencontainers.image.description": "Minecraft server runtime container managed by Lynx",
         }
         if loader_version is not None:
             labels["mc.loader_version"] = str(loader_version)
@@ -1259,9 +1268,11 @@ class DockerManager:
                 # override the entrypoint so the container runs the runtime script instead.
                 run_kwargs = {}
                 if (
-                    os.getenv("BLOCKPANEL_UNIFIED_IMAGE")
-                    or "blockpanel-unified" in RUNTIME_IMAGE.lower()
-                    or os.getenv("BLOCKPANEL_RUNTIME_IMAGE", "").lower().endswith("blockpanel-unified")
+                    os.getenv("LYNX_UNIFIED_IMAGE")
+                    or os.getenv("BLOCKPANEL_UNIFIED_IMAGE")
+                    or _is_unified_image_name(RUNTIME_IMAGE)
+                    or _is_unified_image_name(os.getenv("LYNX_RUNTIME_IMAGE", ""))
+                    or _is_unified_image_name(os.getenv("BLOCKPANEL_RUNTIME_IMAGE", ""))
                 ):
                     # Only set entrypoint if the script exists in the image; if missing, let it fail visibly.
                     run_kwargs["entrypoint"] = ["/usr/local/bin/runtime-entrypoint.sh"]
@@ -1362,9 +1373,11 @@ class DockerManager:
         try:
             run_kwargs = {}
             if (
-                os.getenv("BLOCKPANEL_UNIFIED_IMAGE")
-                or (RUNTIME_IMAGE and "blockpanel-unified" in RUNTIME_IMAGE.lower())
-                or os.getenv("BLOCKPANEL_RUNTIME_IMAGE", "").lower().endswith("blockpanel-unified")
+                os.getenv("LYNX_UNIFIED_IMAGE")
+                or os.getenv("BLOCKPANEL_UNIFIED_IMAGE")
+                or _is_unified_image_name(RUNTIME_IMAGE)
+                or _is_unified_image_name(os.getenv("LYNX_RUNTIME_IMAGE", ""))
+                or _is_unified_image_name(os.getenv("BLOCKPANEL_RUNTIME_IMAGE", ""))
             ):
                 run_kwargs["entrypoint"] = ["/usr/local/bin/runtime-entrypoint.sh"]
 
@@ -1478,12 +1491,12 @@ class DockerManager:
                 "io.casaos.group": casaos_app_id,
                 "io.casaos.subapp": "true",
                 "casaos": "casaos",
-                "origin": "blockpanel",
+                "origin": "lynx",
                 "name": name,
                 "custom_id": custom_id_guess,
                 "protocol": "tcp",
-                "org.opencontainers.image.title": "BlockPanel Runtime",
-                "org.opencontainers.image.description": "Minecraft server runtime container managed by BlockPanel",
+                "org.opencontainers.image.title": "Lynx Runtime",
+                "org.opencontainers.image.description": "Minecraft server runtime container managed by Lynx",
             }
             if server_version_guess:
                 labels["mc.version"] = str(server_version_guess)
@@ -1781,9 +1794,9 @@ class DockerManager:
         labels = {
             "steam.server": "true",
             "steam.name": name,
-            "origin": "blockpanel",
+            "origin": "lynx",
         }
-        # CasaOS: group Steam child containers under the BlockPanel app so they don't
+        # CasaOS: group Steam child containers under the Lynx app so they don't
         # appear as standalone "Legacy Apps". Keep this minimal (no web/custom_id/name)
         # to avoid creating app tiles.
         try:
@@ -1867,7 +1880,7 @@ class DockerManager:
         except Exception as inspect_err:
             logger.warning(f"Failed to inspect assigned ports for {name}: {inspect_err}")
 
-        # Do not update container labels with resolved ports; BlockPanel reads ports directly.
+        # Do not update container labels with resolved ports; Lynx reads ports directly.
 
         return {
             "id": container.id,
@@ -2087,11 +2100,11 @@ class DockerManager:
 
         casaos_app_id = self._resolve_casaos_app_id()
 
-        # Labels for BlockPanel discovery.
+        # Labels for Lynx discovery.
         labels = {
             "steam.server": "true",
             "steam.name": name,
-            "origin": "blockpanel",
+            "origin": "lynx",
             "name": name,
             "custom_id": f"{casaos_app_id}-{name}",
         }

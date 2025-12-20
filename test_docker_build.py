@@ -41,7 +41,7 @@ def test_java_versions():
     for cmd, description in java_tests:
         print(f"\n--- Testing {description} ---")
         result = subprocess.run(
-            f"docker run --rm --entrypoint /bin/sh blockpanel-unified:test -lc \"{cmd} 2>&1\"",
+            f"docker run --rm --entrypoint /bin/sh lynx:test -lc \"{cmd} 2>&1\"",
             shell=True, capture_output=True, text=True
         )
         
@@ -69,7 +69,7 @@ def test_java_paths():
     for command, description in path_tests:
         print(f"\n--- Testing {description} ---")
         result = subprocess.run(
-            f"docker run --rm --entrypoint /bin/sh blockpanel-unified:test -lc \"{command} 2>&1\"",
+            f"docker run --rm --entrypoint /bin/sh lynx:test -lc \"{command} 2>&1\"",
             shell=True, capture_output=True, text=True
         )
         
@@ -85,7 +85,7 @@ def main():
     
     # Step 1: Build the Docker image
     if not run_command(
-        "docker build -t blockpanel-unified:test -f docker/controller-unified.Dockerfile .",
+        "docker build -t lynx:test -f docker/controller-unified.Dockerfile .",
         "Building Unified Docker Image"
     ):
         print("❌ Docker build failed. Stopping tests.")
@@ -99,7 +99,7 @@ def main():
     
     # Step 4: Test basic container functionality
     if run_command(
-    "docker run --rm --entrypoint /bin/sh blockpanel-unified:test -lc \"pwd\"",
+    "docker run --rm --entrypoint /bin/sh lynx:test -lc \"pwd\"",
         "Testing Basic Container Functionality"
     ):
         print("\n✅ All tests completed successfully!")

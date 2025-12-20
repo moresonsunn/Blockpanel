@@ -1,13 +1,13 @@
 <#!
 .SYNOPSIS
-  BlockPanel quick installer for Windows PowerShell.
+  Lynx quick installer for Windows PowerShell.
   Example (PowerShell 5+):
-  irm https://raw.githubusercontent.com/blockypanel/Blockpanel/main/install.ps1 | iex
-  irm https://raw.githubusercontent.com/blockypanel/Blockpanel/main/install.ps1 | iex -v v0.1.1
+  irm https://raw.githubusercontent.com/moresonsunn/Lynx/main/install.ps1 | iex
+  irm https://raw.githubusercontent.com/moresonsunn/Lynx/main/install.ps1 | iex -v v0.1.1
 .PARAMETER Version
   Optional tag (e.g. v0.1.1). If omitted uses latest GitHub release; fallback to :latest edge.
 .PARAMETER Path
-  Target directory (default ./blockpanel)
+  Target directory (default ./lynx)
 .PARAMETER Edge
   Use :latest images ignoring releases.
 .PARAMETER NoStart
@@ -18,15 +18,16 @@
 [CmdletBinding()]
 param(
   [string]$Version,
-  [string]$Path = "blockpanel",
+  [string]$Path = "lynx",
   [switch]$Edge,
   [switch]$NoStart,
   [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
-$repo = 'blockypanel/Blockpanel'
-$namespace = $env:BLOCKPANEL_NAMESPACE
+$repo = 'moresonsunn/Lynx'
+$namespace = $env:LYNX_NAMESPACE
+if (-not $namespace -or $namespace -eq '') { $namespace = $env:BLOCKPANEL_NAMESPACE }
 if (-not $namespace -or $namespace -eq '') { $namespace = 'moresonsun' }
 $branch = 'main'
 $rawBase = "https://raw.githubusercontent.com/$repo/$branch"
@@ -55,10 +56,10 @@ Invoke-Step 'Download docker-compose.yml' { Invoke-WebRequest -Uri $composeUrl -
 if (-not $Edge -and $Version) {
   Write-Host "Pinning images to $Version" -ForegroundColor Green
   Invoke-Step 'Replace controller image tag' {
-    (Get-Content docker-compose.yml) -replace "$namespace/blockypanel:latest", "$namespace/blockypanel:$Version" | Set-Content docker-compose.yml
+    (Get-Content docker-compose.yml) -replace "$namespace/lynx:latest", "$namespace/lynx:$Version" | Set-Content docker-compose.yml
   }
   Invoke-Step 'Replace runtime image tag' {
-    (Get-Content docker-compose.yml) -replace "$namespace/blockypanel-runtime:latest", "$namespace/blockypanel-runtime:$Version" | Set-Content docker-compose.yml
+    (Get-Content docker-compose.yml) -replace "$namespace/lynx-runtime:latest", "$namespace/lynx-runtime:$Version" | Set-Content docker-compose.yml
   }
   Invoke-Step 'Replace APP_VERSION env' {
     (Get-Content docker-compose.yml) -replace 'APP_VERSION=v[0-9A-Za-z\.\-]+', "APP_VERSION=$Version" | Set-Content docker-compose.yml
@@ -71,5 +72,5 @@ if ($DryRun) { Write-Host '(dry-run) Would run docker compose pull + up'; exit 0
 Invoke-Step 'docker compose pull' { docker compose pull }
 Invoke-Step 'docker compose up -d' { docker compose up -d }
 
-Write-Host "BlockPanel is starting at http://localhost:8000" -ForegroundColor Green
+Write-Host "Lynx is starting at http://localhost:8000" -ForegroundColor Green
 if ($Edge) { Write-Host '(Edge build using :latest images)' } else { Write-Host "(Pinned release: $Version)" }

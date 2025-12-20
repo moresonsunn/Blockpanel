@@ -35,7 +35,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--output",
         type=Path,
         default=None,
-        help="Optional destination for the generated zip (defaults to casaos-appstore/blockpanel.zip).",
+        help="Optional destination for the generated zip (defaults to casaos-appstore/lynx.zip).",
     )
     return parser.parse_args(argv)
 
@@ -43,7 +43,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     repo_root = Path(__file__).resolve().parents[1]
-    destination = args.output or (repo_root / "casaos-appstore" / "blockpanel.zip")
+    destination = args.output or (repo_root / "casaos-appstore" / "lynx.zip")
 
     archive_path = package_store(destination)
     print(f"Wrote CasaOS store archive to {archive_path}")

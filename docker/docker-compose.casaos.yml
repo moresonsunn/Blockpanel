@@ -1,12 +1,12 @@
-# CasaOS-ready compose for BlockPanel (Unified)
+# CasaOS-ready compose for Lynx (Unified)
 # Minimal ports, proper volumes, CasaOS labels, and environment for dynamic runtime containers.
 
 services:
-  blockpanel:
-    image: moresonsun/blockpanel-unified:latest
-    container_name: blockpanel
+  lynx:
+    image: moresonsun/lynx:latest
+    container_name: lynx
     networks:
-      - blockpanel_net
+      - lynx_net
     ports:
       - "8000:8000"
       # Explicitly publish Minecraft ports (no range syntax for CasaOS)
@@ -28,15 +28,15 @@ services:
       - "25579:25579/tcp"
       - "25580:25580/tcp"
     environment:
-      APP_NAME: BlockPanel
+      APP_NAME: Lynx
       APP_VERSION: latest
       RUNTIME_MODE: local
       USE_POSTGRES: "false"
       DATABASE_URL: sqlite:////data/sqlite/minecraft_controller.db
       SERVERS_CONTAINER_ROOT: /data/servers
-      SERVERS_VOLUME_NAME: blockpanel_servers
-      BLOCKPANEL_RUNTIME_IMAGE: moresonsun/blockpanel-unified
-      BLOCKPANEL_RUNTIME_TAG: latest
+      SERVERS_VOLUME_NAME: lynx_servers
+      LYNX_RUNTIME_IMAGE: moresonsun/lynx
+      LYNX_RUNTIME_TAG: latest
       DOCKER_HOST: unix:///var/run/docker.sock
       ENVIRONMENT: production
       SECRET_KEY: ${SECRET_KEY:-change-me-unified-secret}
@@ -44,17 +44,17 @@ services:
       # CORS: allow CasaOS and local LAN by regex; tighten in production if desired
       ALLOWED_ORIGIN_REGEX: ".*"
       # Associate runtime containers to avoid legacy-app grouping in CasaOS UI
-      CASAOS_APP_ID: blockpanel-unified
+      CASAOS_APP_ID: lynx
       # Compose context so runtime (if docker mode is used) can join same group
-      CASAOS_COMPOSE_PROJECT: blockpanel-unified
+      CASAOS_COMPOSE_PROJECT: lynx
       # Ensure runtime containers join the same network as the controller
-      COMPOSE_NETWORK: blockpanel_net
+      COMPOSE_NETWORK: lynx_net
       # CasaOS v2 compose apps (Steam servers)
       CASAOS_API_BASE: ${CASAOS_API_BASE:-}
       CASAOS_API_TOKEN: ${CASAOS_API_TOKEN:-}
     volumes:
-      - blockpanel_servers:/data/servers
-      - blockpanel_sqlite:/data/sqlite
+      - lynx_servers:/data/servers
+      - lynx_sqlite:/data/sqlite
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/quick"]
@@ -63,20 +63,20 @@ services:
       retries: 5
     restart: unless-stopped
     labels:
-      io.casaos.app: "blockpanel-unified"
+      io.casaos.app: "lynx"
       io.casaos.managed: "true"
       io.casaos.category: "Game Servers"
-      com.docker.compose.project: "blockpanel-unified"
+      com.docker.compose.project: "lynx"
       com.docker.compose.service: "controller"
       com.docker.compose.version: "2"
 
 volumes:
-  blockpanel_servers:
-    name: blockpanel_servers
-  blockpanel_sqlite:
-    name: blockpanel_sqlite
+  lynx_servers:
+    name: lynx_servers
+  lynx_sqlite:
+    name: lynx_sqlite
 
 networks:
-  blockpanel_net:
-    name: blockpanel_net
+  lynx_net:
+    name: lynx_net
     driver: bridge

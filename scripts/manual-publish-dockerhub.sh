@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Manual multi-arch publisher for BlockPanel images when CI has not yet pushed them.
+# Manual multi-arch publisher for Lynx images when CI has not yet pushed them.
 # Requirements: docker buildx with a builder supporting linux/amd64,linux/arm64 and DOCKERHUB_USERNAME/DOCKERHUB_TOKEN exported.
 # Usage:
 #   export DOCKERHUB_USERNAME=...; export DOCKERHUB_TOKEN=...
@@ -9,7 +9,7 @@ set -euo pipefail
 
 VERSION_TAG="${1:-}"
 DOCKER_NS="${DOCKERHUB_NAMESPACE:-${DOCKERHUB_USERNAME:-moresonsun}}"
-UNIFIED_REPO="${DOCKER_NS}/blockpanel-unified"
+UNIFIED_REPO="${DOCKER_NS}/lynx"
 
 if [[ -z "${DOCKERHUB_USERNAME:-}" || -z "${DOCKERHUB_TOKEN:-}" ]]; then
   echo "Docker Hub credentials missing (DOCKERHUB_USERNAME / DOCKERHUB_TOKEN)" >&2
@@ -18,8 +18,8 @@ fi
 
 echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
 
-if ! docker buildx ls | grep -q blockpanel-publisher; then
-  docker buildx create --name blockpanel-publisher --use
+if ! docker buildx ls | grep -q lynx-publisher; then
+  docker buildx create --name lynx-publisher --use
 fi
 
 docker buildx inspect --bootstrap >/dev/null
