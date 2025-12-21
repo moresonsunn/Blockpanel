@@ -1,33 +1,25 @@
 {
-  "name": "BlockPanel Store",
-  "description": "BlockPanel controller builds for CasaOS.",
+  "name": "Lynx Store",
+  "description": "Lynx controller builds for CasaOS.",
   "tips": "Add this URL as a Custom Source in CasaOS.",
-  "author": "BlockPanel Team",
-  "source": "https://github.com/moresonsunn/Blockpanel",
+  "author": "Lynx Team",
+  "source": "https://github.com/moresonsunn/Lynx",
   "version": 2,
   "apps": [
     {
-      "id": "blockpanel",
-      "title": "BlockPanel",
-      "description": "Controller + Postgres stack with optional runtime prewarm.",
-      "icon": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico",
-      "index": "casaos-appstore/Apps/blockpanel/app.json",
+      "id": "lynx",
+      "title": "Lynx",
+      "description": "Controller + Postgres stack.",
+      "icon": "https://raw.githubusercontent.com/moresonsunn/Lynx/main/frontend/public/favicon.ico",
+      "index": "casaos-appstore/Apps/lynx/docker-compose.yml",
       "port_map": "8000"
     },
     {
-      "id": "blockpanel-lite",
-      "title": "BlockPanel (Lite)",
-      "description": "Single-container SQLite build for lightweight setups.",
-      "icon": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/frontend/public/favicon.ico",
-      "index": "casaos-appstore/Apps/blockpanel-lite/app.json",
-      "port_map": "8000"
-    },
-    {
-      "id": "blockpanel-unified",
-      "title": "BlockPanel (Unified)",
-      "description": "All-in-one image with controller, UI, and runtime.",
-      "icon": "https://raw.githubusercontent.com/moresonsunn/Blockpanel/main/casaos-appstore/assets/blockpanel-unified-icon.png",
-      "index": "casaos-appstore/Apps/blockpanel-unified/app.json",
+      "id": "lynx-unified",
+      "title": "Lynx (Unified)",
+      "description": "All-in-one image with controller, UI, and bundled runtime.",
+      "icon": "https://raw.githubusercontent.com/moresonsunn/Lynx/main/casaos-appstore/assets/lynx-unified-icon.png",
+      "index": "casaos-appstore/Apps/lynx-unified/docker-compose.yml",
       "port_map": "8000"
     }
   ]

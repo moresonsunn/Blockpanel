@@ -3,8 +3,8 @@ FROM eclipse-temurin:21-jdk
 ARG APP_VERSION=dev
 ARG GIT_COMMIT=unknown
 
-LABEL org.opencontainers.image.title="BlockPanel Runtime" \
-    org.opencontainers.image.description="BlockPanel runtime container providing multiple Java versions for Minecraft servers" \
+LABEL org.opencontainers.image.title="Lynx Runtime" \
+    org.opencontainers.image.description="Lynx runtime container providing multiple Java versions for Minecraft servers" \
     org.opencontainers.image.version=$APP_VERSION \
     org.opencontainers.image.revision=$GIT_COMMIT \
     org.opencontainers.image.source="https://github.com/moresonsun/Minecraft-Controller" \

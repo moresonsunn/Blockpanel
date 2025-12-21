@@ -3,24 +3,24 @@
 #   docker compose -f docker-compose.unified.yml up -d --build
 
 services:
-  blockpanel:
-    image: moresonsun/blockpanel-unified:latest
+  lynx:
+    image: moresonsun/lynx:latest
     build:
       context: .
-      dockerfile: docker/controller-unified.Dockerfile
+      dockerfile: docker/controller.Dockerfile
       args:
         - APP_VERSION=${BLOCKPANEL_TAG:-dev}
     ports:
       - "8000:8000"
     environment:
-      - APP_NAME=BlockPanel
+      - APP_NAME=Lynx
       - APP_VERSION=latest
       - USE_POSTGRES=false
       - DATABASE_URL=sqlite:////data/sqlite/minecraft_controller.db
       - SERVERS_CONTAINER_ROOT=/data/servers
       # Must match the actual Docker named volume created by compose: <project>_servers_data
       - SERVERS_VOLUME_NAME=minecraft-controller_servers_data
-      - BLOCKPANEL_RUNTIME_IMAGE=moresonsun/blockpanel-unified
+      - BLOCKPANEL_RUNTIME_IMAGE=moresonsun/lynx
       - BLOCKPANEL_RUNTIME_TAG=latest
       - DOCKER_HOST=unix:///var/run/docker.sock
       - ENVIRONMENT=production
@@ -49,7 +49,7 @@ services:
       retries: 5
     restart: unless-stopped
     labels:
-      io.casaos.app: "blockpanel-unified"
+      io.casaos.app: "lynx"
       io.casaos.managed: "true"
       io.casaos.category: "Games"
 

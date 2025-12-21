@@ -428,7 +428,7 @@ export default function ConfigPanel({ server, onRestart }) {
             />
             {javaArgsError && <div className="text-xs text-red-400 mt-2">{javaArgsError}</div>}
             <div className="flex items-center justify-between mt-3">
-              <div className="text-xs text-white/40">Leave empty to use BlockPanel defaults. Arguments are normalized to a single line.</div>
+              <div className="text-xs text-white/40">Leave empty to use Lynx defaults. Arguments are normalized to a single line.</div>
               <button
                 type="button"
                 onClick={saveJavaArgs}

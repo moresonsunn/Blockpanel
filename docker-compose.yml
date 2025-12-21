@@ -1,9 +1,9 @@
-# Default compose file for BlockPanel unified deployment
+# Default compose file for Lynx unified deployment
 # Build & run:
 #   docker compose up -d --build
 
 services:
-  blockpanel:
+  lynx:
     image: moresonsun/lynx:latest
     build:
       context: .
@@ -13,7 +13,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - APP_NAME=BlockPanel
+      - APP_NAME=Lynx
       - APP_VERSION=latest
       - USE_POSTGRES=false
       - DATABASE_URL=sqlite:////data/sqlite/minecraft_controller.db

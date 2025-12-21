@@ -1,0 +1,97 @@
+name: lynx
+services:
+  lynx:
+    image: moresonsun/lynx:latest
+    network_mode: host
+    environment:
+      APP_NAME: Lynx
+      APP_VERSION: latest
+      RUNTIME_MODE: local
+      USE_POSTGRES: "false"
+      DATABASE_URL: sqlite:////data/sqlite/minecraft_controller.db
+      SERVERS_CONTAINER_ROOT: /data/servers
+      SERVERS_VOLUME_NAME: lynx_servers
+      # Keep env var keys for backward compatibility with existing images.
+      BLOCKPANEL_RUNTIME_IMAGE: moresonsun/lynx
+      BLOCKPANEL_RUNTIME_TAG: latest
+      DOCKER_HOST: unix:///var/run/docker.sock
+      ENVIRONMENT: production
+      SECRET_KEY: change-me-unified-secret
+      ALLOWED_ORIGIN_REGEX: .*
+      LOG_LEVEL: INFO
+      # Run Steam servers on a separate embedded Docker engine (see steam_engine below).
+      # This keeps Steam containers out of CasaOS "Legacy Apps" while remaining manageable in Lynx.
+      STEAM_DOCKER_HOST: tcp://127.0.0.1:23750
+      # CasaOS v2 compose apps (Steam servers)
+      CASAOS_API_BASE: http://127.0.0.1/v2/app_management
+      CASAOS_API_TOKEN: ""
+    volumes:
+      - type: bind
+        source: /DATA/AppData/$AppID/servers
+        target: /data/servers
+      - type: bind
+        source: /DATA/AppData/$AppID/sqlite
+        target: /data/sqlite
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    restart: unless-stopped
+    x-casaos:
+      ports:
+        - container: "8000"
+          description:
+            en_us: Web UI
+      volumes:
+        - container: /data/servers
+          description:
+            en_us: Minecraft servers and worlds
+        - container: /data/sqlite
+          description:
+            en_us: SQLite database storage
+
+  # Embedded Docker engine used for Steam servers.
+  # Runs in the host network namespace so published game ports are reachable from LAN.
+  steam_engine:
+    image: docker:27-dind
+    network_mode: host
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command:
+      - "--host=tcp://0.0.0.0:23750"
+      - "--host=unix:///var/run/docker.sock"
+    volumes:
+      - type: bind
+        source: /DATA/AppData/$AppID/servers
+        target: /data/servers
+      - type: bind
+        source: /DATA/AppData/$AppID/steam-docker
+        target: /var/lib/docker
+    restart: unless-stopped
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: lynx
+  author: Lynx Team
+  category: Games
+  developer: Lynx Team
+  description:
+    en_us: |
+      Single image with the Lynx controller, web UI, and bundled Minecraft runtime (SQLite-backed).
+  # Keep icon URLs aligned with your repo; adjust if you publish a new Lynx icon.
+  icon: https://raw.githubusercontent.com/moresonsunn/Lynx/main/casaos-appstore/assets/lynx-icon.png
+  screenshot_link: []
+  tagline:
+    en_us: All-in-one Minecraft controller
+  thumbnail: https://raw.githubusercontent.com/moresonsunn/Lynx/main/casaos-appstore/assets/lynx-icon.png
+  tips:
+    before_install:
+      en_us: Controller + UI + runtime in a single container. Keep the Docker socket so the panel can provision servers.
+    after_install:
+      en_us: Visit http://<host>:8000 (admin/admin123) then rotate the password.
+  title:
+    en_us: Lynx
+  index: /
+  port_map: "8000"
