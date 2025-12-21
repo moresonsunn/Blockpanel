@@ -17,11 +17,11 @@ WORKDIR /app
 ARG APP_VERSION=dev
 ARG GIT_COMMIT=unknown
 
-LABEL org.opencontainers.image.title="Lynx Unified" \
+LABEL org.opencontainers.image.title="Lynx" \
     org.opencontainers.image.description="Lynx controller + static frontend + embedded multi-Java runtime" \
       org.opencontainers.image.version=$APP_VERSION \
       org.opencontainers.image.revision=$GIT_COMMIT \
-      org.opencontainers.image.source="https://github.com/moresonsun/Minecraft-Controller" \
+      org.opencontainers.image.source="https://github.com/moresonsun/Lynx" \
       org.opencontainers.image.licenses="MIT"
 
 # System deps (minimal headless set to reduce multi-arch emulation issues)
